@@ -23,7 +23,52 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v2.9.2
+## What's New in v3.0.0
+
+**Active Intelligence — Marrow Now Intervenes Before Mistakes**
+
+### Auto-Warn on Orient
+When you call `orient({autoWarn: true})`, Marrow scans your recent decisions and warns you BEFORE you start a task that recently failed:
+
+```typescript
+const result = await marrow.orient({
+  task: "Fix Neutron API authentication",
+  autoWarn: true
+});
+
+// Returns warnings like:
+// "⚠️ HIGH: This task type failed 4x with method='internal'.
+//          Try method='neutronpay' (89% success rate)"
+```
+
+### Loop Detection on Think
+When you call `think({checkLoop: true})`, Marrow detects if you're about to retry a failed approach and interrupts:
+
+```typescript
+const decision = await marrow.think({
+  action: "Retry auth with method='internal'",
+  checkLoop: true
+});
+
+// Returns loop warnings:
+// "🚨 LOOP DETECTED: You're retrying a failed approach.
+//    Previous failure: 'internal' method not supported.
+//    Suggested: Use method='neutronpay' instead."
+```
+
+### Rate Limiting
+- `orient`: 30 requests/minute per account
+- `think`: 60 requests/minute per account
+- Automatic 429 responses when limit exceeded
+
+### Enhanced PII Protection
+- Automatic stripping of emails, phone numbers, API keys from all responses
+- Applied to `recentLessons`, `warnings`, and `outcome` fields
+- Deep object stripping for complex data structures
+
+---
+
+## What's New in v2.9.4
 
 **Backend API Enhancements** — Full memory lifecycle management now available:
 

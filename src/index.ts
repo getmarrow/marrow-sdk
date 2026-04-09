@@ -1,42 +1,48 @@
 /**
- * @getmarrow/sdk — Memory and decision intelligence for agents
- * v2.8.0
+ * @getmarrow/sdk — Memory and Decision Intelligence for Agents
+ *
+ * @packageDocumentation
  */
 
-import { MarrowClient } from './client';
-import { createMarrowClient, marrowFromEnv } from './factory';
-import type {
-  MarrowMemory,
-  MarrowOrientResult,
-  MarrowThinkResult,
-  MarrowCommitResult,
-  MarrowLoopState,
-  MarrowEnforcementMode,
+export { MarrowClient, MarrowLoopRequiredError } from './client';
+export { createMarrowClient, marrowFromEnv } from './factory';
+
+export type {
+  // Core Types
   MarrowDecisionType,
+  MarrowEnforcementMode,
+  MarrowLoopRecommendation,
+  MarrowBlockReasonCode,
+  MarrowActionClass,
+  MarrowChokePoint,
+
+  // Memory Types
   MemoryStatus,
+  MemoryAuditAction,
+  MarrowMemory,
+  MarrowMemoryAuditEntry,
+  MarrowMemoryRetrievalResult,
   MemoryShareOptions,
   MemoryExportOptions,
   MemoryImportOptions,
   MemoryRetrieveOptions,
+
+  // Loop Types
+  MarrowLoopState,
+  MarrowCheckResult,
+  MarrowEnforceOptions,
+  MarrowActionMeta,
+
+  // Result Types
+  MarrowOrientResult,
+  MarrowThinkResult,
+  MarrowCommitResult,
+  MarrowAskResult,
+  MarrowQuickStatusResult,
+  ActionableInsight,
+
+  // Config Types
+  MarrowClientOptions,
 } from './types';
 
-export {
-  MarrowClient,
-  createMarrowClient,
-  marrowFromEnv,
-  // Types
-  type MarrowMemory,
-  type MarrowOrientResult,
-  type MarrowThinkResult,
-  type MarrowCommitResult,
-  type MarrowLoopState,
-  type MarrowEnforcementMode,
-  type MarrowDecisionType,
-  type MemoryStatus,
-  type MemoryShareOptions,
-  type MemoryExportOptions,
-  type MemoryImportOptions,
-  type MemoryRetrieveOptions,
-};
-
-export default createMarrowClient;
+export default MarrowClient;

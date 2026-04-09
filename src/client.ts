@@ -22,6 +22,8 @@ import type {
   MemoryExportOptions,
   MemoryImportOptions,
   MemoryRetrieveOptions,
+  ActionableInsight,
+  MarrowBlockReasonCode,
 } from './types';
 
 const DEFAULT_HINT =
@@ -207,7 +209,7 @@ export class MarrowClient {
   check(): MarrowCheckResult {
     const state = cloneState(this.loopState);
     const warnings: string[] = [];
-    const blockReasonCodes: string[] = [];
+    const blockReasonCodes: MarrowBlockReasonCode[] = [];
     let shouldBlock = false;
     let shouldBlockCompletion = false;
     let shouldBlockExternalAction = false;
@@ -1013,9 +1015,9 @@ export class MarrowClient {
     });
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
+      const errorData: any = await res.json().catch(() => ({}));
       throw new Error(
-        `Marrow API error: ${res.status} ${res.statusText} — ${error.error || error.message || 'Unknown error'}`
+        `Marrow API error: ${res.status} ${res.statusText} — ${errorData.error || errorData.message || 'Unknown error'}`
       );
     }
 

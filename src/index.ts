@@ -4,6 +4,8 @@
  * @packageDocumentation
  */
 
+import { MarrowClient, MarrowLoopRequiredError } from './client';
+
 export { MarrowClient, MarrowLoopRequiredError } from './client';
 export { createMarrowClient, marrowFromEnv } from './factory';
 

@@ -1,6 +1,6 @@
 {
   "name": "@getmarrow/sdk",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Your go-to memory provider for all agents, for any AI model.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,6 +22,7 @@
     "README.md"
   ],
   "devDependencies": {
+    "@types/node": "^25.5.2",
     "typescript": "^5.3.3"
   }
 }

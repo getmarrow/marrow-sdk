@@ -23,7 +23,7 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v2.8.0
+## What's New in v2.9.2
 
 **Backend API Enhancements** — Full memory lifecycle management now available:
 

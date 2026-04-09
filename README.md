@@ -54,8 +54,8 @@ const results = await marrow.memories.retrieve({
 ```
 
 ### New Memory Management Endpoints
-- `GET /v1/memories` — List with pagination and filters
-- `GET /v1/memories/:id` — Get single memory
+- `GET /v1/memories` — List memories with pagination and filters
+- `GET /v1/memories/:id` — Get single memory by ID
 - `PATCH /v1/memories/:id` — Update memory text, tags, or metadata
 - `POST /v1/memories/:id/outdated` — Mark memory as outdated
 - `POST /v1/memories/:id/supersede` — Atomically replace with new version
@@ -74,11 +74,214 @@ const results = await marrow.memories.retrieve({
 
 ---
 
-## What's New in v2.7.0
+## The Problem
 
-- **`marrow.run()`** — single-call wrapper. Auto-orients, thinks, runs your function, commits outcome. Zero ceremony.
-- **`marrowFromEnv()`** — create client from env vars, defaults to `mode: 'auto'`
-- **`createMarrowClient()`** — clean factory export
-- **Session identity** — pass `sessionId` to tag all requests with `X-Marrow-Session-Id`
-- **Auto mode** — set `mode: 'auto'` and Marrow handles orient + think + commit around your actions
+Without durable decision memory:
+- agents repeat bad calls
+- successful patterns get lost
+- work gets marked "done" without outcome context
+- external actions happen with no structured trail
+- every new session wastes time rediscovering what already failed
 
+A bigger context window doesn't solve this.
+You need a system that remembers:
+- what the agent was trying to do
+- what it actually did
+- whether it worked
+- what pattern that should teach the next attempt
+
+---
+
+## The Solution
+
+Marrow gives you a simple SDK for decision memory and loop discipline.
+
+With `@getmarrow/sdk`, your agent can:
+- **orient** at session start
+- **think** before meaningful action
+- **check** whether the loop is still open
+- **wrap** important actions so intent and outcome stay connected
+- **commit** the result back into memory
+
+That gives you a usable operating loop:
+
+```text
+orient -> think -> act -> check -> commit
+```
+
+Not just memory for memory's sake —
+memory that improves execution.
+
+---
+
+## Install
+
+```bash
+npm install @getmarrow/sdk
+```
+
+Get your API key at [getmarrow.ai](https://getmarrow.ai)
+
+---
+
+## Quick Start
+
+```typescript
+import { createMarrowClient } from '@getmarrow/sdk';
+
+const marrow = createMarrowClient(process.env.MARROW_API_KEY!);
+
+await marrow.orient();
+await marrow.think({ action: 'deploy to production', type: 'deployment' });
+await deployToProduction();
+await marrow.commit({ success: true, outcome: 'Deployed v2.8.0 — 0 errors' });
+```
+
+---
+
+## Zero-Ceremony Mode
+
+The simplest integration — one call handles everything:
+
+```typescript
+import { marrowFromEnv } from '@getmarrow/sdk';
+
+const marrow = marrowFromEnv(); // reads MARROW_API_KEY, defaults to auto mode
+
+await marrow.run('deploy to production', async () => {
+  await deployToProduction();
+});
+// orient + think + commit fire automatically
+```
+
+---
+
+## How It Works
+
+### 1. Orient
+Start the session with context from prior decisions.
+
+```typescript
+await marrow.orient();
+```
+
+This gives the agent a cleaner starting point instead of acting cold.
+
+### 2. Think
+Log intent before meaningful work.
+
+```typescript
+const decision = await marrow.think({
+  action: 'Deploy auth refactor to staging',
+  type: 'implementation',
+});
+```
+
+Now the work has a decision trail and Marrow can return relevant intelligence.
+
+### 3. Act
+Do the actual work.
+
+For low-friction usage, wrap the action directly:
+
+```typescript
+await marrow.wrap(
+  {
+    action: 'Call deployment API',
+    type: 'implementation',
+    external: true,
+    result: 'Staging deploy succeeded',
+  },
+  async () => deployToStaging()
+);
+```
+
+### 4. Commit
+Close the loop with the outcome.
+
+```typescript
+await marrow.commit({
+  success: true,
+  outcome: 'Staging deploy succeeded, running smoke tests',
+});
+```
+
+---
+
+## API Reference
+
+### Core Methods
+
+#### `orient(taskType?)`
+Call at session start. Returns failure warnings from your history.
+
+#### `think(params)`
+Log intent before acting. Returns pattern intelligence and recommendations.
+
+#### `commit(params)`
+Log the outcome after acting. Closes the decision loop.
+
+#### `run(description, fn, options?)`
+Zero-ceremony wrapper. Handles orient → think → commit automatically.
+
+#### `wrap(meta, fn)`
+Wrap any action to auto-log intent and outcome.
+
+### Memory Methods
+
+#### `listMemories(params?)`
+List memories with optional filters (status, query, limit, agentId).
+
+#### `getMemory(id)`
+Get a single memory by ID.
+
+#### `updateMemory(id, patch)`
+Update memory text, tags, or metadata.
+
+#### `deleteMemory(id, meta?)`
+Soft delete a memory.
+
+#### `markOutdated(id, meta?)`
+Mark a memory as outdated.
+
+#### `supersedeMemory(id, replacement)`
+Atomically replace a memory with a new version.
+
+#### `shareMemory(id, options)`
+Share a memory with specific agents.
+
+#### `exportMemories(options?)`
+Export memories to JSON or CSV.
+
+#### `importMemories(options)`
+Import memories with merge (dedup) or replace mode.
+
+#### `retrieveMemories(query, params?)`
+Full-text search with filters (from, to, tags, source, status, shared).
+
+### Query Methods
+
+#### `ask(query)`
+Query the collective hive in plain English.
+
+#### `quickStatus()`
+Check health and memory status.
+
+#### `analytics()`
+Get agent health score and trends.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MARROW_API_KEY` | Yes | Your API key from getmarrow.ai |
+| `MARROW_BASE_URL` | No | Custom API URL (default: `https://api.getmarrow.ai`) |
+| `MARROW_SESSION_ID` | No | Session identifier for multi-agent setups |
+
+---
+
+## License
+
+MIT

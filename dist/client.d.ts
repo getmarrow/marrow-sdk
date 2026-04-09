@@ -37,6 +37,7 @@ export declare class MarrowClient {
         previousSuccess?: boolean;
         previousOutcome?: string;
         previousCausedBy?: string;
+        checkLoop?: boolean;
     }): Promise<MarrowThinkResult>;
     commit(params: {
         success: boolean;
@@ -45,6 +46,7 @@ export declare class MarrowClient {
     }): Promise<MarrowCommitResult>;
     orient(params?: {
         taskType?: string;
+        autoWarn?: boolean;
     }): Promise<MarrowOrientResult>;
     agentPatterns(params?: {
         type?: string;

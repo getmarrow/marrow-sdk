@@ -383,6 +383,9 @@ class MarrowClient {
             type: params.type || 'general',
             context: params.context,
         };
+        if (params.checkLoop) {
+            body.checkLoop = true;
+        }
         if (this.decisionId) {
             body.previous_decision_id = this.decisionId;
             body.previous_success = params.previousSuccess ?? true;
@@ -446,6 +449,11 @@ class MarrowClient {
         };
         const loop = this.check();
         const warnings = [...loop.warnings];
+        // Inject loop detection warnings from backend
+        const loopWarnings = (res.loop_warnings || []);
+        if (loopWarnings.length > 0) {
+            warnings.push(...loopWarnings.map((lw) => `🔁 LOOP: ${lw.message}${lw.recommendation ? ` — Try: ${lw.recommendation.action}` : ''}`));
+        }
         const summary = [
             'Intent logged to Marrow.',
             intelligence.insight
@@ -468,6 +476,7 @@ class MarrowClient {
                 : undefined,
             acceptedAs: 'intent',
             warnings,
+            loopWarnings,
             recommendedNext: loop.recommendedNext,
             loop,
             summary,
@@ -513,6 +522,49 @@ class MarrowClient {
         };
     }
     async orient(params) {
+        // When autoWarn is enabled, hit the new orient endpoint directly
+        if (params?.autoWarn) {
+            try {
+                const res = await this.request('POST', '/v1/agent/orient', {
+                    task: params.taskType,
+                    autoWarn: true,
+                });
+                const warnings = (res.warnings || []).map((w) => ({
+                    severity: String(w.severity || 'LOW'),
+                    message: String(w.message || ''),
+                    pattern: String(w.pattern || ''),
+                    recommendation: w.recommendation ? String(w.recommendation) : undefined,
+                }));
+                this.orientWarnings = warnings
+                    .filter((w) => w.severity === 'HIGH' || w.severity === 'MEDIUM')
+                    .map((w) => ({
+                    type: w.pattern,
+                    failureRate: w.message.match(/(\d+)%/)?.[1] ? parseInt((w.message.match(/(\d+)%/)?.[1] || '0'), 10) / 100 : 0,
+                    message: w.message,
+                }));
+                this.loopState.orientedAt = nowIso();
+                this.loopState.recommendedNext = this.loopState.hasIntentLog ? 'act' : 'think';
+                this.loopState.loopState = this.loopState.hasIntentLog ? 'intent_logged' : 'oriented';
+                const loop = this.check();
+                return {
+                    warnings: this.orientWarnings,
+                    serverWarnings: warnings,
+                    lessons: [],
+                    loopState: res.loopState || { isOpen: false, lastCommit: null },
+                    shouldPause: warnings.some((w) => w.severity === 'HIGH'),
+                    loop,
+                    recommendedNext: loop.recommendedNext,
+                    nudge: this.loopState.hasIntentLog ? null : POST_ORIENT_NUDGE,
+                    text: warnings.length > 0
+                        ? `⚠️ ${warnings[0].message}`
+                        : 'No recent failures detected. Proceed.',
+                };
+            }
+            catch (e) {
+                // Fall back to legacy orient if endpoint isn't deployed yet
+                console.warn('[marrow] autoWarn endpoint not available, falling back', e);
+            }
+        }
         const patterns = await this.agentPatterns(params?.taskType ? { type: params.taskType } : undefined);
         const warnings = patterns.failurePatterns
             .filter((p) => p.failureRate > 0.15)

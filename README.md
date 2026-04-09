@@ -280,12 +280,14 @@ Get agent health score and trends.
 | `MARROW_BASE_URL` | No | Custom API URL (default: `https://api.getmarrow.ai`) |
 | `MARROW_SESSION_ID` | No | Session identifier for multi-agent setups |
 
-## Related Packages
-
-- **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Desktop and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol.
-
 ---
 
 ## License
 
 MIT
+
+---
+
+## Related Packages
+
+- **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Desktop and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol.

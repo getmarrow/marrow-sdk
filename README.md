@@ -32,7 +32,7 @@ When you call `orient({autoWarn: true})`, Marrow scans your recent decisions and
 
 ```typescript
 const result = await marrow.orient({
-  task: "Fix Neutron API authentication",
+  task: "Fix authentication error",
   autoWarn: true
 });
 

@@ -138,10 +138,17 @@ export interface MarrowOrientResult {
     failureRate: number;
     message: string;
   }>;
+  serverWarnings?: Array<{
+    severity: 'HIGH' | 'MEDIUM' | 'LOW';
+    message: string;
+    pattern: string;
+    recommendation?: string;
+  }>;
   lessons: Array<{
     summary: string;
     severity: string;
   }>;
+  loopState?: { isOpen: boolean; lastCommit: string | null };
   shouldPause: boolean;
   loop: MarrowCheckResult;
   recommendedNext: MarrowLoopRecommendation;
@@ -176,6 +183,22 @@ export interface MarrowThinkResult {
   upgradeHint?: { message: string; tier: string; url: string };
   acceptedAs: 'intent';
   warnings: string[];
+  loopWarnings?: Array<{
+    type: 'LOOP_DETECTED';
+    severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+    message: string;
+    previousFailure: {
+      timestamp: string;
+      action: string;
+      outcome: string;
+      reason: string;
+    };
+    recommendation?: {
+      action: string;
+      successCount: number;
+      confidence: number;
+    };
+  }>;
   recommendedNext: MarrowLoopRecommendation;
   loop: MarrowCheckResult;
   summary: string;

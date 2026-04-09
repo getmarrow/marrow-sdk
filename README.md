@@ -37,8 +37,8 @@ const result = await marrow.orient({
 });
 
 // Returns warnings like:
-// "⚠️ HIGH: This task type failed 4x with method='internal'.
-//          Try method='neutronpay' (89% success rate)"
+// "⚠️ HIGH: This task type failed 4x with approach='retry-without-fix'.
+//          Try approach='apply-patch-first' (89% success rate)"
 ```
 
 ### Loop Detection on Think
@@ -52,8 +52,8 @@ const decision = await marrow.think({
 
 // Returns loop warnings:
 // "🚨 LOOP DETECTED: You're retrying a failed approach.
-//    Previous failure: 'internal' method not supported.
-//    Suggested: Use method='neutronpay' instead."
+//    Previous failure: 'retry-without-fix' approach not supported.
+//    Suggested: Use 'apply-patch-first' approach instead."
 ```
 
 ### Rate Limiting

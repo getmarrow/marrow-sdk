@@ -52,6 +52,38 @@ function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Validate a path parameter to prevent path traversal attacks.
+ */
+function validatePathParam(value: string, paramName: string): string {
+  if (!value || typeof value !== 'string') {
+    throw new Error(`${paramName} is required`);
+  }
+  if (!/^[a-zA-Z0-9_.\-]+$/.test(value)) {
+    throw new Error(`${paramName} contains invalid characters`);
+  }
+  if (value.length > 256) {
+    throw new Error(`${paramName} exceeds maximum length`);
+  }
+  return value;
+}
+
+/**
+ * Validate and sanitize a base URL. Requires HTTPS (or http://localhost for dev).
+ */
+function validateBaseUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+      throw new Error('baseUrl must use HTTPS (except localhost for development)');
+    }
+    return rawUrl.replace(/\/+$/, '');
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('baseUrl')) throw err;
+    throw new Error(`baseUrl is not a valid URL: ${rawUrl}`);
+  }
+}
+
 function isMeaningfulAction(
   meta: MarrowActionMeta,
   isExternal: boolean
@@ -108,11 +140,12 @@ export class MarrowClient {
     this.apiKey = apiKey;
 
     // Support legacy positional baseUrl: new MarrowClient(key, 'https://...')
+    // [SECURITY] Validate baseUrl to prevent SSRF / credential leakage
     if (typeof options === 'string') {
-      this.baseUrl = options;
+      this.baseUrl = validateBaseUrl(options);
       this.sessionId = null;
     } else {
-      this.baseUrl = options?.baseUrl ?? 'https://api.getmarrow.ai';
+      this.baseUrl = validateBaseUrl(options?.baseUrl ?? 'https://api.getmarrow.ai');
       this.sessionId = options?.sessionId ?? null;
     }
 
@@ -336,8 +369,8 @@ export class MarrowClient {
     } catch (error) {
       try {
         await this.commit({ success: false, outcome: safeErrorMessage(error) });
-      } catch {
-        // commit failed — don't swallow the original error
+      } catch (commitErr) {
+        process.stderr.write(`[marrow] Warning: commit failed during run() error handling: ${safeErrorMessage(commitErr)}\n`);
       }
       throw error;
     }
@@ -768,7 +801,7 @@ export class MarrowClient {
         };
       } catch (e) {
         // Fall back to legacy orient if endpoint isn't deployed yet
-        console.warn('[marrow] autoWarn endpoint not available, falling back', e);
+        process.stderr.write(`[marrow] Warning: autoWarn orient failed, falling back to legacy: ${safeErrorMessage(e)}\n`);
       }
     }
 
@@ -795,8 +828,8 @@ export class MarrowClient {
         summary: String(i.action || i.summary || ''),
         severity: warnings.length > 0 ? 'warning' : 'info',
       }));
-    } catch {
-      // lessons endpoint optional
+    } catch (e) {
+      process.stderr.write(`[marrow] Warning: lessons endpoint unavailable: ${safeErrorMessage(e)}\n`);
     }
 
     this.loopState.orientedAt = nowIso();
@@ -949,7 +982,8 @@ export class MarrowClient {
   }
 
   async getMemory(id: string): Promise<MarrowMemory | null> {
-    const res = await this.request('GET', `/v1/memories/${id}`);
+    const safeId = validatePathParam(id, 'id');
+    const res = await this.request('GET', `/v1/memories/${safeId}`);
     return (res.data?.memory as MarrowMemory) || null;
   }
 
@@ -963,28 +997,31 @@ export class MarrowClient {
       note?: string;
     }
   ): Promise<MarrowMemory> {
-    const res = await this.request('PATCH', `/v1/memories/${id}`, patch);
-    return res.data.memory;
+    const safeId = validatePathParam(id, 'id');
+    const res = await this.request('PATCH', `/v1/memories/${safeId}`, patch);
+    return res.data?.memory;
   }
 
   async deleteMemory(
     id: string,
     meta?: { actor?: string; note?: string }
   ): Promise<MarrowMemory> {
-    const res = await this.request('DELETE', `/v1/memories/${id}`, meta);
-    return res.data.memory;
+    const safeId = validatePathParam(id, 'id');
+    const res = await this.request('DELETE', `/v1/memories/${safeId}`, meta);
+    return res.data?.memory;
   }
 
   async markOutdated(
     id: string,
     meta?: { actor?: string; note?: string }
   ): Promise<MarrowMemory> {
+    const safeId = validatePathParam(id, 'id');
     const res = await this.request(
       'POST',
-      `/v1/memories/${id}/outdated`,
+      `/v1/memories/${safeId}/outdated`,
       meta
     );
-    return res.data.memory;
+    return res.data?.memory;
   }
 
   async supersedeMemory(
@@ -997,9 +1034,10 @@ export class MarrowClient {
       note?: string;
     }
   ): Promise<{ old: MarrowMemory; replacement: MarrowMemory }> {
+    const safeId = validatePathParam(id, 'id');
     const res = await this.request(
       'POST',
-      `/v1/memories/${id}/supersede`,
+      `/v1/memories/${safeId}/supersede`,
       replacement
     );
     return res.data;
@@ -1040,11 +1078,12 @@ export class MarrowClient {
     id: string,
     options: MemoryShareOptions
   ): Promise<MarrowMemory> {
-    const res = await this.request('POST', `/v1/memories/${id}/share`, {
+    const safeId = validatePathParam(id, 'id');
+    const res = await this.request('POST', `/v1/memories/${safeId}/share`, {
       agent_ids: options.agentIds,
       actor: options.actor,
     });
-    return res.data.memory;
+    return res.data?.memory;
   }
 
   async exportMemories(options?: MemoryExportOptions): Promise<{
@@ -1095,9 +1134,15 @@ export class MarrowClient {
     });
 
     if (!res.ok) {
-      const errorData: any = await res.json().catch(() => ({}));
+      let errorDetail = 'Unknown error';
+      try {
+        const errorData: any = await res.json();
+        errorDetail = errorData.error || errorData.message || 'Unknown error';
+      } catch {
+        try { errorDetail = (await res.text()).slice(0, 200); } catch { /* ignore */ }
+      }
       throw new Error(
-        `Marrow API error: ${res.status} ${res.statusText} — ${errorData.error || errorData.message || 'Unknown error'}`
+        `Marrow API error: ${res.status} ${res.statusText} — ${errorDetail}`
       );
     }
 

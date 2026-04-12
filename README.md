@@ -23,6 +23,21 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
+## What's New in v3.0.5
+
+### Security Hardening
+This release includes 6 security patches:
+- **Path traversal protection** — all memory IDs are now validated before URL interpolation. IDs like `../../admin/delete` are rejected.
+- **SSRF protection** — `baseUrl` is validated and must use HTTPS. `http://localhost` is allowed for local development.
+- **Error handling** — all silent catch blocks replaced with proper error logging to stderr. No more swallowed failures.
+- **Safe response access** — all memory methods use safe optional chaining on API response data. No more `TypeError` on unexpected response shapes.
+- **Resilient error parsing** — API error handler gracefully handles non-JSON error responses (e.g., HTML error pages from CDN/load balancer).
+
+### Hardcoded Key Detection
+The SDK already detected hardcoded API keys in source code and threw an error. This continues to work — use `process.env.MARROW_API_KEY` or pass the key from a secure source.
+
+---
+
 ## What's New in v3.0.0
 
 **Active Intelligence — Marrow Now Intervenes Before Mistakes**
@@ -105,6 +120,8 @@ orient -> think -> act -> check -> commit
 
 Not just memory for memory's sake —
 memory that improves execution.
+
+The value compounds with use. Each decision your agent logs makes the hive smarter — failure rates drop, patterns emerge, and the next session starts with real intelligence instead of a blank slate.
 
 ---
 
@@ -271,7 +288,7 @@ Get agent health score and trends.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `MARROW_API_KEY` | Yes | Your API key from getmarrow.ai |
-| `MARROW_BASE_URL` | No | Custom API URL (default: `https://api.getmarrow.ai`) |
+| `MARROW_BASE_URL` | No | Custom API URL (default: `https://api.getmarrow.ai`). Must use HTTPS. |
 | `MARROW_SESSION_ID` | No | Session identifier for multi-agent setups |
 
 ---
@@ -284,4 +301,4 @@ MIT
 
 ## Related Packages
 
-- **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Desktop and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol.
+- **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Code, Claude Desktop, and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol. Includes one-command agent setup for automatic Marrow usage.

@@ -33,7 +33,7 @@ export function marrowFromEnv(options?: {
   }
 
   return new MarrowClient(apiKey, {
-    baseUrl,
+    baseUrl: baseUrl || undefined,
     sessionId: options?.sessionId,
     mode: options?.mode,
   });

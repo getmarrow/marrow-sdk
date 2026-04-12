@@ -23,7 +23,7 @@ function marrowFromEnv(options) {
         throw new Error('MARROW_API_KEY environment variable is required. Set it or pass apiKey explicitly.');
     }
     return new client_1.MarrowClient(apiKey, {
-        baseUrl,
+        baseUrl: baseUrl || undefined,
         sessionId: options?.sessionId,
         mode: options?.mode,
     });

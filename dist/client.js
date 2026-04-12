@@ -21,6 +21,38 @@ function cloneState(state) {
 function safeErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
+/**
+ * Validate a path parameter to prevent path traversal attacks.
+ */
+function validatePathParam(value, paramName) {
+    if (!value || typeof value !== 'string') {
+        throw new Error(`${paramName} is required`);
+    }
+    if (!/^[a-zA-Z0-9_.\-]+$/.test(value)) {
+        throw new Error(`${paramName} contains invalid characters`);
+    }
+    if (value.length > 256) {
+        throw new Error(`${paramName} exceeds maximum length`);
+    }
+    return value;
+}
+/**
+ * Validate and sanitize a base URL. Requires HTTPS (or http://localhost for dev).
+ */
+function validateBaseUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+            throw new Error('baseUrl must use HTTPS (except localhost for development)');
+        }
+        return rawUrl.replace(/\/+$/, '');
+    }
+    catch (err) {
+        if (err instanceof Error && err.message.includes('baseUrl'))
+            throw err;
+        throw new Error(`baseUrl is not a valid URL: ${rawUrl}`);
+    }
+}
 function isMeaningfulAction(meta, isExternal) {
     if (meta.meaningful !== undefined)
         return meta.meaningful;
@@ -53,12 +85,13 @@ class MarrowClient {
     constructor(apiKey, options) {
         this.apiKey = apiKey;
         // Support legacy positional baseUrl: new MarrowClient(key, 'https://...')
+        // [SECURITY] Validate baseUrl to prevent SSRF / credential leakage
         if (typeof options === 'string') {
-            this.baseUrl = options;
+            this.baseUrl = validateBaseUrl(options);
             this.sessionId = null;
         }
         else {
-            this.baseUrl = options?.baseUrl ?? 'https://api.getmarrow.ai';
+            this.baseUrl = validateBaseUrl(options?.baseUrl ?? 'https://api.getmarrow.ai');
             this.sessionId = options?.sessionId ?? null;
         }
         const initialMode = (typeof options === 'object' ? options?.mode : undefined) ?? 'warn';
@@ -251,8 +284,8 @@ class MarrowClient {
             try {
                 await this.commit({ success: false, outcome: safeErrorMessage(error) });
             }
-            catch {
-                // commit failed — don't swallow the original error
+            catch (commitErr) {
+                process.stderr.write(`[marrow] Warning: commit failed during run() error handling: ${safeErrorMessage(commitErr)}\n`);
             }
             throw error;
         }
@@ -562,7 +595,7 @@ class MarrowClient {
             }
             catch (e) {
                 // Fall back to legacy orient if endpoint isn't deployed yet
-                console.warn('[marrow] autoWarn endpoint not available, falling back', e);
+                process.stderr.write(`[marrow] Warning: autoWarn orient failed, falling back to legacy: ${safeErrorMessage(e)}\n`);
             }
         }
         const patterns = await this.agentPatterns(params?.taskType ? { type: params.taskType } : undefined);
@@ -582,8 +615,8 @@ class MarrowClient {
                 severity: warnings.length > 0 ? 'warning' : 'info',
             }));
         }
-        catch {
-            // lessons endpoint optional
+        catch (e) {
+            process.stderr.write(`[marrow] Warning: lessons endpoint unavailable: ${safeErrorMessage(e)}\n`);
         }
         this.loopState.orientedAt = nowIso();
         this.loopState.recommendedNext = this.loopState.hasIntentLog
@@ -686,23 +719,28 @@ class MarrowClient {
         return res.data?.memories || [];
     }
     async getMemory(id) {
-        const res = await this.request('GET', `/v1/memories/${id}`);
+        const safeId = validatePathParam(id, 'id');
+        const res = await this.request('GET', `/v1/memories/${safeId}`);
         return res.data?.memory || null;
     }
     async updateMemory(id, patch) {
-        const res = await this.request('PATCH', `/v1/memories/${id}`, patch);
-        return res.data.memory;
+        const safeId = validatePathParam(id, 'id');
+        const res = await this.request('PATCH', `/v1/memories/${safeId}`, patch);
+        return res.data?.memory;
     }
     async deleteMemory(id, meta) {
-        const res = await this.request('DELETE', `/v1/memories/${id}`, meta);
-        return res.data.memory;
+        const safeId = validatePathParam(id, 'id');
+        const res = await this.request('DELETE', `/v1/memories/${safeId}`, meta);
+        return res.data?.memory;
     }
     async markOutdated(id, meta) {
-        const res = await this.request('POST', `/v1/memories/${id}/outdated`, meta);
-        return res.data.memory;
+        const safeId = validatePathParam(id, 'id');
+        const res = await this.request('POST', `/v1/memories/${safeId}/outdated`, meta);
+        return res.data?.memory;
     }
     async supersedeMemory(id, replacement) {
-        const res = await this.request('POST', `/v1/memories/${id}/supersede`, replacement);
+        const safeId = validatePathParam(id, 'id');
+        const res = await this.request('POST', `/v1/memories/${safeId}/supersede`, replacement);
         return res.data;
     }
     async retrieveMemories(query, params) {
@@ -728,11 +766,12 @@ class MarrowClient {
         return res.data;
     }
     async shareMemory(id, options) {
-        const res = await this.request('POST', `/v1/memories/${id}/share`, {
+        const safeId = validatePathParam(id, 'id');
+        const res = await this.request('POST', `/v1/memories/${safeId}/share`, {
             agent_ids: options.agentIds,
             actor: options.actor,
         });
-        return res.data.memory;
+        return res.data?.memory;
     }
     async exportMemories(options) {
         const qs = new URLSearchParams();
@@ -765,8 +804,18 @@ class MarrowClient {
             body: body ? JSON.stringify(body) : undefined,
         });
         if (!res.ok) {
-            const errorData = await res.json().catch(() => ({}));
-            throw new Error(`Marrow API error: ${res.status} ${res.statusText} — ${errorData.error || errorData.message || 'Unknown error'}`);
+            let errorDetail = 'Unknown error';
+            try {
+                const errorData = await res.json();
+                errorDetail = errorData.error || errorData.message || 'Unknown error';
+            }
+            catch {
+                try {
+                    errorDetail = (await res.text()).slice(0, 200);
+                }
+                catch { /* ignore */ }
+            }
+            throw new Error(`Marrow API error: ${res.status} ${res.statusText} — ${errorDetail}`);
         }
         return res.json();
     }

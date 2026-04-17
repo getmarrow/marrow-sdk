@@ -23,24 +23,48 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v3.0.5
+## What's New in v3.1.0
 
-### Security Hardening
-This release includes 6 security patches:
-- **Path traversal protection** — all memory IDs are now validated before URL interpolation. IDs like `../../admin/delete` are rejected.
-- **SSRF protection** — `baseUrl` is validated and must use HTTPS. `http://localhost` is allowed for local development.
-- **Error handling** — all silent catch blocks replaced with proper error logging to stderr. No more swallowed failures.
-- **Safe response access** — all memory methods use safe optional chaining on API response data. No more `TypeError` on unexpected response shapes.
-- **Resilient error parsing** — API error handler gracefully handles non-JSON error responses (e.g., HTML error pages from CDN/load balancer).
+**Operator visibility + auto-intelligence — agents get smarter, operators can finally see it.**
 
-### Hardcoded Key Detection
-The SDK already detected hardcoded API keys in source code and threw an error. This continues to work — use `process.env.MARROW_API_KEY` or pass the key from a secure source.
+### Operator Dashboard
+One call returns everything an operator needs to see — account health, top failures, workflow status, recent activity, and Marrow's impact.
+
+```typescript
+const dash = await marrow.dashboard();
+// dash.health.overall_score, dash.top_failures, dash.impact.saves_this_week, ...
+```
+
+### Weekly Digest
+Periodic summary with success rate trend vs previous period.
+
+```typescript
+const digest = await marrow.digest('7d');
+// digest.summary, digest.success_rate.direction, digest.saves.count, ...
+```
+
+### Explicit Session End
+Gracefully close a session and optionally auto-commit any open decision — prevents orphaned decisions.
+
+```typescript
+await marrow.endSession(true); // true = auto-commit any open decision
+```
+
+### Auto-Workflow Detection
+When Marrow detects a recurring decision sequence (5+ occurrences), it surfaces it in `orient()` as a suggestion. Accept it to convert the pattern into an enforced workflow.
+
+```typescript
+await marrow.acceptDetectedWorkflow(detectedId);
+```
+
+### New Fields in `think()` Response
+- `onboarding_hint` — contextual tip for new accounts (first 50 decisions)
+- `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
+- `intelligence.team_context` — recent decisions from other sessions in the same account
 
 ---
 
-## What's New in v3.0.0
-
-**Active Intelligence — Marrow Now Intervenes Before Mistakes**
+## Active Intelligence — Marrow Intervenes Before Mistakes
 
 ### Auto-Warn on Orient
 When you call `orient({autoWarn: true})`, Marrow scans your recent decisions and warns you BEFORE you start a task that recently failed:

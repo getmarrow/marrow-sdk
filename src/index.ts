@@ -42,6 +42,9 @@ export type {
   MarrowAskResult,
   MarrowQuickStatusResult,
   ActionableInsight,
+  MarrowDashboardResult,
+  MarrowDigestResult,
+  MarrowSessionEndResult,
 
   // Config Types
   MarrowClientOptions,

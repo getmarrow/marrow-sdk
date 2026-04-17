@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult } from './types';
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -139,6 +139,28 @@ export declare class MarrowClient {
         imported: number;
         skipped: number;
         errors: string[];
+    }>;
+    /**
+     * Get operator dashboard — account health, top failures, workflow status, saves.
+     */
+    dashboard(): Promise<MarrowDashboardResult>;
+    /**
+     * Get periodic summary of agent activity and Marrow impact.
+     * @param period - '7d' (default), '14d', or '30d'
+     */
+    digest(period?: string): Promise<MarrowDigestResult>;
+    /**
+     * Explicitly end the current session. Optionally auto-commits any open decision.
+     * @param autoCommitOpen - whether to auto-commit (default false)
+     */
+    endSession(autoCommitOpen?: boolean): Promise<MarrowSessionEndResult>;
+    /**
+     * Convert a detected decision pattern into an enforced workflow.
+     * @param detectedId - ID from suggested_workflows in orient() response
+     */
+    acceptDetectedWorkflow(detectedId: string): Promise<{
+        workflow_id: string;
+        version: number;
     }>;
     private request;
 }

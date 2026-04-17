@@ -24,6 +24,9 @@ import type {
   MemoryRetrieveOptions,
   ActionableInsight,
   MarrowBlockReasonCode,
+  MarrowDashboardResult,
+  MarrowDigestResult,
+  MarrowSessionEndResult,
 } from './types';
 
 const DEFAULT_HINT =
@@ -647,6 +650,8 @@ export class MarrowClient {
       insight: (intel.insight as string) || null,
       insights: (intel.insights as ActionableInsight[]) || [],
       clusterId: (intel.cluster_id as string) || null,
+      ...(intel.collective ? { collective: intel.collective as MarrowThinkResult['intelligence']['collective'] } : {}),
+      ...(intel.team_context ? { team_context: intel.team_context as MarrowThinkResult['intelligence']['team_context'] } : {}),
     };
 
     const loop = this.check();
@@ -692,6 +697,7 @@ export class MarrowClient {
 
     return {
       decisionId: res.decision_id,
+      ...(res.onboarding_hint ? { onboarding_hint: res.onboarding_hint as string } : {}),
       intelligence,
       streamUrl: res.stream_url,
       previousCommitted: res.previous_committed,
@@ -1111,6 +1117,49 @@ export class MarrowClient {
   }
 
   // Private request helper
+
+  // ============= V4 Backend Parity (SDK v3.1) =============
+
+  /**
+   * Get operator dashboard — account health, top failures, workflow status, saves.
+   */
+  async dashboard(): Promise<MarrowDashboardResult> {
+    const res = await this.request('GET', '/v1/dashboard');
+    return (res.data || res) as MarrowDashboardResult;
+  }
+
+  /**
+   * Get periodic summary of agent activity and Marrow impact.
+   * @param period - '7d' (default), '14d', or '30d'
+   */
+  async digest(period: string = '7d'): Promise<MarrowDigestResult> {
+    const days = parseInt(period) || 7;
+    const res = await this.request('GET', `/v1/digest?period=${days}`);
+    return (res.data || res) as MarrowDigestResult;
+  }
+
+  /**
+   * Explicitly end the current session. Optionally auto-commits any open decision.
+   * @param autoCommitOpen - whether to auto-commit (default false)
+   */
+  async endSession(autoCommitOpen: boolean = false): Promise<MarrowSessionEndResult> {
+    const res = await this.request('POST', '/v1/agent/session/end', {
+      auto_commit_open: autoCommitOpen,
+    });
+    return (res.data || res) as MarrowSessionEndResult;
+  }
+
+  /**
+   * Convert a detected decision pattern into an enforced workflow.
+   * @param detectedId - ID from suggested_workflows in orient() response
+   */
+  async acceptDetectedWorkflow(detectedId: string): Promise<{ workflow_id: string; version: number }> {
+    const safeId = validatePathParam(detectedId, 'detectedId');
+    const res = await this.request('POST', '/v1/workflows/accept-detected', {
+      detected_id: safeId,
+    });
+    return (res.data || res) as { workflow_id: string; version: number };
+  }
 
   private async request(
     method: string,

@@ -122,6 +122,7 @@ export interface MarrowOrientResult {
 }
 export interface MarrowThinkResult {
     decisionId: string;
+    onboarding_hint?: string;
     intelligence: {
         similar: Array<{
             outcome: string;
@@ -148,6 +149,19 @@ export interface MarrowThinkResult {
         insight: string | null;
         insights: ActionableInsight[];
         clusterId: string | null;
+        collective?: {
+            total_agents_reporting: number;
+            decisions_analyzed: number;
+            success_rate: number;
+            top_failure_reasons: string[];
+            insight: string;
+        };
+        team_context?: Array<{
+            agent: string;
+            action: string;
+            outcome: string;
+            when: string;
+        }>;
     };
     streamUrl: string;
     previousCommitted?: boolean;
@@ -240,5 +254,77 @@ export interface MemoryRetrieveOptions {
     source?: string;
     status?: MemoryStatus;
     shared?: boolean;
+}
+export interface MarrowDashboardResult {
+    account: {
+        agent_count: number;
+        total_decisions: number;
+        active_since: string;
+    };
+    health: {
+        overall_score: number;
+        label: string;
+        success_rate_7d: number;
+        success_rate_30d: number;
+        trend: string;
+        trend_delta: number;
+    };
+    top_failures: Array<{
+        decision_type: string;
+        failure_rate: number;
+        count: number;
+        last_seen: string;
+        top_reason: string | null;
+    }>;
+    workflow_status: {
+        active: number;
+        completed_this_week: number;
+        stalled: number;
+        stalled_workflows: Array<{
+            instance_id: string;
+            workflow_name: string;
+            stalled_at_step: number;
+            stalled_since: string;
+            waiting_for: string;
+        }>;
+    };
+    impact: {
+        saves_this_week: number;
+        saves_total: number;
+        failures_prevented_details: Array<unknown>;
+    };
+    recent_decisions: {
+        today: number;
+        this_week: number;
+        by_type: Record<string, number>;
+    };
+}
+export interface MarrowDigestResult {
+    period: string;
+    summary: string;
+    decisions: {
+        total: number;
+        successful: number;
+        failed: number;
+    };
+    success_rate: {
+        current: number;
+        previous_period: number;
+        change: number;
+        direction: string;
+    };
+    saves: {
+        count: number;
+        details: unknown[];
+    };
+    top_improvements: string[];
+    top_risks: string[];
+    workflows_completed: number;
+    workflows_stalled: number;
+}
+export interface MarrowSessionEndResult {
+    session_id: string;
+    committed: number;
+    open_decision_id: string | null;
 }
 //# sourceMappingURL=types.d.ts.map

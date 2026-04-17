@@ -479,6 +479,8 @@ class MarrowClient {
             insight: intel.insight || null,
             insights: intel.insights || [],
             clusterId: intel.cluster_id || null,
+            ...(intel.collective ? { collective: intel.collective } : {}),
+            ...(intel.team_context ? { team_context: intel.team_context } : {}),
         };
         const loop = this.check();
         const warnings = [...loop.warnings];
@@ -500,6 +502,7 @@ class MarrowClient {
             .join(' ');
         return {
             decisionId: res.decision_id,
+            ...(res.onboarding_hint ? { onboarding_hint: res.onboarding_hint } : {}),
             intelligence,
             streamUrl: res.stream_url,
             previousCommitted: res.previous_committed,
@@ -789,6 +792,44 @@ class MarrowClient {
         return res.data;
     }
     // Private request helper
+    // ============= V4 Backend Parity (SDK v3.1) =============
+    /**
+     * Get operator dashboard — account health, top failures, workflow status, saves.
+     */
+    async dashboard() {
+        const res = await this.request('GET', '/v1/dashboard');
+        return (res.data || res);
+    }
+    /**
+     * Get periodic summary of agent activity and Marrow impact.
+     * @param period - '7d' (default), '14d', or '30d'
+     */
+    async digest(period = '7d') {
+        const days = parseInt(period) || 7;
+        const res = await this.request('GET', `/v1/digest?period=${days}`);
+        return (res.data || res);
+    }
+    /**
+     * Explicitly end the current session. Optionally auto-commits any open decision.
+     * @param autoCommitOpen - whether to auto-commit (default false)
+     */
+    async endSession(autoCommitOpen = false) {
+        const res = await this.request('POST', '/v1/agent/session/end', {
+            auto_commit_open: autoCommitOpen,
+        });
+        return (res.data || res);
+    }
+    /**
+     * Convert a detected decision pattern into an enforced workflow.
+     * @param detectedId - ID from suggested_workflows in orient() response
+     */
+    async acceptDetectedWorkflow(detectedId) {
+        const safeId = validatePathParam(detectedId, 'detectedId');
+        const res = await this.request('POST', '/v1/workflows/accept-detected', {
+            detected_id: safeId,
+        });
+        return (res.data || res);
+    }
     async request(method, path, body) {
         const url = `${this.baseUrl}${path}`;
         const headers = {

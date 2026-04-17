@@ -80,6 +80,7 @@ class MarrowClient {
     enforcement;
     loopState;
     sessionId;
+    agentId;
     reminderBudget;
     baseUrl;
     constructor(apiKey, options) {
@@ -89,10 +90,12 @@ class MarrowClient {
         if (typeof options === 'string') {
             this.baseUrl = validateBaseUrl(options);
             this.sessionId = null;
+            this.agentId = null;
         }
         else {
             this.baseUrl = validateBaseUrl(options?.baseUrl ?? 'https://api.getmarrow.ai');
             this.sessionId = options?.sessionId ?? null;
+            this.agentId = options?.agentId ?? null;
         }
         const initialMode = (typeof options === 'object' ? options?.mode : undefined) ?? 'warn';
         // Security check: warn if API key appears hardcoded
@@ -838,6 +841,9 @@ class MarrowClient {
         };
         if (this.sessionId) {
             headers['X-Marrow-Session-Id'] = this.sessionId;
+        }
+        if (this.agentId) {
+            headers['X-Marrow-Agent-Id'] = this.agentId;
         }
         const res = await fetch(url, {
             method,

@@ -14,6 +14,7 @@ export declare class MarrowClient {
     private enforcement;
     private loopState;
     private sessionId;
+    private agentId;
     private reminderBudget;
     private baseUrl;
     constructor(apiKey: string, options?: MarrowClientOptions | string);

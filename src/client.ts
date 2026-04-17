@@ -136,6 +136,7 @@ export class MarrowClient {
   private enforcement: EnforcementConfig;
   private loopState: MarrowLoopState;
   private sessionId: string | null;
+  private agentId: string | null;
   private reminderBudget: ReminderBudget;
   private baseUrl: string;
 
@@ -147,9 +148,11 @@ export class MarrowClient {
     if (typeof options === 'string') {
       this.baseUrl = validateBaseUrl(options);
       this.sessionId = null;
+      this.agentId = null;
     } else {
       this.baseUrl = validateBaseUrl(options?.baseUrl ?? 'https://api.getmarrow.ai');
       this.sessionId = options?.sessionId ?? null;
+      this.agentId = options?.agentId ?? null;
     }
 
     const initialMode: MarrowEnforcementMode =
@@ -1174,6 +1177,9 @@ export class MarrowClient {
 
     if (this.sessionId) {
       headers['X-Marrow-Session-Id'] = this.sessionId;
+    }
+    if (this.agentId) {
+      headers['X-Marrow-Agent-Id'] = this.agentId;
     }
 
     const res = await fetch(url, {

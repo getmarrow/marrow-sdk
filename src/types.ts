@@ -255,6 +255,7 @@ export interface MarrowQuickStatusResult {
 export interface MarrowClientOptions {
   baseUrl?: string;
   sessionId?: string;
+  agentId?: string;
   mode?: MarrowEnforcementMode;
 }
 

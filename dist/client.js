@@ -430,8 +430,9 @@ class MarrowClient {
                 body.previous_caused_by = params.previousCausedBy;
         }
         const res = await this.request('POST', '/v1/agent/think', body);
-        this.decisionId = res.decision_id;
-        const intel = (res.intelligence || {});
+        const data = res.data ?? res; // Unwrap {data: {...}} envelope
+        this.decisionId = data.decision_id;
+        const intel = (data.intelligence || {});
         // Inject orient warnings into intelligence if present
         if (this.orientWarnings.length > 0) {
             const existingInsights = intel.insights || [];
@@ -488,7 +489,7 @@ class MarrowClient {
         const loop = this.check();
         const warnings = [...loop.warnings];
         // Inject loop detection warnings from backend
-        const loopWarnings = (res.loop_warnings || []);
+        const loopWarnings = (data.loop_warnings || []);
         if (loopWarnings.length > 0) {
             warnings.push(...loopWarnings.map((lw) => `🔁 LOOP: ${lw.message}${lw.recommendation ? ` — Try: ${lw.recommendation.action}` : ''}`));
         }
@@ -504,14 +505,14 @@ class MarrowClient {
             .filter(Boolean)
             .join(' ');
         return {
-            decisionId: res.decision_id,
-            ...(res.onboarding_hint ? { onboarding_hint: res.onboarding_hint } : {}),
+            decisionId: data.decision_id,
+            ...(data.onboarding_hint ? { onboarding_hint: data.onboarding_hint } : {}),
             intelligence,
-            streamUrl: res.stream_url,
-            previousCommitted: res.previous_committed,
-            sanitized: Boolean(res.sanitized),
-            upgradeHint: res.upgrade_hint
-                ? res.upgrade_hint
+            streamUrl: data.stream_url,
+            previousCommitted: data.previous_committed,
+            sanitized: Boolean(data.sanitized),
+            upgradeHint: data.upgrade_hint
+                ? data.upgrade_hint
                 : undefined,
             acceptedAs: 'intent',
             warnings,
@@ -531,6 +532,7 @@ class MarrowClient {
             outcome: params.outcome,
             caused_by: params.causedBy,
         });
+        const data = res.data ?? res;
         this.decisionId = null;
         this.loopState.lastOutcomeAt = nowIso();
         this.loopState.hasOutcomeLog = true;
@@ -545,15 +547,15 @@ class MarrowClient {
         const loop = this.check();
         const summary = [
             'Outcome logged to Marrow.',
-            res.insight ? `Pattern hint: ${String(res.insight)}` : null,
+            data.insight ? `Pattern hint: ${String(data.insight)}` : null,
             'Loop closed.',
         ]
             .filter(Boolean)
             .join(' ');
         return {
-            committed: res.committed,
-            successRate: res.success_rate,
-            insight: res.insight,
+            committed: data.committed,
+            successRate: data.success_rate,
+            insight: data.insight,
             acceptedAs: 'outcome',
             recommendedNext: loop.recommendedNext,
             loop,
@@ -568,7 +570,8 @@ class MarrowClient {
                     task: params.taskType,
                     autoWarn: true,
                 });
-                const warnings = (res.warnings || []).map((w) => ({
+                const data = res.data ?? res;
+                const warnings = (data.warnings || []).map((w) => ({
                     severity: String(w.severity || 'LOW'),
                     message: String(w.message || ''),
                     pattern: String(w.pattern || ''),
@@ -589,7 +592,7 @@ class MarrowClient {
                     warnings: this.orientWarnings,
                     serverWarnings: warnings,
                     lessons: [],
-                    loopState: res.loopState || { isOpen: false, lastCommit: null },
+                    loopState: data.loopState || { isOpen: false, lastCommit: null },
                     shouldPause: warnings.some((w) => w.severity === 'HIGH'),
                     loop,
                     recommendedNext: loop.recommendedNext,
@@ -615,7 +618,8 @@ class MarrowClient {
         let lessons = [];
         try {
             const res = await this.request('GET', `/v1/agent/think/history?type=lesson&limit=5`);
-            const items = (res.items || res.decisions || []);
+            const ld = res.data ?? res;
+            const items = (ld.items || ld.decisions || []);
             lessons = items.map((i) => ({
                 summary: String(i.action || i.summary || ''),
                 severity: warnings.length > 0 ? 'warning' : 'info',
@@ -663,17 +667,19 @@ class MarrowClient {
         if (params?.limit)
             qs.set('limit', String(params.limit));
         const res = await this.request('GET', `/v1/agent/patterns${qs.toString() ? '?' + qs.toString() : ''}`);
+        const data = res.data ?? res;
         return {
-            failurePatterns: res.failure_patterns || [],
-            recurringDecisions: res.recurring_decisions || [],
-            behavioralDrift: res.behavioral_drift || {},
-            topFailureTypes: res.top_failure_types || [],
-            generatedAt: String(res.generated_at || ''),
+            failurePatterns: data.failure_patterns || [],
+            recurringDecisions: data.recurring_decisions || [],
+            behavioralDrift: data.behavioral_drift || {},
+            topFailureTypes: data.top_failure_types || [],
+            generatedAt: String(data.generated_at || ''),
         };
     }
     async analytics() {
         const res = await this.request('GET', '/v1/analytics');
-        const hs = res.health_score || {};
+        const data = res.data ?? res;
+        const hs = data.health_score || {};
         return {
             ...res,
             healthScore: {
@@ -687,25 +693,27 @@ class MarrowClient {
     }
     async ask(query) {
         const res = await this.request('POST', '/v1/agent/ask', { query });
+        const data = res.data ?? res;
         return {
-            answer: res.answer,
-            stats: res.stats || null,
-            top_outcomes: res.top_outcomes || [],
-            decisions_matched: res.decisions_matched || 0,
-            query_keywords: res.query_keywords,
-            low_history: res.low_history,
+            answer: data.answer,
+            stats: data.stats || null,
+            top_outcomes: data.top_outcomes || [],
+            decisions_matched: data.decisions_matched || 0,
+            query_keywords: data.query_keywords,
+            low_history: data.low_history,
         };
     }
     async quickStatus() {
         const res = await this.request('GET', '/v1/agent/status');
+        const data = res.data ?? res;
         return {
-            ok: res.ok,
-            health: res.health || 'degraded',
-            message: res.message || '',
-            hasMemory: Boolean(res.has_memory),
-            lowHistory: Boolean(res.low_history),
-            decisionCount: res.decision_count || 0,
-            successRate: res.success_rate ?? null,
+            ok: data.ok,
+            health: data.health || 'degraded',
+            message: data.message || '',
+            hasMemory: Boolean(data.has_memory),
+            lowHistory: Boolean(data.low_history),
+            decisionCount: data.decision_count || 0,
+            successRate: data.success_rate ?? null,
         };
     }
     // Memory Control Methods

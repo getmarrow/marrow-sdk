@@ -595,9 +595,10 @@ export class MarrowClient {
     }
 
     const res = await this.request('POST', '/v1/agent/think', body);
-    this.decisionId = res.decision_id;
+    const data = res.data ?? res; // Unwrap {data: {...}} envelope
+    this.decisionId = data.decision_id;
 
-    const intel = (res.intelligence || {}) as Record<string, unknown>;
+    const intel = (data.intelligence || {}) as Record<string, unknown>;
 
     // Inject orient warnings into intelligence if present
     if (this.orientWarnings.length > 0) {
@@ -661,7 +662,7 @@ export class MarrowClient {
     const warnings = [...loop.warnings];
 
     // Inject loop detection warnings from backend
-    const loopWarnings = (res.loop_warnings || []) as Array<{
+    const loopWarnings = (data.loop_warnings || []) as Array<{
       type: 'LOOP_DETECTED';
       severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
       message: string;
@@ -699,14 +700,14 @@ export class MarrowClient {
       .join(' ');
 
     return {
-      decisionId: res.decision_id,
-      ...(res.onboarding_hint ? { onboarding_hint: res.onboarding_hint as string } : {}),
+      decisionId: data.decision_id,
+      ...(data.onboarding_hint ? { onboarding_hint: data.onboarding_hint as string } : {}),
       intelligence,
-      streamUrl: res.stream_url,
-      previousCommitted: res.previous_committed,
-      sanitized: Boolean(res.sanitized),
-      upgradeHint: res.upgrade_hint
-        ? (res.upgrade_hint as { message: string; tier: string; url: string })
+      streamUrl: data.stream_url,
+      previousCommitted: data.previous_committed,
+      sanitized: Boolean(data.sanitized),
+      upgradeHint: data.upgrade_hint
+        ? (data.upgrade_hint as { message: string; tier: string; url: string })
         : undefined,
       acceptedAs: 'intent',
       warnings,
@@ -732,6 +733,7 @@ export class MarrowClient {
       outcome: params.outcome,
       caused_by: params.causedBy,
     });
+    const data = res.data ?? res;
 
     this.decisionId = null;
     this.loopState.lastOutcomeAt = nowIso();
@@ -748,16 +750,16 @@ export class MarrowClient {
     const loop = this.check();
     const summary = [
       'Outcome logged to Marrow.',
-      res.insight ? `Pattern hint: ${String(res.insight)}` : null,
+      data.insight ? `Pattern hint: ${String(data.insight)}` : null,
       'Loop closed.',
     ]
       .filter(Boolean)
       .join(' ');
 
     return {
-      committed: res.committed,
-      successRate: res.success_rate,
-      insight: res.insight,
+      committed: data.committed,
+      successRate: data.success_rate,
+      insight: data.insight,
       acceptedAs: 'outcome',
       recommendedNext: loop.recommendedNext,
       loop,
@@ -773,8 +775,9 @@ export class MarrowClient {
           task: params.taskType,
           autoWarn: true,
         });
+        const data = res.data ?? res;
 
-        const warnings = (res.warnings || []).map((w: Record<string, unknown>) => ({
+        const warnings = (data.warnings || []).map((w: Record<string, unknown>) => ({
           severity: String(w.severity || 'LOW') as 'HIGH' | 'MEDIUM' | 'LOW',
           message: String(w.message || ''),
           pattern: String(w.pattern || ''),
@@ -799,7 +802,7 @@ export class MarrowClient {
           warnings: this.orientWarnings,
           serverWarnings: warnings,
           lessons: [],
-          loopState: res.loopState || { isOpen: false, lastCommit: null },
+          loopState: data.loopState || { isOpen: false, lastCommit: null },
           shouldPause: warnings.some((w: { severity: string }) => w.severity === 'HIGH'),
           loop,
           recommendedNext: loop.recommendedNext,
@@ -832,7 +835,8 @@ export class MarrowClient {
         'GET',
         `/v1/agent/think/history?type=lesson&limit=5`
       );
-      const items = (res.items || res.decisions || []) as any[];
+      const ld = res.data ?? res;
+      const items = (ld.items || ld.decisions || []) as any[];
       lessons = items.map((i) => ({
         summary: String(i.action || i.summary || ''),
         severity: warnings.length > 0 ? 'warning' : 'info',
@@ -910,13 +914,14 @@ export class MarrowClient {
       'GET',
       `/v1/agent/patterns${qs.toString() ? '?' + qs.toString() : ''}`
     );
+    const data = res.data ?? res;
 
     return {
-      failurePatterns: (res.failure_patterns as any[]) || [],
-      recurringDecisions: (res.recurring_decisions as any[]) || [],
-      behavioralDrift: (res.behavioral_drift as any) || {},
-      topFailureTypes: (res.top_failure_types as string[]) || [],
-      generatedAt: String(res.generated_at || ''),
+      failurePatterns: (data.failure_patterns as any[]) || [],
+      recurringDecisions: (data.recurring_decisions as any[]) || [],
+      behavioralDrift: (data.behavioral_drift as any) || {},
+      topFailureTypes: (data.top_failure_types as string[]) || [],
+      generatedAt: String(data.generated_at || ''),
     };
   }
 
@@ -931,7 +936,8 @@ export class MarrowClient {
     [key: string]: unknown;
   }> {
     const res = await this.request('GET', '/v1/analytics');
-    const hs = (res.health_score as Record<string, unknown>) || {};
+    const data = res.data ?? res;
+    const hs = (data.health_score as Record<string, unknown>) || {};
 
     return {
       ...res,
@@ -947,26 +953,28 @@ export class MarrowClient {
 
   async ask(query: string): Promise<MarrowAskResult> {
     const res = await this.request('POST', '/v1/agent/ask', { query });
+    const data = res.data ?? res;
     return {
-      answer: res.answer,
-      stats: res.stats || null,
-      top_outcomes: res.top_outcomes || [],
-      decisions_matched: res.decisions_matched || 0,
-      query_keywords: res.query_keywords,
-      low_history: res.low_history,
+      answer: data.answer,
+      stats: data.stats || null,
+      top_outcomes: data.top_outcomes || [],
+      decisions_matched: data.decisions_matched || 0,
+      query_keywords: data.query_keywords,
+      low_history: data.low_history,
     };
   }
 
   async quickStatus(): Promise<MarrowQuickStatusResult> {
     const res = await this.request('GET', '/v1/agent/status');
+    const data = res.data ?? res;
     return {
-      ok: res.ok,
-      health: (res.health as 'healthy' | 'degraded') || 'degraded',
-      message: res.message || '',
-      hasMemory: Boolean(res.has_memory),
-      lowHistory: Boolean(res.low_history),
-      decisionCount: res.decision_count || 0,
-      successRate: res.success_rate ?? null,
+      ok: data.ok,
+      health: (data.health as 'healthy' | 'degraded') || 'degraded',
+      message: data.message || '',
+      hasMemory: Boolean(data.has_memory),
+      lowHistory: Boolean(data.low_history),
+      decisionCount: data.decision_count || 0,
+      successRate: data.success_rate ?? null,
     };
   }
 

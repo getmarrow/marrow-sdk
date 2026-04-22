@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -140,6 +140,24 @@ export declare class MarrowClient {
         imported: number;
         skipped: number;
         errors: string[];
+    }>;
+    /**
+     * List available workflow templates with optional filters.
+     */
+    listTemplates(filters?: {
+        industry?: string;
+        category?: string;
+        limit?: number;
+    }): Promise<MarrowTemplateSummary[]>;
+    /**
+     * Get full details of a workflow template by slug.
+     */
+    getTemplate(slug: string): Promise<MarrowTemplateDetail | null>;
+    /**
+     * Install a workflow template into the current account as an active workflow.
+     */
+    installTemplate(slug: string): Promise<{
+        workflow_id: string;
     }>;
     /**
      * Get operator dashboard — account health, top failures, workflow status, saves.

@@ -45,6 +45,8 @@ export type {
   MarrowDashboardResult,
   MarrowDigestResult,
   MarrowSessionEndResult,
+  MarrowTemplateSummary,
+  MarrowTemplateDetail,
 
   // Config Types
   MarrowClientOptions,

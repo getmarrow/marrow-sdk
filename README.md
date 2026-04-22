@@ -23,7 +23,7 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v3.1.0
+## What's New in v3.1.5
 
 **Operator visibility + auto-intelligence — agents get smarter, operators can finally see it.**
 
@@ -61,6 +61,25 @@ await marrow.acceptDetectedWorkflow(detectedId);
 - `onboarding_hint` — contextual tip for new accounts (first 50 decisions)
 - `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
 - `intelligence.team_context` — recent decisions from other sessions in the same account
+
+### Since v3.1.0 (cumulative through v3.1.5)
+
+**v3.1.1** — Published fixes + README consolidation
+
+**v3.1.2** — Agent identity: new `agentId` option on MarrowClient constructor. Adds X-Marrow-Agent-Id header to all requests so decisions tag your specific agent for fleet dashboards.
+
+**v3.1.3** — Fixed decisionId/commit flow — SDK now correctly unwraps API `{data: ...}` envelope across all methods.
+
+**v3.1.4** — Template marketplace methods: `listTemplates(filters?)`, `getTemplate(slug)`, `installTemplate(slug)`. Browse and install pre-built workflow templates for your industry (insurance, healthcare, ecommerce, legal, saas, fintech, media, enterprise — 24 templates total).
+
+**v3.1.5** — README / docs sync (this release).
+
+Example:
+```typescript
+const marrow = new MarrowClient(apiKey, { agentId: 'claims-triage-01' });
+const templates = await marrow.listTemplates({ industry: 'insurance' });
+const wf = await marrow.installTemplate('claims-triage');
+```
 
 ---
 

@@ -803,6 +803,75 @@ class MarrowClient {
         return res.data;
     }
     // Private request helper
+    // ============= Template Marketplace (SDK v3.1.4) =============
+    /**
+     * List available workflow templates with optional filters.
+     */
+    async listTemplates(filters) {
+        const qs = new URLSearchParams();
+        if (filters?.industry)
+            qs.set('industry', filters.industry);
+        if (filters?.category)
+            qs.set('category', filters.category);
+        if (filters?.limit)
+            qs.set('limit', String(filters.limit));
+        const query = qs.toString();
+        const res = await this.request('GET', `/v1/templates${query ? '?' + query : ''}`);
+        const data = res.data ?? res;
+        const templates = data.templates || data || [];
+        return templates.map((t) => ({
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            description: t.description || null,
+            industry: t.industry || null,
+            category: t.category || null,
+            author: t.author || 'marrow',
+            install_count: t.install_count || 0,
+            tags: typeof t.tags === 'string' ? JSON.parse(t.tags) : (t.tags || []),
+        }));
+    }
+    /**
+     * Get full details of a workflow template by slug.
+     */
+    async getTemplate(slug) {
+        const safeSlug = validatePathParam(slug, 'slug');
+        try {
+            const res = await this.request('GET', `/v1/templates/${safeSlug}`);
+            const data = res.data ?? res;
+            if (!data || !data.id)
+                return null;
+            return {
+                id: data.id,
+                name: data.name,
+                slug: data.slug,
+                description: data.description || null,
+                industry: data.industry || null,
+                category: data.category || null,
+                author: data.author || 'marrow',
+                install_count: data.install_count || 0,
+                tags: typeof data.tags === 'string' ? JSON.parse(data.tags) : (data.tags || []),
+                steps: typeof data.steps === 'string' ? JSON.parse(data.steps) : (data.steps || []),
+                avg_success_rate: data.avg_success_rate ?? null,
+                created_at: data.created_at || '',
+                updated_at: data.updated_at || '',
+            };
+        }
+        catch (e) {
+            if (e instanceof Error && e.message.includes('404'))
+                return null;
+            throw e;
+        }
+    }
+    /**
+     * Install a workflow template into the current account as an active workflow.
+     */
+    async installTemplate(slug) {
+        const safeSlug = validatePathParam(slug, 'slug');
+        const res = await this.request('POST', `/v1/templates/${safeSlug}/install`);
+        const data = res.data ?? res;
+        return { workflow_id: data.workflow_id };
+    }
     // ============= V4 Backend Parity (SDK v3.1) =============
     /**
      * Get operator dashboard — account health, top failures, workflow status, saves.

@@ -328,4 +328,26 @@ export interface MarrowSessionEndResult {
     committed: number;
     open_decision_id: string | null;
 }
+export interface MarrowTemplateSummary {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    industry: string | null;
+    category: string | null;
+    author: string;
+    install_count: number;
+    tags: string[];
+}
+export interface MarrowTemplateDetail extends MarrowTemplateSummary {
+    steps: Array<{
+        step: number;
+        name: string;
+        description: string;
+        agent_role?: string;
+    }>;
+    avg_success_rate: number | null;
+    created_at: string;
+    updated_at: string;
+}
 //# sourceMappingURL=types.d.ts.map

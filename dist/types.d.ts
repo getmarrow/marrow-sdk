@@ -262,6 +262,18 @@ export interface MemoryRetrieveOptions {
     status?: MemoryStatus;
     shared?: boolean;
 }
+export interface VelocityMetric {
+    current: number;
+    previous: number;
+    delta_pct: number;
+    direction: 'improving' | 'declining' | 'stable';
+}
+export interface Velocity {
+    attempts_per_success: VelocityMetric;
+    time_to_success_seconds: VelocityMetric;
+    /** Percentage 0-100. Lower = more pattern reuse, less rediscovery. */
+    drift_rate: VelocityMetric;
+}
 export interface MarrowDashboardResult {
     account: {
         agent_count: number;
@@ -300,6 +312,7 @@ export interface MarrowDashboardResult {
         saves_total: number;
         failures_prevented_details: Array<unknown>;
     };
+    velocity: Velocity;
     recent_decisions: {
         today: number;
         this_week: number;
@@ -324,6 +337,7 @@ export interface MarrowDigestResult {
         count: number;
         details: unknown[];
     };
+    velocity: Velocity;
     top_improvements: string[];
     top_risks: string[];
     workflows_completed: number;

@@ -100,6 +100,26 @@ await marrow.acceptDetectedWorkflow(detectedId);
 
 ---
 
+## Available Templates
+
+24 pre-built workflow templates across 8 industries. Browse via `listTemplates()` and install with `installTemplate(slug)`.
+
+- **Insurance (4):** `claims-triage`, `fraud-review`, `underwriting-decision`, `complaint-escalation`
+- **Healthcare (4):** `patient-triage`, `clinical-documentation`, `prior-authorization`, `coding-audit`
+- **E-commerce (3):** `order-fulfillment`, `refund-approval`, `return-processing`
+- **Legal (3):** `contract-review`, `case-triage`, `document-discovery`
+- **SaaS (6):** `code-review-deploy`, `incident-response`, `feature-rollout`, `ticket-triage`, `escalation-flow`, `lead-qualify`
+- **Fintech (2):** `etl-pipeline`, `approval-flow`
+- **Media (1):** `content-publish`
+- **Enterprise (1):** `change-management`
+
+Full catalog with descriptions and step-by-step details: [getmarrow.ai/docs#template-marketplace](https://getmarrow.ai/docs/#template-marketplace)
+
+```typescript
+const templates = await marrow.listTemplates({ industry: 'insurance' });
+const workflow = await marrow.installTemplate('claims-triage');
+```
+
 ## Active Intelligence — Marrow Intervenes Before Mistakes
 
 ### Auto-Warn on Orient

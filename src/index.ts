@@ -34,6 +34,7 @@ export type {
   MarrowCheckResult,
   MarrowEnforceOptions,
   MarrowActionMeta,
+  MarrowAutoWrapOptions,
 
   // Result Types
   MarrowOrientResult,

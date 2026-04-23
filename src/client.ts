@@ -7,6 +7,7 @@ import type {
   MarrowEnforcementMode,
   MarrowEnforceOptions,
   MarrowActionMeta,
+  MarrowAutoWrapOptions,
   MarrowCheckResult,
   MarrowLoopState,
   MarrowLoopRecommendation,
@@ -55,6 +56,62 @@ function cloneState(state: MarrowLoopState): MarrowLoopState {
 
 function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeArg(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || value == null) {
+    return String(value);
+  }
+  if (value instanceof URL) return value.toString();
+  if (typeof Request !== 'undefined' && value instanceof Request) {
+    return `${value.method || 'GET'} ${value.url}`;
+  }
+  return safeJsonStringify(value);
+}
+
+function summarizeArgs(args: unknown[], max: number = 80): string {
+  if (args.length === 0) return '';
+  return truncate(args.map((arg) => summarizeArg(arg)).join(', '), max);
+}
+
+function stripSensitiveUrl(input: string): string {
+  const redactFallback = (value: string): string =>
+    value.replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#]*/gi, '$1[redacted]');
+
+  try {
+    const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(input);
+    const parsed = new URL(input, hasScheme ? undefined : 'http://marrow.local');
+    parsed.username = '';
+    parsed.password = '';
+
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (/(token|key|secret|password|auth|signature|sig|session)/i.test(key)) {
+        parsed.searchParams.set(key, '[redacted]');
+      }
+    }
+
+    if (hasScheme) {
+      return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return redactFallback(input);
+  }
 }
 
 /**
@@ -483,6 +540,118 @@ export class MarrowClient {
       });
       throw error;
     }
+  }
+
+  /**
+   * Wrap every function on an object with Marrow logging.
+   *
+   * @example
+   * const myAgent = new MyAgent();
+   * const wrapped = marrow.autoWrap(myAgent);
+   * await wrapped.deploy(); // auto-logs 'deploy(...)' with think → commit
+   *
+   * @example
+   * const wrapped = marrow.autoWrap(myAgent, {
+   *   exclude: ['getConfig', 'toJSON'],
+   *   actionPrefix: 'claims-agent: ',
+   *   type: 'process'
+   * });
+   */
+  autoWrap<T extends object>(target: T, options: MarrowAutoWrapOptions = {}): T {
+    const exclude = new Set(options.exclude || []);
+    const wrappedCache = new Map<PropertyKey, unknown>();
+
+    return new Proxy(target, {
+      get: (proxyTarget, prop, receiver) => {
+        const value = Reflect.get(proxyTarget, prop, receiver);
+        if (typeof value !== 'function') return value;
+
+        const methodName = typeof prop === 'string' ? prop : String(prop);
+        if (exclude.has(methodName)) return value;
+
+        if (wrappedCache.has(prop)) {
+          return wrappedCache.get(prop);
+        }
+
+        const wrapped = (...args: unknown[]) => {
+          const derivedAction = options.deriveAction
+            ? options.deriveAction(methodName, args)
+            : `${methodName}(${summarizeArgs(args, 80)})`;
+          const action = `${options.actionPrefix || ''}${derivedAction}`;
+
+          return this.wrap(
+            {
+              action,
+              type: options.type || 'general',
+            },
+            () => Reflect.apply(value, receiver, args)
+          );
+        };
+
+        wrappedCache.set(prop, wrapped);
+        return wrapped;
+      },
+    });
+  }
+
+  /**
+   * Wrap a fetch-compatible function with Marrow logging.
+   *
+   * @example
+   * const wrappedFetch = marrow.wrapFetch(fetch);
+   * await wrappedFetch('https://api.example.com/deploy', { method: 'POST' });
+   * // auto-logs 'POST https://api.example.com/deploy'
+   */
+  wrapFetch(fetchFn: typeof fetch): typeof fetch {
+    return (async (input: Request | string | URL, init?: RequestInit) => {
+      const requestMethod = (() => {
+        if (init?.method) return init.method;
+        if (typeof Request !== 'undefined' && input instanceof Request) {
+          return input.method;
+        }
+        return 'GET';
+      })();
+
+      const rawUrl = (() => {
+        if (typeof input === 'string') return input;
+        if (input instanceof URL) return input.toString();
+        if (typeof Request !== 'undefined' && input instanceof Request) {
+          return input.url;
+        }
+        return String(input);
+      })();
+
+      const method = requestMethod.toUpperCase();
+      const action = `${method} ${stripSensitiveUrl(rawUrl)}`;
+      const meta: MarrowActionMeta = {
+        action,
+        type: 'general',
+        external: true,
+        meaningful: true,
+        actionClass: method === 'GET' || method === 'HEAD' ? 'read_only' : 'external_irreversible',
+        chokePoint: method === 'GET' || method === 'HEAD' ? 'other' : 'external_write',
+      };
+
+      await this.beforeAction(meta);
+      try {
+        const response = await fetchFn(input, init);
+        await this.afterAction({
+          ...meta,
+          success: response.ok,
+          result: response.ok
+            ? `HTTP ${response.status} ${response.statusText || 'OK'}`
+            : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
+        });
+        return response;
+      } catch (error) {
+        await this.afterAction({
+          ...meta,
+          success: false,
+          result: safeErrorMessage(error),
+        });
+        throw error;
+      }
+    }) as typeof fetch;
   }
 
   async wrapPublish<T>(

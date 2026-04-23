@@ -94,6 +94,12 @@ export interface MarrowActionMeta {
     causedBy?: string;
     skipAutoOutcome?: boolean;
 }
+export interface MarrowAutoWrapOptions {
+    exclude?: string[];
+    actionPrefix?: string;
+    type?: MarrowDecisionType;
+    deriveAction?: (methodName: string, args: unknown[]) => string;
+}
 export interface MarrowOrientResult {
     warnings: Array<{
         type: string;

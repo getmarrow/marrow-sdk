@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -27,6 +27,31 @@ export declare class MarrowClient {
     beforeAction(meta: MarrowActionMeta): Promise<MarrowCheckResult>;
     afterAction(meta: MarrowActionMeta): Promise<MarrowCheckResult>;
     wrap<T>(meta: MarrowActionMeta, fn: () => Promise<T> | T): Promise<T>;
+    /**
+     * Wrap every function on an object with Marrow logging.
+     *
+     * @example
+     * const myAgent = new MyAgent();
+     * const wrapped = marrow.autoWrap(myAgent);
+     * await wrapped.deploy(); // auto-logs 'deploy(...)' with think → commit
+     *
+     * @example
+     * const wrapped = marrow.autoWrap(myAgent, {
+     *   exclude: ['getConfig', 'toJSON'],
+     *   actionPrefix: 'claims-agent: ',
+     *   type: 'process'
+     * });
+     */
+    autoWrap<T extends object>(target: T, options?: MarrowAutoWrapOptions): T;
+    /**
+     * Wrap a fetch-compatible function with Marrow logging.
+     *
+     * @example
+     * const wrappedFetch = marrow.wrapFetch(fetch);
+     * await wrappedFetch('https://api.example.com/deploy', { method: 'POST' });
+     * // auto-logs 'POST https://api.example.com/deploy'
+     */
+    wrapFetch(fetchFn: typeof fetch): typeof fetch;
     wrapPublish<T>(action: string, fn: () => Promise<T> | T, meta?: Omit<MarrowActionMeta, 'action' | 'chokePoint' | 'actionClass' | 'external' | 'meaningful'>): Promise<T>;
     wrapDeploy<T>(action: string, fn: () => Promise<T> | T, meta?: Omit<MarrowActionMeta, 'action' | 'chokePoint' | 'actionClass' | 'external' | 'meaningful'>): Promise<T>;
     wrapExternalWrite<T>(action: string, fn: () => Promise<T> | T, meta?: Omit<MarrowActionMeta, 'action' | 'chokePoint' | 'actionClass' | 'external' | 'meaningful'>): Promise<T>;

@@ -23,7 +23,43 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v3.1.5
+## What's New in v3.2.0
+
+## Passive Mode (v3.2.0)
+
+Match the MCP's PostToolUse-hook passive mode for SDK users. Three patterns, pick what fits your runtime:
+
+### Per-function: wrap(meta, fn) — existing
+
+```typescript
+await marrow.wrap(
+  { action: 'deploy release', type: 'process', external: true },
+  () => deploy()
+);
+```
+
+### Per-object: autoWrap(client) — NEW in v3.2.0
+
+```typescript
+const wrappedAgent = marrow.autoWrap(myAgent, {
+  actionPrefix: 'claims-agent: ',
+  exclude: ['getConfig', 'toJSON'],
+  type: 'process',
+});
+
+await wrappedAgent.deploy();
+```
+
+### Per-fetch: wrapFetch(fetch) — NEW in v3.2.0
+
+```typescript
+const wrappedFetch = marrow.wrapFetch(fetch);
+await wrappedFetch('https://api.example.com/deploy?token=secret', {
+  method: 'POST',
+});
+```
+
+Pairs with `@getmarrow/mcp@3.2.0` PostToolUse hooks. MCP users get passive via hooks, SDK users get it via `autoWrap`. See `PASSIVE-MODE.md` in the marketing docs for the full pitch story.
 
 **Operator visibility + auto-intelligence — agents get smarter, operators can finally see it.**
 
@@ -62,7 +98,7 @@ await marrow.acceptDetectedWorkflow(detectedId);
 - `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
 - `intelligence.team_context` — recent decisions from other sessions in the same account
 
-### Since v3.1.0 (cumulative through v3.1.5)
+### Since v3.1.0 (cumulative through v3.2.0)
 
 **v3.1.1** — Published fixes + README consolidation
 
@@ -72,7 +108,9 @@ await marrow.acceptDetectedWorkflow(detectedId);
 
 **v3.1.4** — Template marketplace methods: `listTemplates(filters?)`, `getTemplate(slug)`, `installTemplate(slug)`. Browse and install pre-built workflow templates for your industry (insurance, healthcare, ecommerce, legal, saas, fintech, media, enterprise — 24 templates total).
 
-**v3.1.5** — README / docs sync (this release).
+**v3.1.5** — README / docs sync.
+
+**v3.2.0** — Passive Mode for SDK: `autoWrap()` and `wrapFetch()` helpers for auto-logging without per-call `wrap()` boilerplate. Match `@getmarrow/mcp@3.2.0`'s PostToolUse hook approach.
 
 Example:
 ```typescript

@@ -98,27 +98,6 @@ await marrow.acceptDetectedWorkflow(detectedId);
 - `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
 - `intelligence.team_context` — recent decisions from other sessions in the same account
 
-### Since v3.1.0 (cumulative through v3.2.0)
-
-**v3.1.1** — Published fixes + README consolidation
-
-**v3.1.2** — Agent identity: new `agentId` option on MarrowClient constructor. Adds X-Marrow-Agent-Id header to all requests so decisions tag your specific agent for fleet dashboards.
-
-**v3.1.3** — Fixed decisionId/commit flow — SDK now correctly unwraps API `{data: ...}` envelope across all methods.
-
-**v3.1.4** — Template marketplace methods: `listTemplates(filters?)`, `getTemplate(slug)`, `installTemplate(slug)`. Browse and install pre-built workflow templates for your industry (insurance, healthcare, ecommerce, legal, saas, fintech, media, enterprise — 24 templates total).
-
-**v3.1.5** — README / docs sync.
-
-**v3.2.0** — Passive Mode for SDK: `autoWrap()` and `wrapFetch()` helpers for auto-logging without per-call `wrap()` boilerplate. Match `@getmarrow/mcp@3.2.0`'s PostToolUse hook approach.
-
-Example:
-```typescript
-const marrow = new MarrowClient(apiKey, { agentId: 'claims-triage-01' });
-const templates = await marrow.listTemplates({ industry: 'insurance' });
-const wf = await marrow.installTemplate('claims-triage');
-```
-
 ---
 
 ## Active Intelligence — Marrow Intervenes Before Mistakes

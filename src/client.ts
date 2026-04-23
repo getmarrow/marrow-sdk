@@ -578,14 +578,22 @@ export class MarrowClient {
             ? options.deriveAction(methodName, args)
             : `${methodName}(${summarizeArgs(args, 80)})`;
           const action = `${options.actionPrefix || ''}${derivedAction}`;
+          const type = options.type || 'general';
+          const callOriginal = () => Reflect.apply(value, proxyTarget, args);
 
-          return this.wrap(
-            {
-              action,
-              type: options.type || 'general',
-            },
-            () => Reflect.apply(value, receiver, args)
-          );
+          const result = callOriginal();
+          if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+            return this.wrap(
+              {
+                action,
+                type,
+              },
+              () => result
+            );
+          }
+
+          this.run(action, () => result, { type }).catch(() => undefined);
+          return result;
         };
 
         wrappedCache.set(prop, wrapped);

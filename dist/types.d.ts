@@ -274,6 +274,34 @@ export interface Velocity {
     /** Percentage 0-100. Lower = more pattern reuse, less rediscovery. */
     drift_rate: VelocityMetric;
 }
+export interface ImprovementMetricDelta {
+    baseline: number;
+    current: number;
+    /** percentage change from baseline to current */
+    delta_pct: number;
+}
+export interface ImprovementActive {
+    status: 'active';
+    days_since_baseline: number;
+    decisions_since_baseline: number;
+    baseline_captured_at: string;
+    trigger_reason: 'time_7d' | 'volume_20';
+    attempts_per_success: ImprovementMetricDelta;
+    time_to_success_seconds: ImprovementMetricDelta;
+    /** drift_rate baseline/current are percentage 0-100 */
+    drift_rate: ImprovementMetricDelta;
+    /** success_rate baseline/current are 0-1 (fraction, not percent) */
+    success_rate: ImprovementMetricDelta;
+}
+export interface ImprovementOnboarding {
+    status: 'onboarding';
+    days_elapsed: number;
+    decisions_elapsed: number;
+    days_until_time_trigger: number;
+    decisions_until_volume_trigger: number;
+    reason: string;
+}
+export type Improvement = ImprovementActive | ImprovementOnboarding;
 export interface MarrowDashboardResult {
     account: {
         agent_count: number;
@@ -313,6 +341,7 @@ export interface MarrowDashboardResult {
         failures_prevented_details: Array<unknown>;
     };
     velocity: Velocity;
+    improvement: Improvement;
     recent_decisions: {
         today: number;
         this_week: number;
@@ -338,6 +367,7 @@ export interface MarrowDigestResult {
         details: unknown[];
     };
     velocity: Velocity;
+    improvement: Improvement;
     top_improvements: string[];
     top_risks: string[];
     workflows_completed: number;

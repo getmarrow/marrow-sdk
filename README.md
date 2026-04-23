@@ -45,6 +45,88 @@ All metrics are computed from real decision data — no estimates, no heuristics
 
 ---
 
+## Passive Mode
+
+Three patterns for auto-logging agent decisions — pick what fits your runtime.
+
+### Per-function: wrap(meta, fn)
+
+```typescript
+await marrow.wrap(
+  { action: 'deploy release', type: 'process', external: true },
+  () => deploy()
+);
+```
+
+### Per-object: autoWrap(client)
+
+```typescript
+const wrappedAgent = marrow.autoWrap(myAgent, {
+  actionPrefix: 'claims-agent: ',
+  exclude: ['getConfig', 'toJSON'],
+  type: 'process',
+});
+
+await wrappedAgent.deploy();
+```
+
+### Per-fetch: wrapFetch(fetch)
+
+```typescript
+const wrappedFetch = marrow.wrapFetch(fetch);
+await wrappedFetch('https://api.example.com/deploy?token=secret', {
+  method: 'POST',
+});
+```
+
+Pairs with `@getmarrow/mcp@3.2.0` PostToolUse hooks. MCP users get passive via hooks, SDK users get it via `autoWrap`. See `PASSIVE-MODE.md` in the marketing docs for the full pitch story.
+
+---
+
+## Operator Dashboard
+
+One call returns everything an operator needs to see — account health, top failures, workflow status, recent activity, and Marrow's impact.
+
+```typescript
+const dash = await marrow.dashboard();
+// dash.health.overall_score, dash.top_failures, dash.impact.saves_this_week, ...
+```
+
+## Weekly Digest
+
+Periodic summary with success rate trend vs previous period.
+
+```typescript
+const digest = await marrow.digest('7d');
+// digest.summary, digest.success_rate.direction, digest.saves.count, ...
+```
+
+## Session Management
+
+### Explicit Session End
+
+Gracefully close a session and optionally auto-commit any open decision — prevents orphaned decisions.
+
+```typescript
+await marrow.endSession(true); // true = auto-commit any open decision
+```
+
+## Auto-Workflow Detection
+
+When Marrow detects a recurring decision sequence (5+ occurrences), it surfaces it in `orient()` as a suggestion. Accept it to convert the pattern into an enforced workflow.
+
+```typescript
+await marrow.acceptDetectedWorkflow(detectedId);
+```
+
+## Intelligence Fields in think() Response
+
+- `onboarding_hint` — contextual tip for new accounts (first 50 decisions)
+- `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
+- `intelligence.team_context` — recent decisions from other sessions in the same account
+
+---
+
 ## Available Templates
 
 24 pre-built workflow templates across 8 industries. Browse via `listTemplates()` and install with `installTemplate(slug)`.

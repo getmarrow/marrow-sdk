@@ -308,6 +308,7 @@ export interface VelocityMetric {
 export interface Velocity {
   attempts_per_success: VelocityMetric;
   time_to_success_seconds: VelocityMetric;
+  /** Percentage 0-100. Lower = more pattern reuse, less rediscovery. */
   drift_rate: VelocityMetric;
 }
 

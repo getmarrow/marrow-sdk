@@ -23,25 +23,24 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v3.3.0
+## What's New in v3.4.0
 
-### Velocity Metrics
+### Improvement Since Onboarding
 
-Dashboard and digest now include three measured velocity metrics so operators can see how agents get better over time:
-
-- `attempts_per_success` — average number of decisions an agent makes before landing a success
-- `time_to_success_seconds` — median seconds from `think()` to successful `commit()`
-- `drift_rate` — % of decisions that didn't link to a known pattern (lower = more reuse, less rediscovery)
-
-Each metric reports `{current, previous, delta_pct, direction}` so trends are visible at a glance.
+Every dashboard and digest call now returns an `improvement` block comparing your agents' current performance against their day-1 baseline, captured automatically when an account reaches 7 days of activity or 20 decisions, whichever comes first.
 
 ```typescript
 const dash = await marrow.dashboard();
-console.log(dash.velocity.attempts_per_success.direction);  // 'improving'
-console.log(dash.velocity.time_to_success_seconds.current); // 47
+if (dash.improvement.status === 'active') {
+  console.log(`Agents are ${Math.abs(dash.improvement.time_to_success_seconds.delta_pct)}% ${
+    dash.improvement.time_to_success_seconds.delta_pct < 0 ? 'faster' : 'slower'
+  } since onboarding (${dash.improvement.days_since_baseline} days ago).`);
+}
 ```
 
-All metrics are computed from real decision data — no estimates, no heuristics. Token-usage savings are on the enterprise roadmap.
+Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_rate`, `success_rate`, each with `baseline`, `current`, and `delta_pct`.
+
+**No heuristics, no estimates.** The baseline is a frozen snapshot of your agents' own first week. Everything is computed from real decision data. Token-usage savings estimates remain on the enterprise roadmap.
 
 ---
 
@@ -126,6 +125,24 @@ await marrow.acceptDetectedWorkflow(detectedId);
 - `intelligence.team_context` — recent decisions from other sessions in the same account
 
 ---
+
+## Velocity Metrics
+
+Dashboard and digest now include three measured velocity metrics so operators can see how agents get better over time:
+
+- `attempts_per_success` — average number of decisions an agent makes before landing a success
+- `time_to_success_seconds` — median seconds from `think()` to successful `commit()`
+- `drift_rate` — % of decisions that didn't link to a known pattern (lower = more reuse, less rediscovery)
+
+Each metric reports `{current, previous, delta_pct, direction}` so trends are visible at a glance.
+
+```typescript
+const dash = await marrow.dashboard();
+console.log(dash.velocity.attempts_per_success.direction);  // 'improving'
+console.log(dash.velocity.time_to_success_seconds.current); // 47
+```
+
+All metrics are computed from real decision data, no estimates, no heuristics. Token-usage savings are on the enterprise roadmap.
 
 ## Available Templates
 

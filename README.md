@@ -25,7 +25,7 @@ That's fine for a toy. It's a problem for anything real.
 
 ## What's New in v3.2.0
 
-## Passive Mode (v3.2.0)
+### Passive Mode (v3.2.0)
 
 Match the MCP's PostToolUse-hook passive mode for SDK users. Three patterns, pick what fits your runtime:
 

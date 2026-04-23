@@ -23,80 +23,25 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v3.2.0
+## What's New in v3.3.0
 
-### Passive Mode (v3.2.0)
+### Velocity Metrics
 
-Match the MCP's PostToolUse-hook passive mode for SDK users. Three patterns, pick what fits your runtime:
+Dashboard and digest now include three measured velocity metrics so operators can see how agents get better over time:
 
-### Per-function: wrap(meta, fn) — existing
+- `attempts_per_success` — average number of decisions an agent makes before landing a success
+- `time_to_success_seconds` — median seconds from `think()` to successful `commit()`
+- `drift_rate` — % of decisions that didn't link to a known pattern (lower = more reuse, less rediscovery)
 
-```typescript
-await marrow.wrap(
-  { action: 'deploy release', type: 'process', external: true },
-  () => deploy()
-);
-```
-
-### Per-object: autoWrap(client) — NEW in v3.2.0
-
-```typescript
-const wrappedAgent = marrow.autoWrap(myAgent, {
-  actionPrefix: 'claims-agent: ',
-  exclude: ['getConfig', 'toJSON'],
-  type: 'process',
-});
-
-await wrappedAgent.deploy();
-```
-
-### Per-fetch: wrapFetch(fetch) — NEW in v3.2.0
-
-```typescript
-const wrappedFetch = marrow.wrapFetch(fetch);
-await wrappedFetch('https://api.example.com/deploy?token=secret', {
-  method: 'POST',
-});
-```
-
-Pairs with `@getmarrow/mcp@3.2.0` PostToolUse hooks. MCP users get passive via hooks, SDK users get it via `autoWrap`. See `PASSIVE-MODE.md` in the marketing docs for the full pitch story.
-
-**Operator visibility + auto-intelligence — agents get smarter, operators can finally see it.**
-
-### Operator Dashboard
-One call returns everything an operator needs to see — account health, top failures, workflow status, recent activity, and Marrow's impact.
+Each metric reports `{current, previous, delta_pct, direction}` so trends are visible at a glance.
 
 ```typescript
 const dash = await marrow.dashboard();
-// dash.health.overall_score, dash.top_failures, dash.impact.saves_this_week, ...
+console.log(dash.velocity.attempts_per_success.direction);  // 'improving'
+console.log(dash.velocity.time_to_success_seconds.current); // 47
 ```
 
-### Weekly Digest
-Periodic summary with success rate trend vs previous period.
-
-```typescript
-const digest = await marrow.digest('7d');
-// digest.summary, digest.success_rate.direction, digest.saves.count, ...
-```
-
-### Explicit Session End
-Gracefully close a session and optionally auto-commit any open decision — prevents orphaned decisions.
-
-```typescript
-await marrow.endSession(true); // true = auto-commit any open decision
-```
-
-### Auto-Workflow Detection
-When Marrow detects a recurring decision sequence (5+ occurrences), it surfaces it in `orient()` as a suggestion. Accept it to convert the pattern into an enforced workflow.
-
-```typescript
-await marrow.acceptDetectedWorkflow(detectedId);
-```
-
-### New Fields in `think()` Response
-- `onboarding_hint` — contextual tip for new accounts (first 50 decisions)
-- `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
-- `intelligence.team_context` — recent decisions from other sessions in the same account
+All metrics are computed from real decision data — no estimates, no heuristics. Token-usage savings are on the enterprise roadmap.
 
 ---
 

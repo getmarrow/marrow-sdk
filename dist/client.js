@@ -719,6 +719,7 @@ class MarrowClient {
             committed: data.committed,
             successRate: data.success_rate,
             insight: data.insight,
+            narrative: data.narrative ?? null,
             acceptedAs: 'outcome',
             recommendedNext: loop.recommendedNext,
             loop,

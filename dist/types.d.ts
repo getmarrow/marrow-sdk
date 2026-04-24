@@ -3,6 +3,12 @@
  */
 export type MarrowDecisionType = 'implementation' | 'security' | 'architecture' | 'process' | 'general';
 export type MarrowEnforcementMode = 'off' | 'warn' | 'require' | 'auto';
+/**
+ * Human-readable milestone narrative, returned on commit when a trigger fires
+ * (first commit, baseline capture, milestone at 100/500/1000/5000, weekly recap).
+ * Null when no trigger matches this commit.
+ */
+export type Narrative = string | null;
 export type MarrowLoopRecommendation = 'orient' | 'think' | 'act' | 'commit' | 'done';
 export type MarrowBlockReasonCode = 'missing_intent_for_external_action' | 'missing_outcome_for_completion' | 'loop_closed' | 'no_meaningful_action';
 export type MarrowActionClass = 'read_only' | 'low_risk_internal' | 'state_changing_internal' | 'external_irreversible';
@@ -203,6 +209,7 @@ export interface MarrowCommitResult {
     committed: boolean;
     successRate: number;
     insight: string | null;
+    narrative: Narrative;
     acceptedAs: 'outcome';
     recommendedNext: MarrowLoopRecommendation;
     loop: MarrowCheckResult;

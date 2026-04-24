@@ -13,6 +13,7 @@ export type {
   // Core Types
   MarrowDecisionType,
   MarrowEnforcementMode,
+  Narrative,
   MarrowLoopRecommendation,
   MarrowBlockReasonCode,
   MarrowActionClass,

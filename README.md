@@ -23,9 +23,7 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
-## What's New in v3.4.0
-
-### Improvement Since Onboarding
+## Improvement Since Onboarding
 
 Every dashboard and digest call now returns an `improvement` block comparing your agents' current performance against their day-1 baseline, captured automatically when an account reaches 7 days of activity or 20 decisions, whichever comes first.
 
@@ -41,6 +39,23 @@ if (dash.improvement.status === 'active') {
 Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_rate`, `success_rate`, each with `baseline`, `current`, and `delta_pct`.
 
 **No heuristics, no estimates.** The baseline is a frozen snapshot of your agents' own first week. Everything is computed from real decision data. Token-usage savings estimates remain on the enterprise roadmap.
+
+---
+
+## What's New in v3.5.0
+
+### Agent-Narrated Milestones
+
+`commit()` now returns a `narrative` field alongside `committed`/`success_rate`/`insight`. When a milestone fires (first commit, baseline capture, decision #100/500/1000/5000, or a meaningful weekly recap), the backend returns a human-readable string the agent can relay to the user. Otherwise returns null.
+
+Example:
+
+```typescript
+const result = await marrow.commit({ success: true, outcome: 'Deploy succeeded' });
+if (result.narrative) { console.log('Marrow:', result.narrative); }
+```
+
+Narratives are pure aggregated metrics, no user data, no decision content. No heuristics.
 
 ---
 

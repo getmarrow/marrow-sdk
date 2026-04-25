@@ -9,6 +9,30 @@ export type MarrowEnforcementMode = 'off' | 'warn' | 'require' | 'auto';
  * Null when no trigger matches this commit.
  */
 export type Narrative = string | null;
+/**
+ * V6.7: what Marrow contributed for a think() call. Agent narrates if has_signal=true.
+ * Backed by counts + booleans only — no PII, no decision content.
+ */
+export interface ThinkContribution {
+    warnings_consulted: number;
+    hive_patterns_surfaced: number;
+    similar_decisions_found: number;
+    workflow_templates_available: number;
+    loop_detected: boolean;
+    collective_intelligence: boolean;
+    team_context_present: boolean;
+    has_signal: boolean;
+}
+/**
+ * V6.7: what Marrow contributed for a commit() call. Agent narrates if has_signal=true.
+ */
+export interface CommitContribution {
+    success: boolean;
+    pattern_reused: boolean;
+    linked_to_prior_decision: boolean;
+    warning_avoided: boolean;
+    has_signal: boolean;
+}
 export type MarrowLoopRecommendation = 'orient' | 'think' | 'act' | 'commit' | 'done';
 export type MarrowBlockReasonCode = 'missing_intent_for_external_action' | 'missing_outcome_for_completion' | 'loop_closed' | 'no_meaningful_action';
 export type MarrowActionClass = 'read_only' | 'low_risk_internal' | 'state_changing_internal' | 'external_irreversible';
@@ -183,6 +207,7 @@ export interface MarrowThinkResult {
         tier: string;
         url: string;
     };
+    marrow_contributed?: ThinkContribution;
     acceptedAs: 'intent';
     warnings: string[];
     loopWarnings?: Array<{
@@ -210,6 +235,7 @@ export interface MarrowCommitResult {
     successRate: number;
     insight: string | null;
     narrative: Narrative;
+    marrow_contributed?: CommitContribution;
     acceptedAs: 'outcome';
     recommendedNext: MarrowLoopRecommendation;
     loop: MarrowCheckResult;

@@ -42,11 +42,33 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.5.0
+## What's New in v3.6.0
 
-### Agent-Narrated Milestones
+### Agent-Narrated Marrow Contribution
 
-`commit()` now returns a `narrative` field alongside `committed`/`success_rate`/`insight`. When a milestone fires (first commit, baseline capture, decision #100/500/1000/5000, or a meaningful weekly recap), the backend returns a human-readable string the agent can relay to the user. Otherwise returns null.
+Marrow now tells the agent exactly what it contributed to each decision, so the agent can surface that contribution to the user in plain English — no dashboard required.
+
+- `think()` returns `marrow_contributed` describing intelligence Marrow surfaced (warnings consulted, hive patterns, similar decisions, workflow templates, loop detection, collective insight).
+- `commit()` returns `marrow_contributed` with concrete signals (pattern reused, warning avoided, workflow step).
+- `endSession()` returns `session_summary` aggregating Marrow's contribution across the session, with a one-line `narrative` for the agent to surface.
+
+Each object has `has_signal: boolean` — agent narrates when true, stays quiet when false. The MCP `marrow-always-on` system prompt instructs agents on tone and timing.
+
+```typescript
+const result = await marrow.think({ action: 'deploy auth refactor', type: 'implementation' });
+if (result.marrow_contributed?.has_signal) {
+  // Agent can mention: "Pulling 12 similar patterns from the hive..."
+  // Or: "Marrow flagged this approach failed 4× last week..."
+}
+```
+
+Counts and booleans only — no decision content, no PII echoed back.
+
+---
+
+## Agent-Narrated Milestones (v3.5.0)
+
+`commit()` returns a `narrative` field. When a milestone fires (first commit, baseline capture, decision #100/500/1000/5000, or a meaningful weekly recap), the backend returns a human-readable string the agent can relay to the user. Otherwise returns null.
 
 Example:
 

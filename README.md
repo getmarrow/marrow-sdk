@@ -66,7 +66,7 @@ Counts and booleans only — no decision content, no PII echoed back.
 
 ---
 
-## Agent-Narrated Milestones (v3.5.0)
+## Agent-Narrated Milestones
 
 `commit()` returns a `narrative` field. When a milestone fires (first commit, baseline capture, decision #100/500/1000/5000, or a meaningful weekly recap), the backend returns a human-readable string the agent can relay to the user. Otherwise returns null.
 

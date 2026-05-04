@@ -220,7 +220,7 @@ All metrics are computed from real decision data, no estimates, no heuristics. T
 - **Media (1):** `content-publish`
 - **Enterprise (1):** `change-management`
 
-Full catalog with descriptions and step-by-step details: [getmarrow.ai/docs#template-marketplace](https://getmarrow.ai/docs/#template-marketplace)
+Full catalog with descriptions: [https://getmarrow.ai/docs/#template-marketplace](https://getmarrow.ai/docs/#template-marketplace)
 
 ```typescript
 const templates = await marrow.listTemplates({ industry: 'insurance' });
@@ -425,8 +425,7 @@ Zero-ceremony wrapper. Handles orient → think → commit automatically.
 #### `wrap(meta, fn)`
 Wrap any action to auto-log intent and outcome.
 
-**📖 Full API reference with request/response examples:**
-**[getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)**
+**📖 Full API reference with request/response examples:** [https://getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)
 
 ### Memory Methods
 
@@ -460,8 +459,7 @@ Import memories with merge (dedup) or replace mode.
 #### `retrieveMemories(query, params?)`
 Full-text search with filters.
 
-**📖 All memory, query, and operator endpoints:**
-**[getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)**
+**📖 All memory, query, and operator endpoints:** [https://getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)
 
 ---
 

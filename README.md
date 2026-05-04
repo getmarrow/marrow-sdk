@@ -5,7 +5,7 @@
 ![npm](https://img.shields.io/npm/v/@getmarrow/sdk)
 ![npm](https://img.shields.io/npm/dw/@getmarrow/sdk)
 ![npm bundle size](https://img.shields.io/bundlephobia/minzip/@getmarrow/sdk)
-![GitHub](https://img.shields.io/github/license/MajinBuu0x9/marrow-sdk)
+![GitHub](https://img.shields.io/github/license/getmarrow/marrow-sdk)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3%2B-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 

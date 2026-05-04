@@ -80,6 +80,26 @@ const dashboard = await marrow.dashboard();
 // { health, top_failures, workflows, saves, velocity, improvement }
 ```
 
+## Full Feature Marketplace
+
+| Category | Features |
+|----------|----------|
+| 🔁 **Decision Loop** | orient → think → commit with auto-logging |
+| 🔐 **Multi-API-Keys** | Create, list, rotate, revoke scoped keys for fleets |
+| 🧠 **Persistent Memory** | List, search, update, share, export, import (14 tools) |
+| 📊 **Operator Dashboard** | Health, top failures, workflow status, velocity metrics |
+| 📈 **Velocity Tracking** | Attempts/success, time-to-success, drift rate, improvement delta |
+| 🌐 **Collective Intelligence** | Cross-account anonymous patterns, plain-English query |
+| 🔄 **Enforced Workflows** | 24 templates across 8 industries, step-by-step with audit |
+| ⚡ **Passive Mode** | autoWrap + wrapFetch — zero code auto-logging |
+| 🛡️ **PII Protection** | Auto-strip emails, phones, keys from all responses |
+| 🗄️ **Fleet Operations** | Agent registry, multi-user orgs, RBAC, SSE streaming |
+| 📋 **Session Management** | Open/close with summaries, pattern reuse tracking |
+| 🔗 **Causal Graphs** | Decision chaining — "What happened after this deploy?" |
+| 📬 **Auto-Email** | First-decision welcome, 7-day recap, milestone notifications |
+| 🔒 **Rate Limiting** | Per-endpoint, per-key, per-IP with tiered limits |
+| 📜 **Audit Trail** | Immutable key operation logs with IP and timestamp |
+
 ## Full Documentation
 
 📖 **Complete API reference, metrics, features, and examples:**

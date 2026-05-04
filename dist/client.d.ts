@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -111,6 +111,12 @@ export declare class MarrowClient {
     }>;
     ask(query: string): Promise<MarrowAskResult>;
     quickStatus(): Promise<MarrowQuickStatusResult>;
+    createApiKey(params: CreateApiKeyParams): Promise<CreateApiKeyResult>;
+    listApiKeys(): Promise<ListApiKeysResult>;
+    getApiKey(id: string): Promise<MarrowApiKey | null>;
+    revokeApiKey(id: string): Promise<RevokeApiKeyResult>;
+    rotateApiKey(id: string): Promise<RotateApiKeyResult>;
+    getKeyAudit(params?: GetKeyAuditParams): Promise<GetKeyAuditResult>;
     listMemories(params?: {
         status?: MemoryStatus;
         query?: string;
@@ -206,6 +212,7 @@ export declare class MarrowClient {
         workflow_id: string;
         version: number;
     }>;
+    private mapApiKey;
     private request;
 }
 //# sourceMappingURL=client.d.ts.map

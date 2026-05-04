@@ -23,6 +23,17 @@ import type {
   MemoryExportOptions,
   MemoryImportOptions,
   MemoryRetrieveOptions,
+  ApiKeyType,
+  ApiKeyScope,
+  CreateApiKeyParams,
+  MarrowApiKey,
+  CreateApiKeyResult,
+  ListApiKeysResult,
+  RevokeApiKeyResult,
+  RotateApiKeyResult,
+  ApiKeyAuditEntry,
+  GetKeyAuditParams,
+  GetKeyAuditResult,
   ActionableInsight,
   MarrowBlockReasonCode,
   MarrowDashboardResult,
@@ -143,6 +154,21 @@ function validateBaseUrl(rawUrl: string): string {
   } catch (err) {
     if (err instanceof Error && err.message.includes('baseUrl')) throw err;
     throw new Error(`baseUrl is not a valid URL: ${rawUrl}`);
+  }
+}
+
+function mapTierKeyLimit(tier: string | undefined): number {
+  switch (tier) {
+    case 'free':
+      return 2;
+    case 'pro':
+      return 10;
+    case 'enterprise':
+      return 50;
+    case 'owner':
+      return Number.MAX_SAFE_INTEGER;
+    default:
+      return Number.MAX_SAFE_INTEGER;
   }
 }
 
@@ -1160,6 +1186,98 @@ export class MarrowClient {
 
   // Memory Control Methods
 
+  async createApiKey(params: CreateApiKeyParams): Promise<CreateApiKeyResult> {
+    const res = await this.request('POST', '/v1/auth/keys', params);
+    const created = res.data ?? res;
+    const createdId = validatePathParam(String(created.key_id || created.id || ''), 'key_id');
+    const plaintextKey = String(created.key || '');
+    const metadata = await this.getApiKey(createdId);
+
+    return {
+      id: createdId,
+      name: metadata?.name ?? params.name ?? null,
+      key: plaintextKey,
+      key_type: metadata?.key_type ?? params.key_type ?? 'live',
+      scopes: metadata?.scopes ?? params.scopes ?? ['full'],
+      created_at: metadata?.created_at ?? nowIso(),
+      expires_at: metadata?.expires_at ?? params.expires_at ?? null,
+      agent_ids: metadata?.agent_ids ?? params.agent_ids ?? [],
+    };
+  }
+
+  async listApiKeys(): Promise<ListApiKeysResult> {
+    const [keysRes, accountRes] = await Promise.all([
+      this.request('GET', '/v1/auth/keys'),
+      this.request('GET', '/v1/auth/account'),
+    ]);
+
+    const rawKeys = (keysRes.data?.keys || keysRes.keys || []) as Array<Record<string, unknown>>;
+    const keys = rawKeys.map((key) => this.mapApiKey(key));
+    const tier = String(accountRes.data?.tier || accountRes.tier || 'owner');
+
+    return {
+      keys,
+      total: keys.length,
+      tier_limit: mapTierKeyLimit(tier),
+    };
+  }
+
+  async getApiKey(id: string): Promise<MarrowApiKey | null> {
+    const safeId = validatePathParam(id, 'id');
+    const res = await this.request('GET', `/v1/auth/keys/${safeId}`);
+    const raw = res.data?.key || res.key;
+    return raw ? this.mapApiKey(raw as Record<string, unknown>) : null;
+  }
+
+  async revokeApiKey(id: string): Promise<RevokeApiKeyResult> {
+    const safeId = validatePathParam(id, 'id');
+    await this.request('POST', `/v1/auth/keys/${safeId}/revoke`);
+    return { revoked: safeId, status: 'revoked' };
+  }
+
+  async rotateApiKey(id: string): Promise<RotateApiKeyResult> {
+    const safeId = validatePathParam(id, 'id');
+    const res = await this.request('POST', `/v1/auth/keys/${safeId}/rotate`);
+    const rotated = res.data ?? res;
+    const createdId = validatePathParam(String(rotated.key_id || rotated.id || ''), 'key_id');
+    const plaintextKey = String(rotated.key || '');
+    const metadata = await this.getApiKey(createdId);
+
+    return {
+      id: createdId,
+      key: plaintextKey,
+      name: metadata?.name ?? null,
+      key_type: metadata?.key_type ?? 'live',
+      scopes: metadata?.scopes ?? ['full'],
+      revoked: safeId,
+    };
+  }
+
+  async getKeyAudit(params: GetKeyAuditParams = {}): Promise<GetKeyAuditResult> {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set('limit', String(params.limit));
+
+    const res = await this.request('GET', `/v1/auth/keys/audit${qs.toString() ? `?${qs.toString()}` : ''}`);
+    const rawEntries = (res.data?.entries || res.entries || []) as Array<Record<string, unknown>>;
+    const before = params.before ? new Date(params.before).toISOString() : null;
+    const after = params.after ? new Date(params.after).toISOString() : null;
+
+    const entries = rawEntries
+      .map((entry) => ({
+        id: String(entry.id || ''),
+        event: String(entry.event || ''),
+        key_id: entry.key_id == null ? null : String(entry.key_id),
+        ip: entry.ip == null ? null : String(entry.ip),
+        created_at: String(entry.created_at || ''),
+      }) as ApiKeyAuditEntry)
+      .filter((entry) => !before || entry.created_at < before)
+      .filter((entry) => !after || entry.created_at > after);
+
+    return {
+      entries: params.limit ? entries.slice(0, params.limit) : entries,
+    };
+  }
+
   async listMemories(params?: {
     status?: MemoryStatus;
     query?: string;
@@ -1417,6 +1535,22 @@ export class MarrowClient {
       detected_id: safeId,
     });
     return (res.data || res) as { workflow_id: string; version: number };
+  }
+
+  private mapApiKey(raw: Record<string, unknown>): MarrowApiKey {
+    return {
+      id: String(raw.id || ''),
+      name: raw.name == null ? null : String(raw.name),
+      key: String(raw.masked_key || raw.key || ''),
+      key_type: (raw.key_type as ApiKeyType) || 'live',
+      scopes: Array.isArray(raw.scopes) ? (raw.scopes as ApiKeyScope[]) : ['full'],
+      status: String(raw.status || 'active'),
+      created_at: String(raw.created_at || ''),
+      last_used_at: raw.last_used_at == null ? null : String(raw.last_used_at),
+      usage_count: Number(raw.usage_count || 0),
+      expires_at: raw.expires_at == null ? null : String(raw.expires_at),
+      agent_ids: Array.isArray(raw.agent_ids) ? (raw.agent_ids as string[]) : [],
+    };
   }
 
   private async request(

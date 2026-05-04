@@ -62,6 +62,18 @@ export type MarrowChokePoint =
   | 'other';
 
 export type MemoryStatus = 'active' | 'outdated' | 'superseded' | 'deleted';
+export type ApiKeyType = 'live' | 'test';
+export type ApiKeyScope =
+  | 'full'
+  | 'decisions:read'
+  | 'decisions:write'
+  | 'patterns:read'
+  | 'memories:read'
+  | 'memories:write'
+  | 'memories:import'
+  | 'memories:export'
+  | 'agents:manage'
+  | 'webhooks:manage';
 
 export type MemoryAuditAction =
   | 'created'
@@ -330,6 +342,77 @@ export interface MemoryRetrieveOptions {
   source?: string;
   status?: MemoryStatus;
   shared?: boolean;
+}
+
+export interface CreateApiKeyParams {
+  name: string;
+  key_type?: ApiKeyType;
+  scopes?: ApiKeyScope[];
+  agent_ids?: string[];
+  expires_at?: string;
+}
+
+export interface MarrowApiKey {
+  id: string;
+  name: string | null;
+  key: string;
+  key_type: ApiKeyType;
+  scopes: ApiKeyScope[];
+  status: string;
+  created_at: string;
+  last_used_at?: string | null;
+  usage_count: number;
+  expires_at?: string | null;
+  agent_ids?: string[];
+}
+
+export interface CreateApiKeyResult {
+  id: string;
+  name: string | null;
+  key: string;
+  key_type: ApiKeyType;
+  scopes: ApiKeyScope[];
+  created_at: string;
+  expires_at?: string | null;
+  agent_ids?: string[];
+}
+
+export interface ListApiKeysResult {
+  keys: MarrowApiKey[];
+  total: number;
+  tier_limit: number;
+}
+
+export interface RevokeApiKeyResult {
+  revoked: string;
+  status: 'revoked';
+}
+
+export interface RotateApiKeyResult {
+  id: string;
+  key: string;
+  name: string | null;
+  key_type: ApiKeyType;
+  scopes: ApiKeyScope[];
+  revoked: string;
+}
+
+export interface ApiKeyAuditEntry {
+  id: string;
+  event: string;
+  key_id?: string | null;
+  ip?: string | null;
+  created_at: string;
+}
+
+export interface GetKeyAuditParams {
+  limit?: number;
+  before?: string;
+  after?: string;
+}
+
+export interface GetKeyAuditResult {
+  entries: ApiKeyAuditEntry[];
 }
 
 // ============= V4 Backend Parity (SDK v3.1) =============

@@ -42,9 +42,35 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.6.0
+## What's New in v3.7.0
 
-### Agent-Narrated Marrow Contribution
+### Multi-API-Key Management
+
+Manage API keys for your entire fleet of agents directly from your code:
+
+- `createApiKey()` — Create named, scoped API keys (`live`/`test`)
+- `listApiKeys()` — List all keys with masked display
+- `getApiKey()` — Get key details and usage stats
+- `revokeApiKey()` — Permanently revoke a key
+- `rotateApiKey()` — Atomically rotate (revoke + create new)
+- `getKeyAudit()` — Paginated audit log for key operations
+
+```typescript
+const key = await marrow.createApiKey({
+  name: 'Production Agent',
+  key_type: 'live',
+  scopes: ['decisions:write', 'memories:read']
+});
+// { id, key: 'mrw_live_...', name, scopes, ... }
+// ⚠️ Full key shown once — store it securely
+
+const keys = await marrow.listApiKeys();
+// [{ name, key: 'mrw_live_abc1...d4ef', key_type, status, ... }]
+```
+
+---
+
+### Previous: v3.6.0 — Agent-Narrated Marrow Contribution
 
 Marrow now tells the agent exactly what it contributed to each decision, so the agent can surface that contribution to the user in plain English — no dashboard required.
 

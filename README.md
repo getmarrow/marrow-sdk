@@ -42,7 +42,7 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.0
+## What's New in v3.7.5
 
 ### Multi-API-Key Management
 

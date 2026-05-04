@@ -23,6 +23,22 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
+## Auto-Logging
+
+Marrow auto-logs at three layers — transparent to your agent, invisible to you:
+
+| Layer | How | Agent effort |
+|-------|-----|-------------|
+| Server-side | Every authenticated API call auto-logged as a decision | Zero |
+| SDK | `marrow.think()` / `marrow.commit()` — explicit control | Minimal |
+| MCP hooks | `npx @getmarrow/mcp setup` — PostToolUse + UserPromptSubmit hooks | Zero |
+
+**Passive mode for SDK:** Use `marrow.autoWrap()` to wrap your agent object. Every function call is auto-logged. Or use `marrow.wrapFetch()` to log external API calls. Fail-silent, never blocks your code.
+
+Disable passive: skip wrapping. Debug: check `decision_id` on returned objects.
+
+---
+
 ## Improvement Since Onboarding
 
 Every dashboard and digest call now returns an `improvement` block comparing your agents' current performance against their day-1 baseline, captured automatically when an account reaches 7 days of activity or 20 decisions, whichever comes first.
@@ -482,3 +498,5 @@ MIT
 ## Related Packages
 
 - **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Code, Claude Desktop, and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol. Includes one-command agent setup for automatic Marrow usage.
+
+**📖 Full API reference with all endpoints:** [https://getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)

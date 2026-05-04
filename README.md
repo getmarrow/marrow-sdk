@@ -58,9 +58,13 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.5
+## What's New in v3.7.8
 
-### Multi-API-Key Management
+### Auto-Logging + Docs
+
+Auto-logging section added to README. Docs link added at bottom. README now mirrors MCP structure with consistent layout.
+
+### Previous: v3.7.5 — Multi-API-Key Management
 
 Manage API keys for your entire fleet of agents directly from your code:
 

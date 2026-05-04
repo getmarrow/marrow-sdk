@@ -45,7 +45,7 @@ await marrow.commit({ success: true, outcome: 'deployed successfully' });
 | `run()` | Zero-ceremony: orient → think → commit |
 | `auto()` | Fire-and-forget background logging |
 
-### 🆕 v3.7.1 — Multi-API-Key Management
+### 🆕 v3.7.3 — Multi-API-Key Management
 
 ```typescript
 const key = await marrow.createApiKey({ name: 'Prod Agent', key_type: 'live' });

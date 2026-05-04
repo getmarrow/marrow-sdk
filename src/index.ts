@@ -29,6 +29,17 @@ export type {
   MemoryExportOptions,
   MemoryImportOptions,
   MemoryRetrieveOptions,
+  ApiKeyType,
+  ApiKeyScope,
+  CreateApiKeyParams,
+  MarrowApiKey,
+  CreateApiKeyResult,
+  ListApiKeysResult,
+  RevokeApiKeyResult,
+  RotateApiKeyResult,
+  ApiKeyAuditEntry,
+  GetKeyAuditParams,
+  GetKeyAuditResult,
 
   // Loop Types
   MarrowLoopState,

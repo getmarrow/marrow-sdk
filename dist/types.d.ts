@@ -132,6 +132,40 @@ export interface MarrowAutoWrapOptions {
     type?: MarrowDecisionType;
     deriveAction?: (methodName: string, args: unknown[]) => string;
 }
+export type MarrowPassiveRuntimeSurface = 'fetch' | 'tool' | 'command' | 'deploy' | 'publish' | 'github' | 'cloudflare' | 'npm' | 'docs' | 'production' | 'workspace' | string;
+export interface MarrowPassiveRuntimeOptions {
+    mode?: MarrowEnforcementMode;
+    defaultType?: string;
+    defaultRole?: MarrowDecisionBriefRole | string;
+    defaultRiskPolicy?: MarrowGuardedRiskPolicy;
+    includeValueReport?: boolean;
+    valueReportPeriod?: string | number;
+    actionPrefix?: string;
+    fetch?: typeof fetch | false;
+    patchGlobalFetch?: boolean;
+}
+export interface MarrowPassiveActionOptions {
+    action?: string;
+    type?: string;
+    role?: MarrowDecisionBriefRole | string;
+    surfaces?: MarrowPassiveRuntimeSurface[];
+    context?: Record<string, unknown>;
+    riskPolicy?: MarrowGuardedRiskPolicy;
+    includeValueReport?: boolean;
+    valueReportPeriod?: string | number;
+}
+export interface MarrowPassiveRuntime {
+    readonly installed: boolean;
+    readonly fetch: typeof fetch;
+    install(): {
+        fetchPatched: boolean;
+    };
+    restore(): void;
+    tool<T>(name: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
+    command<T>(command: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
+    deploy<T>(action: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
+    publish<T>(action: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
+}
 export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'unknown';
 export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
 export interface MarrowGuardedRunOptions<T> {

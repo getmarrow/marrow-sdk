@@ -45,6 +45,9 @@ import type {
   MarrowFailureType,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowPassiveActionOptions,
+  MarrowPassiveRuntime,
+  MarrowPassiveRuntimeOptions,
   MarrowSessionEndResult,
   MarrowTemplateSummary,
   MarrowTemplateDetail,
@@ -164,6 +167,14 @@ function summarizeArgs(args: unknown[], max: number = 80): string {
   return truncate(args.map((arg) => summarizeArg(arg)).join(', '), max);
 }
 
+function summarizeCommand(command: string): string {
+  return truncate(redactSensitiveText(normalizeWhitespace(command)), 240);
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 function stripSensitiveUrl(input: string): string {
   const redactFallback = (value: string): string =>
     value.replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#]*/gi, '$1[redacted]');
@@ -188,6 +199,28 @@ function stripSensitiveUrl(input: string): string {
   } catch {
     return redactFallback(input);
   }
+}
+
+function inferSurfacesFromText(value: string): string[] {
+  const lower = value.toLowerCase();
+  const surfaces = new Set<string>();
+  if (/\b(git|github|gh|pull request|pr|commit|merge|push)\b/.test(lower)) surfaces.add('github');
+  if (/\b(cloudflare|worker|wrangler)\b/.test(lower)) surfaces.add('cloudflare');
+  if (/\b(npm|package|publish)\b/.test(lower)) surfaces.add('npm');
+  if (/\b(doc|docs|readme|getmarrow\.ai)\b/.test(lower)) surfaces.add('docs');
+  if (/\b(prod|production|deploy|release)\b/.test(lower)) surfaces.add('production');
+  if (/\b(secret|token|credential|key|permission)\b/.test(lower)) surfaces.add('secrets');
+  return surfaces.size > 0 ? Array.from(surfaces) : ['workspace'];
+}
+
+function inferTypeFromText(value: string): string {
+  const lower = value.toLowerCase();
+  if (/\b(deploy|release|cloudflare|worker|wrangler)\b/.test(lower)) return 'deploy';
+  if (/\b(publish|npm|package)\b/.test(lower)) return 'publish';
+  if (/\b(audit|security|secret|token|credential|permission|opsec)\b/.test(lower)) return 'security';
+  if (/\b(patch|fix|bug|harden|remediate)\b/.test(lower)) return 'implementation';
+  if (/\b(review|merge|pr|pull request)\b/.test(lower)) return 'process';
+  return 'general';
 }
 
 /**
@@ -680,6 +713,139 @@ export class MarrowClient {
         summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
       };
     }
+  }
+
+  /**
+   * Create a passive runtime shim for agents that own their process.
+   *
+   * MCP users usually get passive behavior from `npx @getmarrow/mcp setup`.
+   * SDK users can call this once and wrap common surfaces without manually
+   * stitching together decision briefs, think, commit, and value reporting.
+   */
+  createPassiveRuntime(options: MarrowPassiveRuntimeOptions = {}): MarrowPassiveRuntime {
+    const client = this;
+    client.enforce({ mode: options.mode || 'auto' });
+
+    const fetchFn = options.fetch === false
+      ? undefined
+      : options.fetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
+    let originalGlobalFetch: typeof fetch | null = null;
+    let installed = false;
+
+    const buildGuardOptions = <T>(
+      action: string,
+      execute: () => Promise<T> | T,
+      actionOptions: MarrowPassiveActionOptions = {}
+    ): MarrowGuardedRunOptions<T> => {
+      const prefixedAction = `${options.actionPrefix || ''}${action}`;
+      return {
+        action: prefixedAction,
+        execute,
+        type: actionOptions.type || options.defaultType || inferTypeFromText(prefixedAction),
+        role: actionOptions.role || options.defaultRole || 'general',
+        surfaces: actionOptions.surfaces || inferSurfacesFromText(prefixedAction),
+        context: {
+          ...(actionOptions.context || {}),
+          marrow_passive_runtime_layer: 'v2',
+        },
+        riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || 'warn',
+        includeValueReport: actionOptions.includeValueReport ?? options.includeValueReport ?? false,
+        valueReportPeriod: actionOptions.valueReportPeriod ?? options.valueReportPeriod ?? '7d',
+      };
+    };
+
+    const passiveFetch = fetchFn
+      ? client.wrapFetch(fetchFn.bind(globalThis))
+      : (async () => {
+          throw new Error('No fetch implementation available for Marrow passive runtime');
+        }) as typeof fetch;
+
+    const runtime: MarrowPassiveRuntime = {
+      get installed() {
+        return installed;
+      },
+
+      fetch: passiveFetch,
+
+      install(): { fetchPatched: boolean } {
+        if (
+          options.patchGlobalFetch !== false &&
+          fetchFn &&
+          typeof globalThis !== 'undefined' &&
+          typeof globalThis.fetch === 'function' &&
+          globalThis.fetch !== passiveFetch
+        ) {
+          originalGlobalFetch = globalThis.fetch;
+          globalThis.fetch = passiveFetch;
+          installed = true;
+          return { fetchPatched: true };
+        }
+
+        installed = true;
+        return { fetchPatched: false };
+      },
+
+      restore(): void {
+        if (originalGlobalFetch && typeof globalThis !== 'undefined') {
+          globalThis.fetch = originalGlobalFetch;
+        }
+        originalGlobalFetch = null;
+        installed = false;
+      },
+
+      tool<T>(
+        name: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        const action = actionOptions.action || `run tool: ${truncate(redactSensitiveText(name), 180)}`;
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(name),
+        }));
+      },
+
+      command<T>(
+        command: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        const redactedCommand = summarizeCommand(command);
+        const action = actionOptions.action || `run command: ${redactedCommand}`;
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(command),
+        }));
+      },
+
+      deploy<T>(
+        action: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          type: actionOptions.type || 'deploy',
+          role: actionOptions.role || 'deploy',
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(`deploy ${action}`),
+        }));
+      },
+
+      publish<T>(
+        action: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          type: actionOptions.type || 'publish',
+          role: actionOptions.role || 'deploy',
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(`publish ${action}`),
+        }));
+      },
+    };
+
+    return runtime;
   }
 
   async beforeAction(meta: MarrowActionMeta): Promise<MarrowCheckResult> {

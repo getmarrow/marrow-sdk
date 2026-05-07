@@ -58,7 +58,9 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.12
+## What's New in v3.7.13
+
+v3.7.13 is a README-only patch release for npmjs. It keeps the package page focused on the current install surface and sends full feature history, examples, and API reference to [getmarrow.ai/docs](https://getmarrow.ai/docs/).
 
 ### Decision Brief: One Pre-Action Call
 

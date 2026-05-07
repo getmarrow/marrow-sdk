@@ -30,10 +30,10 @@ Marrow auto-logs at three layers — transparent to your agent, invisible to you
 | Layer | How | Agent effort |
 |-------|-----|-------------|
 | Server-side | Every authenticated API call auto-logged as a decision | Zero |
-| SDK | `marrow.think()` / `marrow.commit()` — explicit control | Minimal |
+| SDK | `createPassiveRuntime()`, `runGuarded()`, `think()` / `commit()` | Minimal |
 | MCP hooks | `npx @getmarrow/mcp setup` — PostToolUse + UserPromptSubmit hooks | Zero |
 
-**Passive mode for SDK:** Use `marrow.autoWrap()` to wrap your agent object. Every function call is auto-logged. Or use `marrow.wrapFetch()` to log external API calls. Fail-silent, never blocks your code.
+**Passive mode for SDK:** Use `marrow.createPassiveRuntime()` once in the agent process. It can wrap global `fetch`, guard tools, commands, deploys, and publishes with the full Marrow loop. Use `autoWrap()` and `wrapFetch()` when you need lower-level control.
 
 Disable passive: skip wrapping. Debug: check `decision_id` on returned objects.
 
@@ -58,9 +58,32 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.14
+## What's New in v3.7.15
 
-v3.7.14 adds the Passive Runtime Layer v1 SDK surface: `runGuarded()`, deterministic failure classification, and `valueReport()`.
+v3.7.15 adds Passive Runtime Layer v2: `createPassiveRuntime()` for SDK agents that should benefit from Marrow after one install step.
+
+```typescript
+const runtime = marrow.createPassiveRuntime({
+  mode: 'auto',
+  defaultRiskPolicy: 'warn',
+  includeValueReport: false,
+});
+
+runtime.install(); // wraps global fetch when available
+
+await runtime.deploy('deploy Cloudflare Worker to production', async () => {
+  return deploy();
+}, {
+  surfaces: ['github', 'cloudflare', 'production']
+});
+
+await runtime.command('wrangler deploy', () => exec('wrangler deploy'));
+await runtime.tool('github.pr.merge', () => mergePr());
+```
+
+The runtime keeps secrets out of logs: URLs and command text are redacted/truncated, and Marrow never receives request bodies, headers, command output, or raw credentials from this shim.
+
+v3.7.14 added the Passive Runtime Layer v1 SDK surface: `runGuarded()`, deterministic failure classification, and `valueReport()`.
 
 ### Guarded Run: One Passive Workflow Call
 
@@ -138,7 +161,22 @@ Narratives are pure aggregated metrics, no user data, no decision content. No he
 
 ## Passive Mode
 
-Three patterns for auto-logging agent decisions — pick what fits your runtime.
+Four patterns for auto-logging agent decisions — pick what fits your runtime.
+
+### Process-level: createPassiveRuntime()
+
+```typescript
+const runtime = marrow.createPassiveRuntime();
+runtime.install();
+
+await runtime.tool('linear.issue.update', () => updateIssue());
+await runtime.command('npm publish', () => publishPackage(), {
+  role: 'deploy',
+  surfaces: ['npm', 'production']
+});
+```
+
+Use this when you own the agent process and want Marrow to sit behind common surfaces with minimal agent code. The runtime defaults the client to `mode: 'auto'` so wrapped fetch calls and actions log intent and outcomes automatically.
 
 ### Per-function: wrap(meta, fn)
 
@@ -170,7 +208,7 @@ await wrappedFetch('https://api.example.com/deploy?token=secret', {
 });
 ```
 
-Pairs with `@getmarrow/mcp@3.2.0` PostToolUse hooks. MCP users get passive via hooks, SDK users get it via `autoWrap`. See `PASSIVE-MODE.md` in the marketing docs for the full pitch story.
+Pairs with `@getmarrow/mcp` setup hooks. MCP users usually get passive behavior from hooks; SDK users get it from `createPassiveRuntime()`, `runGuarded()`, `autoWrap()`, and `wrapFetch()`.
 
 ---
 

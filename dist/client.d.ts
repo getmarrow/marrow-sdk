@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -205,6 +205,11 @@ export declare class MarrowClient {
      * @param agentId - optional agent_id/session_id filter. Defaults to this client's agentId.
      */
     agentStatus(period?: string, agentId?: string | null): Promise<MarrowAgentStatusResult>;
+    /**
+     * Get one pre-action operating brief: risk, workflow, handoff, quality checks,
+     * source-of-truth surfaces, proof-pack requirements, and next actions.
+     */
+    decisionBrief(input: MarrowDecisionBriefRequest): Promise<MarrowDecisionBriefResult>;
     /**
      * Explicitly end the current session. Optionally auto-commits any open decision.
      * @param autoCommitOpen - whether to auto-commit (default false)

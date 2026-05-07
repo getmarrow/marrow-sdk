@@ -38,6 +38,7 @@ import type {
   MarrowBlockReasonCode,
   MarrowDashboardResult,
   MarrowDigestResult,
+  MarrowAgentStatusResult,
   MarrowSessionEndResult,
   MarrowTemplateSummary,
   MarrowTemplateDetail,
@@ -1512,6 +1513,19 @@ export class MarrowClient {
     const days = parseInt(period) || 7;
     const res = await this.request('GET', `/v1/digest?period=${days}`);
     return (res.data || res) as MarrowDigestResult;
+  }
+
+  /**
+   * Get agent-native proof that Marrow is active and collecting useful signal.
+   * @param period - '7d' (default), '14d', or '30d'
+   * @param agentId - optional agent_id/session_id filter. Defaults to this client's agentId.
+   */
+  async agentStatus(period: string = '7d', agentId: string | null = this.agentId): Promise<MarrowAgentStatusResult> {
+    const days = parseInt(period) || 7;
+    const qs = new URLSearchParams({ period: String(days) });
+    if (agentId) qs.set('agent_id', agentId);
+    const res = await this.request('GET', `/v1/analytics/agent-status?${qs.toString()}`);
+    return (res.data || res) as MarrowAgentStatusResult;
   }
 
   /**

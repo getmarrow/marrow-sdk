@@ -57,6 +57,8 @@ export type {
   ActionableInsight,
   MarrowDashboardResult,
   MarrowDigestResult,
+  MarrowAgentStatusState,
+  MarrowAgentStatusResult,
   ImprovementMetricDelta,
   ImprovementActive,
   ImprovementOnboarding,

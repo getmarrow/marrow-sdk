@@ -58,9 +58,27 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.8
+## What's New in v3.7.11
 
-### Auto-Logging + Docs
+### Agent Status: Prove Marrow Is Working
+
+Agents can now call `agentStatus()` to verify Marrow is active without sending a user to a dashboard. It returns connection state, signal quality, non-sensitive proof, and next actions.
+
+```typescript
+const status = await marrow.agentStatus('7d');
+
+if (!status.active) {
+  console.log(status.next_actions[0]);
+}
+
+if (status.quality.enough_signal) {
+  console.log(status.summary);
+}
+```
+
+No raw action, context, or outcome text is returned. The response is aggregated proof only.
+
+### Previous: v3.7.8 — Auto-Logging + Docs
 
 Auto-logging section added to README. Docs link added at bottom. README now mirrors MCP structure with consistent layout.
 
@@ -182,6 +200,19 @@ Periodic summary with success rate trend vs previous period.
 const digest = await marrow.digest('7d');
 // digest.summary, digest.success_rate.direction, digest.saves.count, ...
 ```
+
+## Agent Status
+
+Machine-readable proof that Marrow is installed, active, and collecting enough signal for an agent or fleet.
+
+```typescript
+const status = await marrow.agentStatus('7d');
+// status.active, status.state, status.signals.outcome_coverage, status.next_actions
+
+const jarvis = await marrow.agentStatus('7d', 'jarvis-agent');
+```
+
+States: `inactive`, `warming_up`, `needs_outcomes`, `learning`, `proving_value`.
 
 ## Session Management
 

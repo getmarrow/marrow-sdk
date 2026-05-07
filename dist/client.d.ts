@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -199,6 +199,12 @@ export declare class MarrowClient {
      * @param period - '7d' (default), '14d', or '30d'
      */
     digest(period?: string): Promise<MarrowDigestResult>;
+    /**
+     * Get agent-native proof that Marrow is active and collecting useful signal.
+     * @param period - '7d' (default), '14d', or '30d'
+     * @param agentId - optional agent_id/session_id filter. Defaults to this client's agentId.
+     */
+    agentStatus(period?: string, agentId?: string | null): Promise<MarrowAgentStatusResult>;
     /**
      * Explicitly end the current session. Optionally auto-commits any open decision.
      * @param autoCommitOpen - whether to auto-commit (default false)

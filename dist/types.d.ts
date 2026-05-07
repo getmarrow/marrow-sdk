@@ -470,6 +470,45 @@ export interface MarrowDigestResult {
     workflows_completed: number;
     workflows_stalled: number;
 }
+export type MarrowAgentStatusState = 'inactive' | 'warming_up' | 'needs_outcomes' | 'learning' | 'proving_value';
+export interface MarrowAgentStatusResult {
+    period: {
+        days: number;
+        start: string;
+        end: string;
+    };
+    scope: {
+        agent_id: string | null;
+    };
+    active: boolean;
+    state: MarrowAgentStatusState;
+    summary: string;
+    signals: {
+        decisions_logged: number;
+        outcomes_recorded: number;
+        outcome_coverage: number;
+        success_rate: number;
+        saves: {
+            period: number;
+            total: number;
+        };
+        active_agents: number;
+        first_decision_at: string | null;
+        last_decision_at: string | null;
+    };
+    quality: {
+        enough_signal: boolean;
+        measurement_risk: 'low' | 'medium' | 'high';
+    };
+    proof: {
+        recent_decision_count: number;
+        last_decision_at: string | null;
+        has_recent_outcomes: boolean;
+        has_prevented_failures: boolean;
+        raw_data_exposed: false;
+    };
+    next_actions: string[];
+}
 export interface MarrowSessionEndResult {
     session_id: string;
     committed: number;

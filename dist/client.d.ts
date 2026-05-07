@@ -1,7 +1,8 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
     readonly state: MarrowLoopState;
@@ -24,6 +25,7 @@ export declare class MarrowClient {
         type?: string;
         context?: Record<string, unknown>;
     }): Promise<T>;
+    runGuarded<T>(options: MarrowGuardedRunOptions<T>): Promise<MarrowGuardedRunResult<T>>;
     beforeAction(meta: MarrowActionMeta): Promise<MarrowCheckResult>;
     afterAction(meta: MarrowActionMeta): Promise<MarrowCheckResult>;
     wrap<T>(meta: MarrowActionMeta, fn: () => Promise<T> | T): Promise<T>;
@@ -205,6 +207,12 @@ export declare class MarrowClient {
      * @param agentId - optional agent_id/session_id filter. Defaults to this client's agentId.
      */
     agentStatus(period?: string, agentId?: string | null): Promise<MarrowAgentStatusResult>;
+    /**
+     * Get an agent-native value report for owner reporting or agent planning.
+     * This is the no-dashboard proof payload: summary, metrics, fleet activity,
+     * risks, recommendations, and improvement data without raw decision text.
+     */
+    valueReport(period?: string | number, agentId?: string | null): Promise<MarrowValueReportResult>;
     /**
      * Get one pre-action operating brief: risk, workflow, handoff, quality checks,
      * source-of-truth surfaces, proof-pack requirements, and next actions.

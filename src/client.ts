@@ -45,6 +45,9 @@ import type {
   MarrowFailureType,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowPassiveActionOptions,
+  MarrowPassiveRuntime,
+  MarrowPassiveRuntimeOptions,
   MarrowSessionEndResult,
   MarrowTemplateSummary,
   MarrowTemplateDetail,
@@ -78,6 +81,9 @@ function safeErrorMessage(error: unknown): string {
 
 function redactSensitiveText(value: string): string {
   return value
+    .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)=)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
+    .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)\s+)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
+    .replace(/(\B-(?:p|k)\s+)([^\s"'`]+|"[^"]*"|'[^']*')/g, '$1[REDACTED]')
     .replace(/\b(Bearer|Token|ApiKey|API_KEY|MARROW_API_KEY|MARROW_KEY)\s+[\w.\-+/=]{12,}\b/gi, '$1 [REDACTED]')
     .replace(/\b([A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|CREDENTIAL|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*[:=]\s*['"]?[^'"\s,;]{6,}/gi, '$1=[REDACTED]')
     .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
@@ -164,9 +170,55 @@ function summarizeArgs(args: unknown[], max: number = 80): string {
   return truncate(args.map((arg) => summarizeArg(arg)).join(', '), max);
 }
 
+function summarizeCommand(command: string): string {
+  return truncate(redactSensitiveText(normalizeWhitespace(command)), 240);
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+const URL_QUERY_ALLOWLIST = new Set([
+  'page',
+  'limit',
+  'offset',
+  'cursor',
+  'per_page',
+  'sort',
+  'order',
+]);
+
+function isPrivateHost(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  return lower === 'localhost'
+    || lower === '127.0.0.1'
+    || lower === '::1'
+    || lower.startsWith('10.')
+    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(lower)
+    || lower.startsWith('192.168.')
+    || lower.startsWith('169.254.')
+    || lower.endsWith('.internal')
+    || lower.endsWith('.local')
+    || lower.endsWith('.localhost');
+}
+
+function hasSensitivePath(pathname: string): boolean {
+  return /(oauth|callback|token|secret|password|session|auth|metadata|latest\/meta-data|private|internal)/i.test(pathname);
+}
+
 function stripSensitiveUrl(input: string): string {
-  const redactFallback = (value: string): string =>
-    value.replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#]*/gi, '$1[redacted]');
+  const redactFallback = (value: string): string => {
+    const [base, fragment = ''] = value.split('#', 2);
+    const [pathOnly, query = ''] = base.split('?', 2);
+    const redactedQuery = query
+      ? query.split('&').map((pair) => {
+          if (!pair) return pair;
+          const [rawKey] = pair.split('=', 1);
+          return rawKey ? `${rawKey}=[redacted]` : '[redacted]';
+        }).join('&')
+      : '';
+    return `${pathOnly}${redactedQuery ? `?${redactedQuery}` : ''}${fragment ? `#${fragment}` : ''}`;
+  };
 
   try {
     const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(input);
@@ -174,20 +226,56 @@ function stripSensitiveUrl(input: string): string {
     parsed.username = '';
     parsed.password = '';
 
+    const sensitiveHost = isPrivateHost(parsed.hostname);
+    const sensitivePath = hasSensitivePath(parsed.pathname);
+
     for (const key of Array.from(parsed.searchParams.keys())) {
-      if (/(token|key|secret|password|auth|signature|sig|session)/i.test(key)) {
+      if (!URL_QUERY_ALLOWLIST.has(key.toLowerCase()) || sensitiveHost || sensitivePath) {
         parsed.searchParams.set(key, '[redacted]');
       }
     }
 
-    if (hasScheme) {
-      return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    if (sensitiveHost || sensitivePath) {
+      parsed.pathname = '/[redacted-path]';
     }
 
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    if (hasScheme) {
+      return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`.replace(/%5Bredacted%5D/gi, '[redacted]');
+    }
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`.replace(/%5Bredacted%5D/gi, '[redacted]');
   } catch {
     return redactFallback(input);
   }
+}
+
+const GLOBAL_FETCH_PATCH_KEY = Symbol.for('marrow.passiveRuntime.fetchPatch');
+
+interface GlobalFetchPatchState {
+  originalFetch: typeof fetch;
+  owners: Array<{ token: symbol; wrapper: typeof fetch }>;
+}
+
+function inferSurfacesFromText(value: string): string[] {
+  const lower = value.toLowerCase();
+  const surfaces = new Set<string>();
+  if (/\b(git|github|gh|pull request|pr|commit|merge|push)\b/.test(lower)) surfaces.add('github');
+  if (/\b(cloudflare|worker|wrangler)\b/.test(lower)) surfaces.add('cloudflare');
+  if (/\b(npm|package|publish)\b/.test(lower)) surfaces.add('npm');
+  if (/\b(doc|docs|readme|getmarrow\.ai)\b/.test(lower)) surfaces.add('docs');
+  if (/\b(prod|production|deploy|release)\b/.test(lower)) surfaces.add('production');
+  if (/\b(secret|token|credential|key|permission)\b/.test(lower)) surfaces.add('secrets');
+  return surfaces.size > 0 ? Array.from(surfaces) : ['workspace'];
+}
+
+function inferTypeFromText(value: string): string {
+  const lower = value.toLowerCase();
+  if (/\b(deploy|release|cloudflare|worker|wrangler)\b/.test(lower)) return 'deploy';
+  if (/\b(publish|npm|package)\b/.test(lower)) return 'publish';
+  if (/\b(audit|security|secret|token|credential|permission|opsec)\b/.test(lower)) return 'security';
+  if (/\b(patch|fix|bug|harden|remediate)\b/.test(lower)) return 'implementation';
+  if (/\b(review|merge|pr|pull request)\b/.test(lower)) return 'process';
+  return 'general';
 }
 
 /**
@@ -680,6 +768,167 @@ export class MarrowClient {
         summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
       };
     }
+  }
+
+  /**
+   * Create a passive runtime shim for agents that own their process.
+   *
+   * MCP users usually get passive behavior from `npx @getmarrow/mcp setup`.
+   * SDK users can call this once and wrap common surfaces without manually
+   * stitching together decision briefs, think, commit, and value reporting.
+   */
+  createPassiveRuntime(options: MarrowPassiveRuntimeOptions = {}): MarrowPassiveRuntime {
+    const client = this;
+    client.enforce({ mode: options.mode || 'auto' });
+
+    const registry = typeof globalThis !== 'undefined'
+      ? (globalThis as typeof globalThis & {
+          [GLOBAL_FETCH_PATCH_KEY]?: GlobalFetchPatchState;
+        })
+      : null;
+    const activeFetchPatch = registry?.[GLOBAL_FETCH_PATCH_KEY];
+    const fetchFn = options.fetch === false
+      ? undefined
+      : options.fetch || activeFetchPatch?.originalFetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
+    let installed = false;
+    const ownerToken = Symbol('marrowPassiveRuntimeFetchOwner');
+
+    const buildGuardOptions = <T>(
+      action: string,
+      execute: () => Promise<T> | T,
+      actionOptions: MarrowPassiveActionOptions = {}
+    ): MarrowGuardedRunOptions<T> => {
+      const prefixedAction = `${options.actionPrefix || ''}${action}`;
+      return {
+        action: prefixedAction,
+        execute,
+        type: actionOptions.type || options.defaultType || inferTypeFromText(prefixedAction),
+        role: actionOptions.role || options.defaultRole || 'general',
+        surfaces: actionOptions.surfaces || inferSurfacesFromText(prefixedAction),
+        context: {
+          ...(actionOptions.context || {}),
+          marrow_passive_runtime_layer: 'v2',
+        },
+        riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || 'warn',
+        includeValueReport: actionOptions.includeValueReport ?? options.includeValueReport ?? false,
+        valueReportPeriod: actionOptions.valueReportPeriod ?? options.valueReportPeriod ?? '7d',
+      };
+    };
+
+    const passiveFetch = fetchFn
+      ? client.wrapFetch(fetchFn.bind(globalThis))
+      : (async () => {
+          throw new Error('No fetch implementation available for Marrow passive runtime');
+        }) as typeof fetch;
+
+    const runtime: MarrowPassiveRuntime = {
+      get installed() {
+        return installed;
+      },
+
+      fetch: passiveFetch,
+
+      install(): { fetchPatched: boolean } {
+        if (
+          options.patchGlobalFetch !== false &&
+          fetchFn &&
+          typeof globalThis !== 'undefined' &&
+          typeof globalThis.fetch === 'function'
+        ) {
+          const registry = (globalThis as typeof globalThis & {
+            [GLOBAL_FETCH_PATCH_KEY]?: GlobalFetchPatchState;
+          });
+          const state = registry[GLOBAL_FETCH_PATCH_KEY] ?? {
+            originalFetch: globalThis.fetch,
+            owners: [],
+          };
+          registry[GLOBAL_FETCH_PATCH_KEY] = state;
+
+          const existingIndex = state.owners.findIndex((owner) => owner.token === ownerToken);
+          if (existingIndex >= 0) {
+            state.owners.splice(existingIndex, 1);
+          }
+          state.owners.push({ token: ownerToken, wrapper: passiveFetch });
+          globalThis.fetch = passiveFetch;
+          installed = true;
+          return { fetchPatched: true };
+        }
+
+        installed = true;
+        return { fetchPatched: false };
+      },
+
+      restore(): void {
+        if (typeof globalThis !== 'undefined') {
+          const registry = (globalThis as typeof globalThis & {
+            [GLOBAL_FETCH_PATCH_KEY]?: GlobalFetchPatchState;
+          });
+          const state = registry[GLOBAL_FETCH_PATCH_KEY];
+          if (state) {
+            state.owners = state.owners.filter((owner) => owner.token !== ownerToken);
+            const nextOwner = state.owners[state.owners.length - 1];
+            globalThis.fetch = nextOwner?.wrapper || state.originalFetch;
+            if (!nextOwner) {
+              delete registry[GLOBAL_FETCH_PATCH_KEY];
+            }
+          }
+        }
+        installed = false;
+      },
+
+      tool<T>(
+        name: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        const action = actionOptions.action || `run tool: ${truncate(redactSensitiveText(name), 180)}`;
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(name),
+        }));
+      },
+
+      command<T>(
+        command: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        const redactedCommand = summarizeCommand(command);
+        const action = actionOptions.action || `run command: ${redactedCommand}`;
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(command),
+        }));
+      },
+
+      deploy<T>(
+        action: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          type: actionOptions.type || 'deploy',
+          role: actionOptions.role || 'deploy',
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(`deploy ${action}`),
+        }));
+      },
+
+      publish<T>(
+        action: string,
+        execute: () => Promise<T> | T,
+        actionOptions: MarrowPassiveActionOptions = {}
+      ): Promise<MarrowGuardedRunResult<T>> {
+        return client.runGuarded(buildGuardOptions(action, execute, {
+          ...actionOptions,
+          type: actionOptions.type || 'publish',
+          role: actionOptions.role || 'deploy',
+          surfaces: actionOptions.surfaces || inferSurfacesFromText(`publish ${action}`),
+        }));
+      },
+    };
+
+    return runtime;
   }
 
   async beforeAction(meta: MarrowActionMeta): Promise<MarrowCheckResult> {

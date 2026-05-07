@@ -1161,6 +1161,18 @@ class MarrowClient {
         return (res.data || res);
     }
     /**
+     * Get one pre-action operating brief: risk, workflow, handoff, quality checks,
+     * source-of-truth surfaces, proof-pack requirements, and next actions.
+     */
+    async decisionBrief(input) {
+        const res = await this.request('POST', '/v1/analytics/decision-brief', {
+            ...input,
+            agent_id: input.agent_id ?? this.agentId ?? undefined,
+            session_id: input.session_id ?? this.sessionId ?? undefined,
+        });
+        return (res.data || res);
+    }
+    /**
      * Explicitly end the current session. Optionally auto-commits any open decision.
      * @param autoCommitOpen - whether to auto-commit (default false)
      */

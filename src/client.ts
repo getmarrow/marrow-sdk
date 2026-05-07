@@ -39,6 +39,8 @@ import type {
   MarrowDashboardResult,
   MarrowDigestResult,
   MarrowAgentStatusResult,
+  MarrowDecisionBriefRequest,
+  MarrowDecisionBriefResult,
   MarrowSessionEndResult,
   MarrowTemplateSummary,
   MarrowTemplateDetail,
@@ -1526,6 +1528,19 @@ export class MarrowClient {
     if (agentId) qs.set('agent_id', agentId);
     const res = await this.request('GET', `/v1/analytics/agent-status?${qs.toString()}`);
     return (res.data || res) as MarrowAgentStatusResult;
+  }
+
+  /**
+   * Get one pre-action operating brief: risk, workflow, handoff, quality checks,
+   * source-of-truth surfaces, proof-pack requirements, and next actions.
+   */
+  async decisionBrief(input: MarrowDecisionBriefRequest): Promise<MarrowDecisionBriefResult> {
+    const res = await this.request('POST', '/v1/analytics/decision-brief', {
+      ...input,
+      agent_id: input.agent_id ?? this.agentId ?? undefined,
+      session_id: input.session_id ?? this.sessionId ?? undefined,
+    });
+    return (res.data || res) as MarrowDecisionBriefResult;
   }
 
   /**

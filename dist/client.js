@@ -22,22 +22,6 @@ function cloneState(state) {
 function safeErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
-const CLI_SECRET_FLAGS = [
-    'password',
-    'pass',
-    'secret',
-    'api-key',
-    'apikey',
-    'token',
-    'auth',
-    'access-token',
-    'client-secret',
-    'private-key',
-    'key',
-].join('|');
-const CLI_SECRET_VALUE_PATTERN = `([^\\s"'\\\`]+|"[^"]*"|'[^']*')`;
-const CLI_SECRET_EQUALS_RE = new RegExp(`(\\B--(?:${CLI_SECRET_FLAGS})=)${CLI_SECRET_VALUE_PATTERN}`, 'gi');
-const CLI_SECRET_SPACED_RE = new RegExp(`(\\B--(?:${CLI_SECRET_FLAGS})\\s+)${CLI_SECRET_VALUE_PATTERN}`, 'gi');
 function redactSensitiveText(value) {
     return value
         .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)=)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
@@ -670,9 +654,13 @@ class MarrowClient {
     createPassiveRuntime(options = {}) {
         const client = this;
         client.enforce({ mode: options.mode || 'auto' });
+        const registry = typeof globalThis !== 'undefined'
+            ? globalThis
+            : null;
+        const activeFetchPatch = registry?.[GLOBAL_FETCH_PATCH_KEY];
         const fetchFn = options.fetch === false
             ? undefined
-            : options.fetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
+            : options.fetch || activeFetchPatch?.originalFetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
         let installed = false;
         const ownerToken = Symbol('marrowPassiveRuntimeFetchOwner');
         const buildGuardOptions = (action, execute, actionOptions = {}) => {

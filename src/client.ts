@@ -781,9 +781,15 @@ export class MarrowClient {
     const client = this;
     client.enforce({ mode: options.mode || 'auto' });
 
+    const registry = typeof globalThis !== 'undefined'
+      ? (globalThis as typeof globalThis & {
+          [GLOBAL_FETCH_PATCH_KEY]?: GlobalFetchPatchState;
+        })
+      : null;
+    const activeFetchPatch = registry?.[GLOBAL_FETCH_PATCH_KEY];
     const fetchFn = options.fetch === false
       ? undefined
-      : options.fetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
+      : options.fetch || activeFetchPatch?.originalFetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
     let installed = false;
     const ownerToken = Symbol('marrowPassiveRuntimeFetchOwner');
 

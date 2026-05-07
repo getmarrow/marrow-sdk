@@ -57,6 +57,57 @@ test('createPassiveRuntime restores original fetch across multiple runtimes', ()
   }
 });
 
+test('createPassiveRuntime does not nest fetch wrappers for later runtimes', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const originalFetch = globalThis.fetch;
+  const fakeFetch = async () => new Response('ok', { status: 200 });
+
+  globalThis.fetch = fakeFetch;
+  try {
+    const marrowA = new MarrowClient(process.env.MARROW_API_KEY);
+    const callsA = { before: 0, after: 0 };
+    marrowA.beforeAction = async () => {
+      callsA.before += 1;
+      return { ok: true };
+    };
+    marrowA.afterAction = async () => {
+      callsA.after += 1;
+      return { ok: true };
+    };
+
+    const runtimeA = marrowA.createPassiveRuntime();
+    runtimeA.install();
+
+    const marrowB = new MarrowClient(process.env.MARROW_API_KEY);
+    const callsB = { before: 0, after: 0 };
+    marrowB.beforeAction = async () => {
+      callsB.before += 1;
+      return { ok: true };
+    };
+    marrowB.afterAction = async () => {
+      callsB.after += 1;
+      return { ok: true };
+    };
+
+    const runtimeB = marrowB.createPassiveRuntime();
+    runtimeB.install();
+
+    await globalThis.fetch('https://api.example.com/ok?page=1');
+    assert.deepEqual(callsA, { before: 0, after: 0 });
+    assert.deepEqual(callsB, { before: 1, after: 1 });
+
+    runtimeA.restore();
+    await globalThis.fetch('https://api.example.com/ok?page=2');
+    assert.deepEqual(callsA, { before: 0, after: 0 });
+    assert.deepEqual(callsB, { before: 2, after: 2 });
+
+    runtimeB.restore();
+    assert.equal(globalThis.fetch, fakeFetch);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('passive command uses runGuarded with redacted command metadata', async () => {
   process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);

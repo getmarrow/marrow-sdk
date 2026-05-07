@@ -58,9 +58,33 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.11
+## What's New in v3.7.12
 
-### Agent Status: Prove Marrow Is Working
+### Decision Brief: One Pre-Action Call
+
+Agents can call `decisionBrief()` before meaningful work to get risk, workflow, handoff, freshness, quality checks, source-of-truth surfaces, proof-pack requirements, and next actions in one backend call.
+
+```typescript
+const brief = await marrow.decisionBrief({
+  action: 'publish SDK and MCP packages to npm and update docs',
+  type: 'deploy',
+  role: 'deploy',
+  surfaces: ['github', 'npm', 'docs', 'production']
+});
+
+if (brief.risk.level === 'high') {
+  console.log(brief.workflow.steps);
+  console.log(brief.quality.minimum_checks);
+}
+```
+
+Use this before deploys, publishes, merges, audits, patches, secret changes, or production work. Prior failure data is aggregated by type only; no raw action, context, or outcome text from past decisions is returned.
+
+`decisionBrief()` does not replace the Marrow loop. Agents should still log intent with `think()` or passive auto-logging before acting, then call `commit()` after verification so the outcome teaches the next run.
+
+### Previous: v3.7.11 — Agent Status
+
+Agent Status: Prove Marrow Is Working
 
 Agents can now call `agentStatus()` to verify Marrow is active without sending a user to a dashboard. It returns connection state, signal quality, non-sensitive proof, and next actions.
 
@@ -213,6 +237,23 @@ const jarvis = await marrow.agentStatus('7d', 'jarvis-agent');
 ```
 
 States: `inactive`, `warming_up`, `needs_outcomes`, `learning`, `proving_value`.
+
+## Decision Brief
+
+One pre-action bundle for agents. Instead of stitching together status, workflow, fleet, source-of-truth, and reporting calls, use `decisionBrief()` before meaningful work.
+
+```typescript
+const brief = await marrow.decisionBrief({
+  action: 'deploy production worker',
+  type: 'deploy',
+  surfaces: ['github', 'production', 'docs']
+});
+
+// brief.risk.level, brief.workflow.steps, brief.handoff.required,
+// brief.quality.minimum_checks, brief.proof_pack.fields, brief.next_actions
+```
+
+After reading the brief, continue the normal loop: log intent, do the work, verify, and commit the outcome.
 
 ## Session Management
 

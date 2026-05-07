@@ -22,8 +22,27 @@ function cloneState(state) {
 function safeErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
+const CLI_SECRET_FLAGS = [
+    'password',
+    'pass',
+    'secret',
+    'api-key',
+    'apikey',
+    'token',
+    'auth',
+    'access-token',
+    'client-secret',
+    'private-key',
+    'key',
+].join('|');
+const CLI_SECRET_VALUE_PATTERN = `([^\\s"'\\\`]+|"[^"]*"|'[^']*')`;
+const CLI_SECRET_EQUALS_RE = new RegExp(`(\\B--(?:${CLI_SECRET_FLAGS})=)${CLI_SECRET_VALUE_PATTERN}`, 'gi');
+const CLI_SECRET_SPACED_RE = new RegExp(`(\\B--(?:${CLI_SECRET_FLAGS})\\s+)${CLI_SECRET_VALUE_PATTERN}`, 'gi');
 function redactSensitiveText(value) {
     return value
+        .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)=)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
+        .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)\s+)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
+        .replace(/(\B-(?:p|k)\s+)([^\s"'`]+|"[^"]*"|'[^']*')/g, '$1[REDACTED]')
         .replace(/\b(Bearer|Token|ApiKey|API_KEY|MARROW_API_KEY|MARROW_KEY)\s+[\w.\-+/=]{12,}\b/gi, '$1 [REDACTED]')
         .replace(/\b([A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|CREDENTIAL|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*[:=]\s*['"]?[^'"\s,;]{6,}/gi, '$1=[REDACTED]')
         .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
@@ -113,27 +132,70 @@ function summarizeCommand(command) {
 function normalizeWhitespace(value) {
     return value.replace(/\s+/g, ' ').trim();
 }
+const URL_QUERY_ALLOWLIST = new Set([
+    'page',
+    'limit',
+    'offset',
+    'cursor',
+    'per_page',
+    'sort',
+    'order',
+]);
+function isPrivateHost(hostname) {
+    const lower = hostname.toLowerCase();
+    return lower === 'localhost'
+        || lower === '127.0.0.1'
+        || lower === '::1'
+        || lower.startsWith('10.')
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(lower)
+        || lower.startsWith('192.168.')
+        || lower.startsWith('169.254.')
+        || lower.endsWith('.internal')
+        || lower.endsWith('.local')
+        || lower.endsWith('.localhost');
+}
+function hasSensitivePath(pathname) {
+    return /(oauth|callback|token|secret|password|session|auth|metadata|latest\/meta-data|private|internal)/i.test(pathname);
+}
 function stripSensitiveUrl(input) {
-    const redactFallback = (value) => value.replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#]*/gi, '$1[redacted]');
+    const redactFallback = (value) => {
+        const [base, fragment = ''] = value.split('#', 2);
+        const [pathOnly, query = ''] = base.split('?', 2);
+        const redactedQuery = query
+            ? query.split('&').map((pair) => {
+                if (!pair)
+                    return pair;
+                const [rawKey] = pair.split('=', 1);
+                return rawKey ? `${rawKey}=[redacted]` : '[redacted]';
+            }).join('&')
+            : '';
+        return `${pathOnly}${redactedQuery ? `?${redactedQuery}` : ''}${fragment ? `#${fragment}` : ''}`;
+    };
     try {
         const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(input);
         const parsed = new URL(input, hasScheme ? undefined : 'http://marrow.local');
         parsed.username = '';
         parsed.password = '';
+        const sensitiveHost = isPrivateHost(parsed.hostname);
+        const sensitivePath = hasSensitivePath(parsed.pathname);
         for (const key of Array.from(parsed.searchParams.keys())) {
-            if (/(token|key|secret|password|auth|signature|sig|session)/i.test(key)) {
+            if (!URL_QUERY_ALLOWLIST.has(key.toLowerCase()) || sensitiveHost || sensitivePath) {
                 parsed.searchParams.set(key, '[redacted]');
             }
         }
-        if (hasScheme) {
-            return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        if (sensitiveHost || sensitivePath) {
+            parsed.pathname = '/[redacted-path]';
         }
-        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        if (hasScheme) {
+            return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`.replace(/%5Bredacted%5D/gi, '[redacted]');
+        }
+        return `${parsed.pathname}${parsed.search}${parsed.hash}`.replace(/%5Bredacted%5D/gi, '[redacted]');
     }
     catch {
         return redactFallback(input);
     }
 }
+const GLOBAL_FETCH_PATCH_KEY = Symbol.for('marrow.passiveRuntime.fetchPatch');
 function inferSurfacesFromText(value) {
     const lower = value.toLowerCase();
     const surfaces = new Set();
@@ -611,8 +673,8 @@ class MarrowClient {
         const fetchFn = options.fetch === false
             ? undefined
             : options.fetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
-        let originalGlobalFetch = null;
         let installed = false;
+        const ownerToken = Symbol('marrowPassiveRuntimeFetchOwner');
         const buildGuardOptions = (action, execute, actionOptions = {}) => {
             const prefixedAction = `${options.actionPrefix || ''}${action}`;
             return {
@@ -644,9 +706,18 @@ class MarrowClient {
                 if (options.patchGlobalFetch !== false &&
                     fetchFn &&
                     typeof globalThis !== 'undefined' &&
-                    typeof globalThis.fetch === 'function' &&
-                    globalThis.fetch !== passiveFetch) {
-                    originalGlobalFetch = globalThis.fetch;
+                    typeof globalThis.fetch === 'function') {
+                    const registry = globalThis;
+                    const state = registry[GLOBAL_FETCH_PATCH_KEY] ?? {
+                        originalFetch: globalThis.fetch,
+                        owners: [],
+                    };
+                    registry[GLOBAL_FETCH_PATCH_KEY] = state;
+                    const existingIndex = state.owners.findIndex((owner) => owner.token === ownerToken);
+                    if (existingIndex >= 0) {
+                        state.owners.splice(existingIndex, 1);
+                    }
+                    state.owners.push({ token: ownerToken, wrapper: passiveFetch });
                     globalThis.fetch = passiveFetch;
                     installed = true;
                     return { fetchPatched: true };
@@ -655,10 +726,18 @@ class MarrowClient {
                 return { fetchPatched: false };
             },
             restore() {
-                if (originalGlobalFetch && typeof globalThis !== 'undefined') {
-                    globalThis.fetch = originalGlobalFetch;
+                if (typeof globalThis !== 'undefined') {
+                    const registry = globalThis;
+                    const state = registry[GLOBAL_FETCH_PATCH_KEY];
+                    if (state) {
+                        state.owners = state.owners.filter((owner) => owner.token !== ownerToken);
+                        const nextOwner = state.owners[state.owners.length - 1];
+                        globalThis.fetch = nextOwner?.wrapper || state.originalFetch;
+                        if (!nextOwner) {
+                            delete registry[GLOBAL_FETCH_PATCH_KEY];
+                        }
+                    }
                 }
-                originalGlobalFetch = null;
                 installed = false;
             },
             tool(name, execute, actionOptions = {}) {

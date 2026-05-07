@@ -25,15 +25,15 @@ That's fine for a toy. It's a problem for anything real.
 
 ## Auto-Logging
 
-Marrow auto-logs at three layers — transparent to your agent, invisible to you:
+Marrow can log at three layers, but the behavior depends on how you wire it up:
 
 | Layer | How | Agent effort |
 |-------|-----|-------------|
-| Server-side | Every authenticated API call auto-logged as a decision | Zero |
-| SDK | `createPassiveRuntime()`, `runGuarded()`, `think()` / `commit()` | Minimal |
-| MCP hooks | `npx @getmarrow/mcp setup` — PostToolUse + UserPromptSubmit hooks | Zero |
+| Server-side | Authenticated Marrow API calls are auto-logged server-side | Zero |
+| SDK | `createPassiveRuntime()`, `runGuarded()`, `think()` / `commit()` after install/wrapping | Minimal |
+| MCP hooks | `npx @getmarrow/mcp setup` — PostToolUse + UserPromptSubmit hooks after setup | Minimal |
 
-**Passive mode for SDK:** Use `marrow.createPassiveRuntime()` once in the agent process. It can wrap global `fetch`, guard tools, commands, deploys, and publishes with the full Marrow loop. Use `autoWrap()` and `wrapFetch()` when you need lower-level control.
+**Passive mode for SDK:** Use `marrow.createPassiveRuntime()` once in the agent process, then install or wrap the surfaces you want covered. It can wrap global `fetch`, guard tools, commands, deploys, and publishes with the full Marrow loop. Use `autoWrap()` and `wrapFetch()` when you need lower-level control.
 
 Disable passive: skip wrapping. Debug: check `decision_id` on returned objects.
 
@@ -81,7 +81,7 @@ await runtime.command('wrangler deploy', () => exec('wrangler deploy'));
 await runtime.tool('github.pr.merge', () => mergePr());
 ```
 
-The runtime keeps secrets out of logs: URLs and command text are redacted/truncated, and Marrow never receives request bodies, headers, command output, or raw credentials from this shim.
+The runtime redacts URL/action metadata before logging, and Marrow never receives request bodies, headers, response bodies, or command output from this shim. Avoid placing secrets directly in action or command text when you can; the runtime redacts common cases but should not be treated as a license to inline credentials.
 
 v3.7.14 added the Passive Runtime Layer v1 SDK surface: `runGuarded()`, deterministic failure classification, and `valueReport()`.
 
@@ -176,7 +176,7 @@ await runtime.command('npm publish', () => publishPackage(), {
 });
 ```
 
-Use this when you own the agent process and want Marrow to sit behind common surfaces with minimal agent code. The runtime defaults the client to `mode: 'auto'` so wrapped fetch calls and actions log intent and outcomes automatically.
+Use this when you own the agent process and want Marrow to sit behind common surfaces with minimal agent code. The runtime defaults the client to `mode: 'auto'` so installed/wrapped fetch calls and runtime actions log intent and outcomes automatically.
 
 ### Per-function: wrap(meta, fn)
 
@@ -208,7 +208,7 @@ await wrappedFetch('https://api.example.com/deploy?token=secret', {
 });
 ```
 
-Pairs with `@getmarrow/mcp` setup hooks. MCP users usually get passive behavior from hooks; SDK users get it from `createPassiveRuntime()`, `runGuarded()`, `autoWrap()`, and `wrapFetch()`.
+Pairs with `@getmarrow/mcp` setup hooks. MCP users only get passive behavior after hook setup; SDK users get it after installing or wrapping the surfaces they want with `createPassiveRuntime()`, `runGuarded()`, `autoWrap()`, and `wrapFetch()`.
 
 ---
 

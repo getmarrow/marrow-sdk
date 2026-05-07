@@ -1,6 +1,6 @@
 {
   "name": "@getmarrow/sdk",
-  "version": "3.7.13",
+  "version": "3.7.14",
   "description": "Your go-to memory provider for all agents, for any AI model.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -4,9 +4,9 @@
  * @packageDocumentation
  */
 
-import { MarrowClient, MarrowLoopRequiredError } from './client';
+import { MarrowClient, MarrowLoopRequiredError, classifyMarrowFailure } from './client';
 
-export { MarrowClient, MarrowLoopRequiredError } from './client';
+export { MarrowClient, MarrowLoopRequiredError, classifyMarrowFailure } from './client';
 export { createMarrowClient, marrowFromEnv } from './factory';
 
 export type {
@@ -47,6 +47,10 @@ export type {
   MarrowEnforceOptions,
   MarrowActionMeta,
   MarrowAutoWrapOptions,
+  MarrowFailureType,
+  MarrowGuardedRiskPolicy,
+  MarrowGuardedRunOptions,
+  MarrowGuardedRunResult,
 
   // Result Types
   MarrowOrientResult,
@@ -59,6 +63,7 @@ export type {
   MarrowDigestResult,
   MarrowAgentStatusState,
   MarrowAgentStatusResult,
+  MarrowValueReportResult,
   MarrowDecisionBriefRole,
   MarrowDecisionBriefRiskLevel,
   MarrowDecisionBriefRequest,

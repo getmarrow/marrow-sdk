@@ -58,9 +58,42 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.13
+## What's New in v3.7.14
 
-v3.7.13 is a README-only patch release for npmjs. It keeps the package page focused on the current install surface and sends full feature history, examples, and API reference to [getmarrow.ai/docs](https://getmarrow.ai/docs/).
+v3.7.14 adds the Passive Runtime Layer v1 SDK surface: `runGuarded()`, deterministic failure classification, and `valueReport()`.
+
+### Guarded Run: One Passive Workflow Call
+
+`runGuarded()` gives SDK agents the full Marrow loop in one call: decision brief, intent log, execution, outcome commit, failure classification, and optional owner-ready value report.
+
+```typescript
+const guarded = await marrow.runGuarded({
+  action: 'deploy Cloudflare Worker to production',
+  type: 'deploy',
+  role: 'deploy',
+  surfaces: ['github', 'cloudflare', 'production'],
+  includeValueReport: true,
+  execute: async () => deploy(),
+});
+
+if (!guarded.ok) {
+  console.log(guarded.failure_type);
+  console.log(guarded.summary);
+}
+```
+
+Set `riskPolicy: 'block_high'` when the agent should stop before execution if Marrow classifies the work as high risk.
+
+### Value Report
+
+Agents can now pull no-dashboard proof directly:
+
+```typescript
+const report = await marrow.valueReport('7d');
+console.log(report.summary);
+```
+
+The report returns aggregate metrics, saves, fleet activity, top risks, recommendations, and improvement data without exposing raw decision text.
 
 ### Decision Brief: One Pre-Action Call
 

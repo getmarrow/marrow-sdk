@@ -4,6 +4,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MarrowClient = exports.MarrowLoopRequiredError = void 0;
+exports.classifyMarrowFailure = classifyMarrowFailure;
 const DEFAULT_HINT = 'Tip: log plans, decisions, and outcomes to Marrow so your agent improves over time.';
 const POST_ORIENT_NUDGE = 'You have not logged any decisions yet this session. Before acting, call marrow_think.';
 const PRE_EXIT_REMINDER = 'Before ending the session, log the outcome to Marrow so the loop closes cleanly.';
@@ -20,6 +21,60 @@ function cloneState(state) {
 }
 function safeErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
+}
+function redactSensitiveText(value) {
+    return value
+        .replace(/\b(Bearer|Token|ApiKey|API_KEY|MARROW_API_KEY|MARROW_KEY)\s+[\w.\-+/=]{12,}\b/gi, '$1 [REDACTED]')
+        .replace(/\b([A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|CREDENTIAL|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*[:=]\s*['"]?[^'"\s,;]{6,}/gi, '$1=[REDACTED]')
+        .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
+        .replace(/\b(?:sk|pk|ghp|github_pat|npm)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
+        .replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#\s]*/gi, '$1[redacted]');
+}
+function safePublicErrorMessage(error) {
+    return truncate(redactSensitiveText(safeErrorMessage(error)), 500);
+}
+function classifyMarrowFailure(error) {
+    const message = safeErrorMessage(error).toLowerCase();
+    if (/\b(unauthorized|unauthenticated|invalid api key|bad token|expired token|auth(?:entication)? failed)\b/.test(message)) {
+        return 'auth';
+    }
+    if (/\b(forbidden|permission denied|insufficient scope|access denied|not allowed|eacces|eperm)\b/.test(message)) {
+        return 'permission';
+    }
+    if (/\b(rate limit|too many requests|429|quota exceeded|throttl)\b/.test(message)) {
+        return 'rate_limit';
+    }
+    if (/\b(timeout|timed out|etimedout|gatewaytransporterror|deadline|abort(?:ed)?|econnreset)\b/.test(message)) {
+        return 'timeout';
+    }
+    if (/\b(test failed|tests failed|assertion|expect\(|vitest|jest|playwright|coverage failed)\b/.test(message)) {
+        return 'test_failure';
+    }
+    if (/\b(deploy failed|deployment failed|rollback|cloudflare|worker deploy|wrangler)\b/.test(message)) {
+        return 'deploy_failure';
+    }
+    if (/\b(module not found|cannot find module|dependency|npm err|pnpm|yarn|package not found|peer dep)\b/.test(message)) {
+        return 'dependency';
+    }
+    if (/\b(migration|schema|d1|database|sql|constraint failed|foreign key)\b/.test(message)) {
+        return 'migration';
+    }
+    if (/\b(command not found|enoent|eisdir|tool|spawn|exit code|non-zero)\b/.test(message)) {
+        return 'tooling';
+    }
+    if (/\b(missing context|not enough context|unknown repo|no such file|not found)\b/.test(message)) {
+        return 'missing_context';
+    }
+    if (/\b(policy|blocked|requires review|approval required|guard|gate)\b/.test(message)) {
+        return 'policy_block';
+    }
+    return 'unknown';
+}
+function clampPeriodDays(value, defaultDays = 7) {
+    const parsed = typeof value === 'number' ? value : parseInt(String(value || defaultDays), 10);
+    if (!Number.isFinite(parsed))
+        return defaultDays;
+    return Math.min(90, Math.max(1, Math.floor(parsed)));
 }
 function truncate(value, max) {
     if (value.length <= max)
@@ -357,6 +412,153 @@ class MarrowClient {
                 process.stderr.write(`[marrow] Warning: commit failed during run() error handling: ${safeErrorMessage(commitErr)}\n`);
             }
             throw error;
+        }
+    }
+    async runGuarded(options) {
+        const riskPolicy = options.riskPolicy ?? 'warn';
+        let brief = null;
+        let decisionId = null;
+        let commit = null;
+        let valueReport = null;
+        try {
+            brief = await this.decisionBrief({
+                action: options.action,
+                type: options.type,
+                role: options.role,
+                surfaces: options.surfaces,
+            });
+        }
+        catch (error) {
+            if (riskPolicy === 'block_high') {
+                const failureType = classifyMarrowFailure(error);
+                return {
+                    ok: false,
+                    blocked: true,
+                    error: safePublicErrorMessage(error),
+                    failure_type: failureType,
+                    decision_id: null,
+                    brief: null,
+                    commit: null,
+                    value_report: null,
+                    summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
+                };
+            }
+        }
+        if (riskPolicy === 'block_high' && brief?.risk.level === 'high') {
+            return {
+                ok: false,
+                blocked: true,
+                failure_type: 'policy_block',
+                decision_id: null,
+                brief,
+                commit: null,
+                value_report: null,
+                summary: `Blocked high-risk action before execution. Recommended workflow: ${brief.workflow.recommended}.`,
+            };
+        }
+        try {
+            const think = await this.think({
+                action: options.action,
+                type: options.type || 'general',
+                context: {
+                    ...(options.context || {}),
+                    marrow_passive_runtime: true,
+                    role: options.role,
+                    surfaces: options.surfaces,
+                    risk_level: brief?.risk.level,
+                    workflow: brief?.workflow.recommended,
+                },
+                checkLoop: true,
+            });
+            decisionId = think.decisionId;
+            let result;
+            try {
+                result = await options.execute();
+            }
+            catch (error) {
+                const failureType = classifyMarrowFailure(error);
+                const publicError = safePublicErrorMessage(error);
+                if (this.decisionId) {
+                    try {
+                        commit = await this.commit({
+                            success: false,
+                            outcome: `Guarded run failed (${failureType}): ${publicError}`,
+                        });
+                    }
+                    catch (commitError) {
+                        process.stderr.write(`[marrow] Warning: guarded run failure commit failed: ${safePublicErrorMessage(commitError)}\n`);
+                    }
+                }
+                return {
+                    ok: false,
+                    blocked: false,
+                    error: publicError,
+                    failure_type: failureType,
+                    decision_id: decisionId,
+                    brief,
+                    commit,
+                    value_report: null,
+                    summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
+                };
+            }
+            let commitErrorMessage = null;
+            try {
+                commit = await this.commit({
+                    success: true,
+                    outcome: `Guarded run completed: ${options.action}`,
+                });
+            }
+            catch (error) {
+                commitErrorMessage = safePublicErrorMessage(error);
+                process.stderr.write(`[marrow] Warning: guarded run success commit failed: ${commitErrorMessage}\n`);
+            }
+            if (options.includeValueReport) {
+                try {
+                    valueReport = await this.valueReport(options.valueReportPeriod ?? '7d');
+                }
+                catch (reportError) {
+                    process.stderr.write(`[marrow] Warning: guarded run value report failed: ${safePublicErrorMessage(reportError)}\n`);
+                }
+            }
+            return {
+                ok: true,
+                blocked: false,
+                result,
+                failure_type: null,
+                decision_id: decisionId,
+                brief,
+                commit,
+                value_report: valueReport,
+                summary: commitErrorMessage
+                    ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
+                    : valueReport?.summary || `Marrow guarded run completed and outcome was logged for: ${options.action}`,
+            };
+        }
+        catch (error) {
+            const failureType = classifyMarrowFailure(error);
+            const publicError = safePublicErrorMessage(error);
+            if (this.decisionId) {
+                try {
+                    commit = await this.commit({
+                        success: false,
+                        outcome: `Guarded run failed (${failureType}): ${publicError}`,
+                    });
+                }
+                catch (commitError) {
+                    process.stderr.write(`[marrow] Warning: guarded run commit failed: ${safePublicErrorMessage(commitError)}\n`);
+                }
+            }
+            return {
+                ok: false,
+                blocked: false,
+                error: publicError,
+                failure_type: failureType,
+                decision_id: decisionId,
+                brief,
+                commit,
+                value_report: null,
+                summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
+            };
         }
     }
     async beforeAction(meta) {
@@ -1158,6 +1360,19 @@ class MarrowClient {
         if (agentId)
             qs.set('agent_id', agentId);
         const res = await this.request('GET', `/v1/analytics/agent-status?${qs.toString()}`);
+        return (res.data || res);
+    }
+    /**
+     * Get an agent-native value report for owner reporting or agent planning.
+     * This is the no-dashboard proof payload: summary, metrics, fleet activity,
+     * risks, recommendations, and improvement data without raw decision text.
+     */
+    async valueReport(period = '7d', agentId = this.agentId) {
+        const days = clampPeriodDays(period);
+        const qs = new URLSearchParams({ period: String(days) });
+        if (agentId)
+            qs.set('agent_id', agentId);
+        const res = await this.request('GET', `/v1/analytics/value-report?${qs.toString()}`);
         return (res.data || res);
     }
     /**

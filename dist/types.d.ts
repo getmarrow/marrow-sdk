@@ -132,6 +132,31 @@ export interface MarrowAutoWrapOptions {
     type?: MarrowDecisionType;
     deriveAction?: (methodName: string, args: unknown[]) => string;
 }
+export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'unknown';
+export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
+export interface MarrowGuardedRunOptions<T> {
+    action: string;
+    execute: () => Promise<T> | T;
+    type?: string;
+    role?: MarrowDecisionBriefRole | string;
+    surfaces?: string[];
+    context?: Record<string, unknown>;
+    riskPolicy?: MarrowGuardedRiskPolicy;
+    includeValueReport?: boolean;
+    valueReportPeriod?: string | number;
+}
+export interface MarrowGuardedRunResult<T> {
+    ok: boolean;
+    blocked: boolean;
+    result?: T;
+    error?: string;
+    failure_type: MarrowFailureType | null;
+    decision_id: string | null;
+    brief: MarrowDecisionBriefResult | null;
+    commit: MarrowCommitResult | null;
+    value_report: MarrowValueReportResult | null;
+    summary: string;
+}
 export interface MarrowOrientResult {
     warnings: Array<{
         type: string;
@@ -508,6 +533,47 @@ export interface MarrowAgentStatusResult {
         raw_data_exposed: false;
     };
     next_actions: string[];
+}
+export interface MarrowValueReportResult {
+    period: {
+        days: number;
+        start: string;
+        end: string;
+    };
+    scope: {
+        agent_id: string | null;
+    };
+    summary: string;
+    metrics: {
+        decisions: {
+            total: number;
+            recorded: number;
+            successful: number;
+            failed: number;
+        };
+        success_rate: number;
+        saves: {
+            period: number;
+            total: number;
+        };
+    };
+    fleet: {
+        active_agents: number;
+        top_agents: Array<{
+            agent_id: string;
+            decisions: number;
+            success_rate: number;
+        }>;
+    };
+    risks: {
+        top_failure_types: Array<{
+            decision_type: string;
+            failures: number;
+            failure_rate: number;
+        }>;
+    };
+    recommendations: string[];
+    improvement: Record<string, unknown>;
 }
 export type MarrowDecisionBriefRole = 'deploy' | 'audit' | 'patch' | 'review' | 'general';
 export type MarrowDecisionBriefRiskLevel = 'low' | 'medium' | 'high';

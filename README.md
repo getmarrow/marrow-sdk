@@ -58,24 +58,26 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.16
+## What's New in v3.7.17
 
-v3.7.16 adds Phase 1 passive install support for agent runtimes:
+v3.7.17 adds the Phase 2 fleet learning layer for agent runtimes:
 
-- `quickStatus()` now returns passive health fields from `/v1/agent/status`: `enabled`, `lastEventAt`, `recentDecisions24h`, `captureCoverage`, `missedHooks`, and `recommendedFix`.
-- Pair SDK passive runtime with the new universal installer: `npx @getmarrow/install --sdk --dry-run`.
-- The installer can write `.marrow/passive-runtime.mjs` so owned Node agent processes can preload `createPassiveRuntime()` after one reviewed setup step.
-
-```bash
-npx @getmarrow/install --sdk --dry-run
-npx @getmarrow/install --sdk --yes
-```
+- `fleetLessons()` retrieves ranked reusable lessons before similar work.
+- `recordDeploymentMemory()` stores PR, commit, tests, smoke result, rollback plan, production health, and incident notes.
+- `createHandoff()`, `updateHandoff()`, and `handoffStatus()` provide a structured cross-agent handoff protocol.
+- `agentPerformance()` returns agent-facing value metrics: avoided mistakes, reused winning decisions, failed patterns, token/time saved estimate, reliability score, and next improvements.
+- `setMemoryPermission()` and `memoryPermissions()` expose fleet memory permission metadata for agent/team/org boundaries.
 
 ```typescript
-const status = await marrow.quickStatus();
-if (!status.enabled && status.recommendedFix) {
-  console.log(status.recommendedFix);
-}
+const lessons = await marrow.fleetLessons({ query: 'deploy production worker' });
+const performance = await marrow.agentPerformance('7d');
+
+await marrow.recordDeploymentMemory({
+  release_id: 'release-2026-05-08',
+  status: 'verified',
+  tests: ['npm test', 'smoke /health'],
+  rollback_plan: 'Use last known-good Worker deployment',
+});
 ```
 
 Full feature history, examples, and API reference live at [getmarrow.ai/docs](https://getmarrow.ai/docs/).

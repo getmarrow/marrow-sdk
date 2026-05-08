@@ -1604,6 +1604,91 @@ class MarrowClient {
         });
         return (res.data || res);
     }
+    async agentPerformance(period = '7d', agentId = this.agentId) {
+        const days = clampPeriodDays(period);
+        const qs = new URLSearchParams({ period: String(days) });
+        if (agentId)
+            qs.set('agent_id', agentId);
+        const res = await this.request('GET', `/v1/analytics/agent-performance?${qs.toString()}`);
+        return (res.data || res);
+    }
+    async fleetLessons(options = {}) {
+        const qs = new URLSearchParams();
+        if (options.query)
+            qs.set('query', options.query);
+        if (options.type)
+            qs.set('type', options.type);
+        if (options.agentId ?? this.agentId)
+            qs.set('agent_id', String(options.agentId ?? this.agentId));
+        if (options.limit)
+            qs.set('limit', String(options.limit));
+        const res = await this.request('GET', `/v1/fleet/lessons${qs.toString() ? `?${qs.toString()}` : ''}`);
+        return (res.data || res);
+    }
+    async recordFleetLesson(input) {
+        const res = await this.request('POST', '/v1/fleet/lessons', {
+            ...input,
+            agent_id: input.agent_id ?? this.agentId ?? undefined,
+        });
+        return (res.data || res);
+    }
+    async markFleetLessonReused(lessonId) {
+        const safeId = validatePathParam(lessonId, 'lessonId');
+        const res = await this.request('POST', `/v1/fleet/lessons/${safeId}/reuse`);
+        return (res.data || res);
+    }
+    async recordDeploymentMemory(input) {
+        const res = await this.request('POST', '/v1/fleet/deployment-memory', {
+            ...input,
+            agent_id: input.agent_id ?? this.agentId ?? undefined,
+        });
+        return (res.data || res);
+    }
+    async deploymentMemories(options = {}) {
+        const qs = new URLSearchParams();
+        if (options.environment)
+            qs.set('environment', options.environment);
+        if (options.status)
+            qs.set('status', options.status);
+        if (options.limit)
+            qs.set('limit', String(options.limit));
+        const res = await this.request('GET', `/v1/fleet/deployment-memory${qs.toString() ? `?${qs.toString()}` : ''}`);
+        return (res.data || res);
+    }
+    async createHandoff(input) {
+        const res = await this.request('POST', '/v1/fleet/handoffs', {
+            ...input,
+            from_agent_id: input.from_agent_id ?? this.agentId ?? undefined,
+        });
+        return (res.data || res);
+    }
+    async updateHandoff(handoffId, input) {
+        const safeId = validatePathParam(handoffId, 'handoffId');
+        const res = await this.request('PATCH', `/v1/fleet/handoffs/${safeId}`, input);
+        return (res.data || res);
+    }
+    async handoffStatus(options = {}) {
+        const qs = new URLSearchParams();
+        if (options.status)
+            qs.set('status', options.status);
+        if (options.agentId ?? this.agentId)
+            qs.set('agent_id', String(options.agentId ?? this.agentId));
+        if (options.limit)
+            qs.set('limit', String(options.limit));
+        const res = await this.request('GET', `/v1/fleet/handoffs/status${qs.toString() ? `?${qs.toString()}` : ''}`);
+        return (res.data || res);
+    }
+    async setMemoryPermission(input) {
+        const res = await this.request('PUT', '/v1/fleet/memory-permissions', input);
+        return (res.data || res);
+    }
+    async memoryPermissions(agentId = this.agentId) {
+        const qs = new URLSearchParams();
+        if (agentId)
+            qs.set('agent_id', agentId);
+        const res = await this.request('GET', `/v1/fleet/memory-permissions${qs.toString() ? `?${qs.toString()}` : ''}`);
+        return (res.data || res);
+    }
     /**
      * Explicitly end the current session. Optionally auto-commits any open decision.
      * @param autoCommitOpen - whether to auto-commit (default false)

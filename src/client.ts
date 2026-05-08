@@ -42,6 +42,16 @@ import type {
   MarrowValueReportResult,
   MarrowDecisionBriefRequest,
   MarrowDecisionBriefResult,
+  MarrowAgentPerformanceResult,
+  MarrowRecordFleetLessonInput,
+  MarrowFleetLessonsResult,
+  MarrowDeploymentMemoryInput,
+  MarrowDeploymentMemory,
+  MarrowCreateHandoffInput,
+  MarrowUpdateHandoffInput,
+  MarrowAgentHandoff,
+  MarrowSetMemoryPermissionInput,
+  MarrowMemoryPermissionRecord,
   MarrowFailureType,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
@@ -2031,6 +2041,90 @@ export class MarrowClient {
       session_id: input.session_id ?? this.sessionId ?? undefined,
     });
     return (res.data || res) as MarrowDecisionBriefResult;
+  }
+
+  async agentPerformance(period: string | number = '7d', agentId: string | null = this.agentId): Promise<MarrowAgentPerformanceResult> {
+    const days = clampPeriodDays(period);
+    const qs = new URLSearchParams({ period: String(days) });
+    if (agentId) qs.set('agent_id', agentId);
+    const res = await this.request('GET', `/v1/analytics/agent-performance?${qs.toString()}`);
+    return (res.data || res) as MarrowAgentPerformanceResult;
+  }
+
+  async fleetLessons(options: { query?: string; type?: string; agentId?: string | null; limit?: number } = {}): Promise<MarrowFleetLessonsResult> {
+    const qs = new URLSearchParams();
+    if (options.query) qs.set('query', options.query);
+    if (options.type) qs.set('type', options.type);
+    if (options.agentId ?? this.agentId) qs.set('agent_id', String(options.agentId ?? this.agentId));
+    if (options.limit) qs.set('limit', String(options.limit));
+    const res = await this.request('GET', `/v1/fleet/lessons${qs.toString() ? `?${qs.toString()}` : ''}`);
+    return (res.data || res) as MarrowFleetLessonsResult;
+  }
+
+  async recordFleetLesson(input: MarrowRecordFleetLessonInput): Promise<{ lesson: MarrowFleetLessonsResult['lessons'][number] }> {
+    const res = await this.request('POST', '/v1/fleet/lessons', {
+      ...input,
+      agent_id: input.agent_id ?? this.agentId ?? undefined,
+    });
+    return (res.data || res) as { lesson: MarrowFleetLessonsResult['lessons'][number] };
+  }
+
+  async markFleetLessonReused(lessonId: string): Promise<{ lesson: MarrowFleetLessonsResult['lessons'][number] }> {
+    const safeId = validatePathParam(lessonId, 'lessonId');
+    const res = await this.request('POST', `/v1/fleet/lessons/${safeId}/reuse`);
+    return (res.data || res) as { lesson: MarrowFleetLessonsResult['lessons'][number] };
+  }
+
+  async recordDeploymentMemory(input: MarrowDeploymentMemoryInput): Promise<{ memory: MarrowDeploymentMemory }> {
+    const res = await this.request('POST', '/v1/fleet/deployment-memory', {
+      ...input,
+      agent_id: input.agent_id ?? this.agentId ?? undefined,
+    });
+    return (res.data || res) as { memory: MarrowDeploymentMemory };
+  }
+
+  async deploymentMemories(options: { environment?: string; status?: string; limit?: number } = {}): Promise<{ memories: MarrowDeploymentMemory[]; count: number }> {
+    const qs = new URLSearchParams();
+    if (options.environment) qs.set('environment', options.environment);
+    if (options.status) qs.set('status', options.status);
+    if (options.limit) qs.set('limit', String(options.limit));
+    const res = await this.request('GET', `/v1/fleet/deployment-memory${qs.toString() ? `?${qs.toString()}` : ''}`);
+    return (res.data || res) as { memories: MarrowDeploymentMemory[]; count: number };
+  }
+
+  async createHandoff(input: MarrowCreateHandoffInput): Promise<{ handoff: MarrowAgentHandoff }> {
+    const res = await this.request('POST', '/v1/fleet/handoffs', {
+      ...input,
+      from_agent_id: input.from_agent_id ?? this.agentId ?? undefined,
+    });
+    return (res.data || res) as { handoff: MarrowAgentHandoff };
+  }
+
+  async updateHandoff(handoffId: string, input: MarrowUpdateHandoffInput): Promise<{ handoff: MarrowAgentHandoff }> {
+    const safeId = validatePathParam(handoffId, 'handoffId');
+    const res = await this.request('PATCH', `/v1/fleet/handoffs/${safeId}`, input);
+    return (res.data || res) as { handoff: MarrowAgentHandoff };
+  }
+
+  async handoffStatus(options: { status?: string; agentId?: string | null; limit?: number } = {}): Promise<{ handoffs: MarrowAgentHandoff[]; summary: Record<string, number> }> {
+    const qs = new URLSearchParams();
+    if (options.status) qs.set('status', options.status);
+    if (options.agentId ?? this.agentId) qs.set('agent_id', String(options.agentId ?? this.agentId));
+    if (options.limit) qs.set('limit', String(options.limit));
+    const res = await this.request('GET', `/v1/fleet/handoffs/status${qs.toString() ? `?${qs.toString()}` : ''}`);
+    return (res.data || res) as { handoffs: MarrowAgentHandoff[]; summary: Record<string, number> };
+  }
+
+  async setMemoryPermission(input: MarrowSetMemoryPermissionInput): Promise<{ permission: MarrowMemoryPermissionRecord }> {
+    const res = await this.request('PUT', '/v1/fleet/memory-permissions', input);
+    return (res.data || res) as { permission: MarrowMemoryPermissionRecord };
+  }
+
+  async memoryPermissions(agentId: string | null = this.agentId): Promise<{ permissions: MarrowMemoryPermissionRecord[]; count: number }> {
+    const qs = new URLSearchParams();
+    if (agentId) qs.set('agent_id', agentId);
+    const res = await this.request('GET', `/v1/fleet/memory-permissions${qs.toString() ? `?${qs.toString()}` : ''}`);
+    return (res.data || res) as { permissions: MarrowMemoryPermissionRecord[]; count: number };
   }
 
   /**

@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
@@ -226,6 +226,51 @@ export declare class MarrowClient {
      * source-of-truth surfaces, proof-pack requirements, and next actions.
      */
     decisionBrief(input: MarrowDecisionBriefRequest): Promise<MarrowDecisionBriefResult>;
+    agentPerformance(period?: string | number, agentId?: string | null): Promise<MarrowAgentPerformanceResult>;
+    fleetLessons(options?: {
+        query?: string;
+        type?: string;
+        agentId?: string | null;
+        limit?: number;
+    }): Promise<MarrowFleetLessonsResult>;
+    recordFleetLesson(input: MarrowRecordFleetLessonInput): Promise<{
+        lesson: MarrowFleetLessonsResult['lessons'][number];
+    }>;
+    markFleetLessonReused(lessonId: string): Promise<{
+        lesson: MarrowFleetLessonsResult['lessons'][number];
+    }>;
+    recordDeploymentMemory(input: MarrowDeploymentMemoryInput): Promise<{
+        memory: MarrowDeploymentMemory;
+    }>;
+    deploymentMemories(options?: {
+        environment?: string;
+        status?: string;
+        limit?: number;
+    }): Promise<{
+        memories: MarrowDeploymentMemory[];
+        count: number;
+    }>;
+    createHandoff(input: MarrowCreateHandoffInput): Promise<{
+        handoff: MarrowAgentHandoff;
+    }>;
+    updateHandoff(handoffId: string, input: MarrowUpdateHandoffInput): Promise<{
+        handoff: MarrowAgentHandoff;
+    }>;
+    handoffStatus(options?: {
+        status?: string;
+        agentId?: string | null;
+        limit?: number;
+    }): Promise<{
+        handoffs: MarrowAgentHandoff[];
+        summary: Record<string, number>;
+    }>;
+    setMemoryPermission(input: MarrowSetMemoryPermissionInput): Promise<{
+        permission: MarrowMemoryPermissionRecord;
+    }>;
+    memoryPermissions(agentId?: string | null): Promise<{
+        permissions: MarrowMemoryPermissionRecord[];
+        count: number;
+    }>;
     /**
      * Explicitly end the current session. Optionally auto-commits any open decision.
      * @param autoCommitOpen - whether to auto-commit (default false)

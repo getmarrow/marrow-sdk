@@ -729,6 +729,149 @@ export interface MarrowDecisionBriefResult {
   next_actions: string[];
 }
 
+export type MarrowFleetLessonType = 'success' | 'failure' | 'deploy' | 'incident' | 'handoff' | 'general';
+export type MarrowFleetVisibility = 'private' | 'shared' | 'production-critical';
+export type MarrowHandoffStatus = 'pending' | 'accepted' | 'working' | 'blocked' | 'complete' | 'stale' | 'cancelled';
+export type MarrowDeploymentMemoryStatus = 'planned' | 'dry_run' | 'deployed' | 'verified' | 'rolled_back' | 'incident';
+export type MarrowMemoryPermission = 'read-only' | 'contribute-only' | 'private' | 'shared' | 'production-critical';
+
+export interface MarrowFleetLesson {
+  id: string;
+  source_decision_id: string | null;
+  agent_id: string | null;
+  lesson_type: MarrowFleetLessonType;
+  title: string;
+  summary: string;
+  action_pattern: string | null;
+  outcome_success: boolean | null;
+  confidence: number;
+  score: number;
+  reuse_count: number;
+  visibility: MarrowFleetVisibility;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+  last_reused_at: string | null;
+}
+
+export interface MarrowFleetLessonsResult {
+  lessons: MarrowFleetLesson[];
+  count: number;
+}
+
+export interface MarrowRecordFleetLessonInput {
+  summary: string;
+  title?: string;
+  source_decision_id?: string;
+  agent_id?: string;
+  lesson_type?: MarrowFleetLessonType | string;
+  action_pattern?: string;
+  outcome_success?: boolean;
+  confidence?: number;
+  visibility?: MarrowFleetVisibility | string;
+  tags?: string[];
+}
+
+export interface MarrowDeploymentMemory {
+  id: string;
+  agent_id: string | null;
+  workflow_id: string | null;
+  release_id: string | null;
+  pr_url: string | null;
+  commit_sha: string | null;
+  environment: string;
+  status: MarrowDeploymentMemoryStatus;
+  tests: string[];
+  smoke_result: string | null;
+  rollback_plan: string | null;
+  prod_health: string | null;
+  incident_summary: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarrowDeploymentMemoryInput {
+  agent_id?: string;
+  workflow_id?: string;
+  release_id?: string;
+  pr_url?: string;
+  commit_sha?: string;
+  environment?: string;
+  status?: MarrowDeploymentMemoryStatus | string;
+  tests?: string[];
+  smoke_result?: string;
+  rollback_plan?: string;
+  prod_health?: string;
+  incident_summary?: string;
+}
+
+export interface MarrowAgentHandoff {
+  id: string;
+  workflow_id: string | null;
+  from_agent_id: string | null;
+  to_agent_id: string;
+  task: string;
+  status: MarrowHandoffStatus;
+  checkpoint: string | null;
+  result_summary: string | null;
+  stale_after_seconds: number;
+  stale: boolean;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface MarrowCreateHandoffInput {
+  workflow_id?: string;
+  from_agent_id?: string;
+  to_agent_id: string;
+  task: string;
+  checkpoint?: string;
+  stale_after_seconds?: number;
+}
+
+export interface MarrowUpdateHandoffInput {
+  status?: MarrowHandoffStatus | string;
+  checkpoint?: string;
+  result_summary?: string;
+}
+
+export interface MarrowMemoryPermissionRecord {
+  id: string;
+  agent_id: string;
+  scope: string;
+  permission: MarrowMemoryPermission;
+  resource_type: string;
+  resource_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarrowSetMemoryPermissionInput {
+  agent_id: string;
+  permission: MarrowMemoryPermission | string;
+  scope?: string;
+  resource_type?: string;
+  resource_id?: string;
+}
+
+export interface MarrowAgentPerformanceResult {
+  period: { days: number; start: string; end: string };
+  scope: { agent_id: string | null };
+  avoided_mistakes: number;
+  reused_winning_decisions: number;
+  failed_patterns: Array<{ decision_type: string; failures: number; failure_rate: number }>;
+  token_time_saved_estimate: {
+    decisions_reused: number;
+    estimated_tokens_saved: number;
+    estimated_minutes_saved: number;
+  };
+  agent_reliability_score: number;
+  outcome_coverage: number;
+  top_reusable_lessons: MarrowFleetLesson[];
+  recommended_next_improvements: string[];
+}
+
 export interface MarrowSessionEndResult {
   session_id: string;
   committed: number;

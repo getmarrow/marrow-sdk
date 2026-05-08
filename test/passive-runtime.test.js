@@ -178,3 +178,48 @@ test('wrapFetch redacts sensitive query values and internal paths', async () => 
   assert.equal(beforeCalls[3].action, 'GET https://api.example.com/ok?page=2&limit=10');
   assert.equal(afterCalls[0].result, 'HTTP 200 OK');
 });
+
+test('quickStatus maps passive install health fields', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+
+  marrow.request = async () => ({
+    data: {
+      ok: true,
+      enabled: true,
+      health: 'healthy',
+      message: 'Marrow is active',
+      has_memory: true,
+      low_history: false,
+      decision_count: 12,
+      outcome_count: 9,
+      success_rate: 0.75,
+      first_event_at: '2026-05-08T00:00:00.000Z',
+      last_event_at: '2026-05-08T01:00:00.000Z',
+      recent_decisions_24h: 4,
+      capture_coverage: {
+        decisions: true,
+        outcomes: 0.75,
+        tools: 'detected',
+        commands: 'detected',
+        deploys: 'unknown',
+        publishes: 'unknown',
+      },
+      missed_hooks: [],
+      recommended_fix: null,
+      proof: {
+        raw_data_exposed: false,
+        last_event_at: '2026-05-08T01:00:00.000Z',
+        recent_decisions_24h: 4,
+      },
+    },
+  });
+
+  const status = await marrow.quickStatus();
+  assert.equal(status.enabled, true);
+  assert.equal(status.decisionCount, 12);
+  assert.equal(status.outcomeCount, 9);
+  assert.equal(status.lastEventAt, '2026-05-08T01:00:00.000Z');
+  assert.equal(status.captureCoverage.outcomes, 0.75);
+  assert.deepEqual(status.missedHooks, []);
+});

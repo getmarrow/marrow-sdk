@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail } from './types';
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
@@ -226,6 +226,7 @@ export declare class MarrowClient {
      * source-of-truth surfaces, proof-pack requirements, and next actions.
      */
     decisionBrief(input: MarrowDecisionBriefRequest): Promise<MarrowDecisionBriefResult>;
+    workflowGate(input: MarrowWorkflowGateRequest): Promise<MarrowWorkflowGateResult>;
     agentPerformance(period?: string | number, agentId?: string | null): Promise<MarrowAgentPerformanceResult>;
     fleetLessons(options?: {
         query?: string;

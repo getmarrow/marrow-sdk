@@ -58,25 +58,30 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.17
+## What's New in v3.7.18
 
-v3.7.17 adds the Phase 2 fleet learning layer for agent runtimes:
+v3.7.18 adds the Phase 1 passive-value layer for SDK agents:
 
-- `fleetLessons()` retrieves ranked reusable lessons before similar work.
-- `recordDeploymentMemory()` stores PR, commit, tests, smoke result, rollback plan, production health, and incident notes.
-- `createHandoff()`, `updateHandoff()`, and `handoffStatus()` provide a structured cross-agent handoff protocol.
-- `agentPerformance()` returns agent-facing value metrics: avoided mistakes, reused winning decisions, failed patterns, token/time saved estimate, reliability score, and next improvements.
-- `setMemoryPermission()` and `memoryPermissions()` expose fleet memory permission metadata for agent/team/org boundaries.
+- `workflowGate()` calls `/v1/workflow/gate` before risky work and returns allow, warn, review-required, or block.
+- `runGuarded()` now runs the workflow gate before execution by default.
+- Passive deploy/publish wrappers default to stricter high-risk blocking.
+- Guarded runs return the gate result next to the decision brief, commit, and optional value report.
+- `createPassiveRuntime()` can enable workflow gating with `useWorkflowGate`.
 
 ```typescript
-const lessons = await marrow.fleetLessons({ query: 'deploy production worker' });
-const performance = await marrow.agentPerformance('7d');
+const gate = await marrow.workflowGate({
+  action: 'deploy Cloudflare Worker to production',
+  risk_tolerance: 'medium'
+});
 
-await marrow.recordDeploymentMemory({
-  release_id: 'release-2026-05-08',
-  status: 'verified',
-  tests: ['npm test', 'smoke /health'],
-  rollback_plan: 'Use last known-good Worker deployment',
+const result = await marrow.runGuarded({
+  action: 'deploy Cloudflare Worker to production',
+  type: 'deploy',
+  role: 'deploy',
+  surfaces: ['github', 'cloudflare', 'production'],
+  riskPolicy: 'block_high',
+  includeValueReport: true,
+  execute: async () => deploy(),
 });
 ```
 
@@ -91,8 +96,8 @@ Full feature history, examples, and API reference live at [getmarrow.ai/docs](ht
 ```typescript
 const runtime = marrow.createPassiveRuntime({
   mode: 'auto',
-  defaultRiskPolicy: 'warn',
-  includeValueReport: false,
+  useWorkflowGate: true,
+  includeValueReport: true,
 });
 
 runtime.install(); // wraps global fetch when available
@@ -129,7 +134,7 @@ if (!guarded.ok) {
 }
 ```
 
-Set `riskPolicy: 'block_high'` when the agent should stop before execution if Marrow classifies the work as high risk.
+Set `riskPolicy: 'block_high'` when the agent should stop before execution if Marrow classifies the work as high risk or the workflow gate requires review.
 
 ### Value Report
 

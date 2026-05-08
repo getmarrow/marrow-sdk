@@ -1289,12 +1289,28 @@ class MarrowClient {
         const data = res.data ?? res;
         return {
             ok: data.ok,
+            enabled: Boolean(data.enabled ?? data.ok),
             health: data.health || 'degraded',
             message: data.message || '',
             hasMemory: Boolean(data.has_memory),
             lowHistory: Boolean(data.low_history),
             decisionCount: data.decision_count || 0,
+            outcomeCount: data.outcome_count || 0,
             successRate: data.success_rate ?? null,
+            firstEventAt: data.first_event_at || null,
+            lastEventAt: data.last_event_at || null,
+            recentDecisions24h: data.recent_decisions_24h || 0,
+            captureCoverage: data.capture_coverage || {
+                decisions: Boolean(data.has_memory),
+                outcomes: 0,
+                tools: 'unknown',
+                commands: 'unknown',
+                deploys: 'unknown',
+                publishes: 'unknown',
+            },
+            missedHooks: Array.isArray(data.missed_hooks) ? data.missed_hooks : [],
+            recommendedFix: data.recommended_fix || null,
+            proof: data.proof || null,
         };
     }
     // Memory Control Methods

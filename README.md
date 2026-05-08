@@ -58,9 +58,33 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.15
+## What's New in v3.7.16
 
-v3.7.15 adds Passive Runtime Layer v2: `createPassiveRuntime()` for SDK agents that should benefit from Marrow after one install step.
+v3.7.16 adds Phase 1 passive install support for agent runtimes:
+
+- `quickStatus()` now returns passive health fields from `/v1/agent/status`: `enabled`, `lastEventAt`, `recentDecisions24h`, `captureCoverage`, `missedHooks`, and `recommendedFix`.
+- Pair SDK passive runtime with the new universal installer: `npx @getmarrow/install --sdk --dry-run`.
+- The installer can write `.marrow/passive-runtime.mjs` so owned Node agent processes can preload `createPassiveRuntime()` after one reviewed setup step.
+
+```bash
+npx @getmarrow/install --sdk --dry-run
+npx @getmarrow/install --sdk --yes
+```
+
+```typescript
+const status = await marrow.quickStatus();
+if (!status.enabled && status.recommendedFix) {
+  console.log(status.recommendedFix);
+}
+```
+
+Full feature history, examples, and API reference live at [getmarrow.ai/docs](https://getmarrow.ai/docs/).
+
+---
+
+## Passive Runtime Layer v2
+
+`createPassiveRuntime()` is for SDK agents that should benefit from Marrow after one install step.
 
 ```typescript
 const runtime = marrow.createPassiveRuntime({
@@ -82,8 +106,6 @@ await runtime.tool('github.pr.merge', () => mergePr());
 ```
 
 The runtime redacts URL/action metadata before logging, and Marrow never receives request bodies, headers, response bodies, or command output from this shim. Avoid placing secrets directly in action or command text when you can; the runtime redacts common cases but should not be treated as a license to inline credentials.
-
-v3.7.14 added the Passive Runtime Layer v1 SDK surface: `runGuarded()`, deterministic failure classification, and `valueReport()`.
 
 ### Guarded Run: One Passive Workflow Call
 

@@ -388,12 +388,32 @@ export interface MarrowAskResult {
 
 export interface MarrowQuickStatusResult {
   ok: boolean;
+  enabled: boolean;
   health: 'healthy' | 'degraded';
   message: string;
   hasMemory: boolean;
   lowHistory: boolean;
   decisionCount: number;
+  outcomeCount: number;
   successRate: number | null;
+  firstEventAt: string | null;
+  lastEventAt: string | null;
+  recentDecisions24h: number;
+  captureCoverage: {
+    decisions: boolean;
+    outcomes: number;
+    tools: 'detected' | 'unknown';
+    commands: 'detected' | 'unknown';
+    deploys: 'detected' | 'unknown';
+    publishes: 'detected' | 'unknown';
+  };
+  missedHooks: string[];
+  recommendedFix: string | null;
+  proof: {
+    raw_data_exposed: false;
+    last_event_at: string | null;
+    recent_decisions_24h: number;
+  } | null;
 }
 
 export interface MarrowClientOptions {

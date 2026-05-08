@@ -203,6 +203,7 @@ export interface MarrowPassiveRuntimeOptions {
   defaultType?: string;
   defaultRole?: MarrowDecisionBriefRole | string;
   defaultRiskPolicy?: MarrowGuardedRiskPolicy;
+  useWorkflowGate?: boolean;
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
   actionPrefix?: string;
@@ -217,6 +218,9 @@ export interface MarrowPassiveActionOptions {
   surfaces?: MarrowPassiveRuntimeSurface[];
   context?: Record<string, unknown>;
   riskPolicy?: MarrowGuardedRiskPolicy;
+  useWorkflowGate?: boolean;
+  requiresApproval?: boolean;
+  riskTolerance?: MarrowWorkflowGateRiskTolerance;
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
 }
@@ -247,6 +251,35 @@ export type MarrowFailureType =
   | 'unknown';
 
 export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
+export type MarrowWorkflowGateRiskTolerance = 'low' | 'medium' | 'high';
+export type MarrowWorkflowGateDecision = 'allow' | 'warn' | 'review_required' | 'block';
+export type MarrowWorkflowGateRiskLevel = 'low' | 'medium' | 'high';
+
+export interface MarrowWorkflowGateRequest {
+  action: string;
+  description?: string;
+  context?: Record<string, unknown>;
+  risk_tolerance?: MarrowWorkflowGateRiskTolerance;
+  requires_approval?: boolean;
+}
+
+export interface MarrowWorkflowGateResult {
+  allow: boolean;
+  decision: MarrowWorkflowGateDecision;
+  risk_level: MarrowWorkflowGateRiskLevel;
+  reasons: Array<{
+    code: string;
+    severity: string;
+    message: string;
+  }>;
+  agent_id?: string | null;
+  session_id?: string | null;
+  gate_event_id?: string | null;
+  policy?: Record<string, unknown>;
+  prior_lessons?: MarrowFleetLesson[];
+  deployment_playbooks?: MarrowDeploymentMemory[];
+  next?: Record<string, unknown>;
+}
 
 export interface MarrowGuardedRunOptions<T> {
   action: string;
@@ -256,6 +289,9 @@ export interface MarrowGuardedRunOptions<T> {
   surfaces?: string[];
   context?: Record<string, unknown>;
   riskPolicy?: MarrowGuardedRiskPolicy;
+  useWorkflowGate?: boolean;
+  requiresApproval?: boolean;
+  riskTolerance?: MarrowWorkflowGateRiskTolerance;
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
 }
@@ -268,6 +304,7 @@ export interface MarrowGuardedRunResult<T> {
   failure_type: MarrowFailureType | null;
   decision_id: string | null;
   brief: MarrowDecisionBriefResult | null;
+  gate: MarrowWorkflowGateResult | null;
   commit: MarrowCommitResult | null;
   value_report: MarrowValueReportResult | null;
   summary: string;

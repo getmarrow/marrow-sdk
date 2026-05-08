@@ -42,6 +42,8 @@ import type {
   MarrowValueReportResult,
   MarrowDecisionBriefRequest,
   MarrowDecisionBriefResult,
+  MarrowWorkflowGateRequest,
+  MarrowWorkflowGateResult,
   MarrowAgentPerformanceResult,
   MarrowRecordFleetLessonInput,
   MarrowFleetLessonsResult,
@@ -53,6 +55,7 @@ import type {
   MarrowSetMemoryPermissionInput,
   MarrowMemoryPermissionRecord,
   MarrowFailureType,
+  MarrowGuardedRiskPolicy,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
   MarrowPassiveActionOptions,
@@ -99,6 +102,25 @@ function redactSensitiveText(value: string): string {
     .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
     .replace(/\b(?:sk|pk|ghp|github_pat|npm)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
     .replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#\s]*/gi, '$1[redacted]');
+}
+
+function redactSensitiveValue(value: unknown, depth: number = 0): unknown {
+  if (depth > 4) return '[redacted-depth]';
+  if (typeof value === 'string') return redactSensitiveText(value);
+  if (typeof value === 'number' || typeof value === 'boolean' || value == null) return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => redactSensitiveValue(item, depth + 1));
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 40)) {
+      if (/(?:secret|token|api[_-]?key|password|credential|authorization|private[_-]?key)/i.test(key)) {
+        out[key] = '[redacted]';
+      } else {
+        out[key] = redactSensitiveValue(item, depth + 1);
+      }
+    }
+    return out;
+  }
+  return String(value);
 }
 
 function safePublicErrorMessage(error: unknown): string {
@@ -182,6 +204,17 @@ function summarizeArgs(args: unknown[], max: number = 80): string {
 
 function summarizeCommand(command: string): string {
   return truncate(redactSensitiveText(normalizeWhitespace(command)), 240);
+}
+
+function isHighRiskPassiveAction(action: string, surfaces: string[] = []): boolean {
+  const haystack = `${action} ${surfaces.join(' ')}`.toLowerCase();
+  return /\b(?:deploy|deployment|publish|release|merge|push|migration|migrate|rollback|production|prod|cloudflare|worker|npm|github|secret|token|credential|key|permission|database|db|delete|destroy|revoke|rotate)\b/.test(haystack);
+}
+
+function riskToleranceForPolicy(policy: MarrowGuardedRiskPolicy | undefined): 'low' | 'medium' | 'high' {
+  if (policy === 'block_high') return 'medium';
+  if (policy === 'off') return 'high';
+  return 'high';
 }
 
 function normalizeWhitespace(value: string): string {
@@ -632,10 +665,58 @@ export class MarrowClient {
 
   async runGuarded<T>(options: MarrowGuardedRunOptions<T>): Promise<MarrowGuardedRunResult<T>> {
     const riskPolicy = options.riskPolicy ?? 'warn';
+    const useWorkflowGate = options.useWorkflowGate ?? riskPolicy !== 'off';
     let brief: MarrowDecisionBriefResult | null = null;
+    let gate: MarrowWorkflowGateResult | null = null;
     let decisionId: string | null = null;
     let commit: MarrowCommitResult | null = null;
     let valueReport: MarrowValueReportResult | null = null;
+
+    if (useWorkflowGate) {
+      try {
+        gate = await this.workflowGate({
+          action: redactSensitiveText(options.action),
+          description: options.type || options.role ? `${options.type || 'general'}:${options.role || 'general'}` : undefined,
+          context: {
+            ...((redactSensitiveValue(options.context || {}) as Record<string, unknown>)),
+            role: options.role,
+            surfaces: options.surfaces,
+          },
+          risk_tolerance: options.riskTolerance || riskToleranceForPolicy(riskPolicy),
+          requires_approval: options.requiresApproval,
+        });
+      } catch (error) {
+        if (riskPolicy === 'block_high') {
+          const failureType = classifyMarrowFailure(error);
+          return {
+            ok: false,
+            blocked: true,
+            error: safePublicErrorMessage(error),
+            failure_type: failureType,
+            decision_id: null,
+            brief: null,
+            gate: null,
+            commit: null,
+            value_report: null,
+            summary: `Blocked before execution because Marrow could not run the workflow gate (${failureType}).`,
+          };
+        }
+      }
+
+      if (gate && !gate.allow && riskPolicy !== 'off') {
+        return {
+          ok: false,
+          blocked: true,
+          failure_type: 'policy_block',
+          decision_id: null,
+          brief: null,
+          gate,
+          commit: null,
+          value_report: null,
+          summary: `Blocked by Marrow workflow gate: ${gate.decision} (${gate.risk_level}).`,
+        };
+      }
+    }
 
     try {
       brief = await this.decisionBrief({
@@ -654,6 +735,7 @@ export class MarrowClient {
           failure_type: failureType,
           decision_id: null,
           brief: null,
+          gate,
           commit: null,
           value_report: null,
           summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
@@ -668,6 +750,7 @@ export class MarrowClient {
         failure_type: 'policy_block',
         decision_id: null,
         brief,
+        gate,
         commit: null,
         value_report: null,
         summary: `Blocked high-risk action before execution. Recommended workflow: ${brief.workflow.recommended}.`,
@@ -684,6 +767,9 @@ export class MarrowClient {
           role: options.role,
           surfaces: options.surfaces,
           risk_level: brief?.risk.level,
+          gate_decision: gate?.decision,
+          gate_risk_level: gate?.risk_level,
+          gate_event_id: gate?.gate_event_id,
           workflow: brief?.workflow.recommended,
         },
         checkLoop: true,
@@ -714,6 +800,7 @@ export class MarrowClient {
           failure_type: failureType,
           decision_id: decisionId,
           brief,
+          gate,
           commit,
           value_report: null,
           summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
@@ -746,6 +833,7 @@ export class MarrowClient {
         failure_type: null,
         decision_id: decisionId,
         brief,
+        gate,
         commit,
         value_report: valueReport,
         summary: commitErrorMessage
@@ -773,6 +861,7 @@ export class MarrowClient {
         failure_type: failureType,
         decision_id: decisionId,
         brief,
+        gate,
         commit,
         value_report: null,
         summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
@@ -809,17 +898,22 @@ export class MarrowClient {
       actionOptions: MarrowPassiveActionOptions = {}
     ): MarrowGuardedRunOptions<T> => {
       const prefixedAction = `${options.actionPrefix || ''}${action}`;
+      const surfaces = actionOptions.surfaces || inferSurfacesFromText(prefixedAction);
+      const defaultRiskPolicy = isHighRiskPassiveAction(prefixedAction, surfaces) ? 'block_high' : 'warn';
       return {
         action: prefixedAction,
         execute,
         type: actionOptions.type || options.defaultType || inferTypeFromText(prefixedAction),
         role: actionOptions.role || options.defaultRole || 'general',
-        surfaces: actionOptions.surfaces || inferSurfacesFromText(prefixedAction),
+        surfaces,
         context: {
           ...(actionOptions.context || {}),
           marrow_passive_runtime_layer: 'v2',
         },
-        riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || 'warn',
+        riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || defaultRiskPolicy,
+        useWorkflowGate: actionOptions.useWorkflowGate ?? options.useWorkflowGate ?? true,
+        requiresApproval: actionOptions.requiresApproval,
+        riskTolerance: actionOptions.riskTolerance,
         includeValueReport: actionOptions.includeValueReport ?? options.includeValueReport ?? false,
         valueReportPeriod: actionOptions.valueReportPeriod ?? options.valueReportPeriod ?? '7d',
       };
@@ -2041,6 +2135,11 @@ export class MarrowClient {
       session_id: input.session_id ?? this.sessionId ?? undefined,
     });
     return (res.data || res) as MarrowDecisionBriefResult;
+  }
+
+  async workflowGate(input: MarrowWorkflowGateRequest): Promise<MarrowWorkflowGateResult> {
+    const res = await this.request('POST', '/v1/workflow/gate', input);
+    return (res.data || res) as MarrowWorkflowGateResult;
   }
 
   async agentPerformance(period: string | number = '7d', agentId: string | null = this.agentId): Promise<MarrowAgentPerformanceResult> {

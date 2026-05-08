@@ -33,6 +33,29 @@ function redactSensitiveText(value) {
         .replace(/\b(?:sk|pk|ghp|github_pat|npm)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
         .replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#\s]*/gi, '$1[redacted]');
 }
+function redactSensitiveValue(value, depth = 0) {
+    if (depth > 4)
+        return '[redacted-depth]';
+    if (typeof value === 'string')
+        return redactSensitiveText(value);
+    if (typeof value === 'number' || typeof value === 'boolean' || value == null)
+        return value;
+    if (Array.isArray(value))
+        return value.slice(0, 20).map((item) => redactSensitiveValue(item, depth + 1));
+    if (typeof value === 'object') {
+        const out = {};
+        for (const [key, item] of Object.entries(value).slice(0, 40)) {
+            if (/(?:secret|token|api[_-]?key|password|credential|authorization|private[_-]?key)/i.test(key)) {
+                out[key] = '[redacted]';
+            }
+            else {
+                out[key] = redactSensitiveValue(item, depth + 1);
+            }
+        }
+        return out;
+    }
+    return String(value);
+}
 function safePublicErrorMessage(error) {
     return truncate(redactSensitiveText(safeErrorMessage(error)), 500);
 }
@@ -112,6 +135,17 @@ function summarizeArgs(args, max = 80) {
 }
 function summarizeCommand(command) {
     return truncate(redactSensitiveText(normalizeWhitespace(command)), 240);
+}
+function isHighRiskPassiveAction(action, surfaces = []) {
+    const haystack = `${action} ${surfaces.join(' ')}`.toLowerCase();
+    return /\b(?:deploy|deployment|publish|release|merge|push|migration|migrate|rollback|production|prod|cloudflare|worker|npm|github|secret|token|credential|key|permission|database|db|delete|destroy|revoke|rotate)\b/.test(haystack);
+}
+function riskToleranceForPolicy(policy) {
+    if (policy === 'block_high')
+        return 'medium';
+    if (policy === 'off')
+        return 'high';
+    return 'high';
 }
 function normalizeWhitespace(value) {
     return value.replace(/\s+/g, ' ').trim();
@@ -499,10 +533,57 @@ class MarrowClient {
     }
     async runGuarded(options) {
         const riskPolicy = options.riskPolicy ?? 'warn';
+        const useWorkflowGate = options.useWorkflowGate ?? riskPolicy !== 'off';
         let brief = null;
+        let gate = null;
         let decisionId = null;
         let commit = null;
         let valueReport = null;
+        if (useWorkflowGate) {
+            try {
+                gate = await this.workflowGate({
+                    action: redactSensitiveText(options.action),
+                    description: options.type || options.role ? `${options.type || 'general'}:${options.role || 'general'}` : undefined,
+                    context: {
+                        ...redactSensitiveValue(options.context || {}),
+                        role: options.role,
+                        surfaces: options.surfaces,
+                    },
+                    risk_tolerance: options.riskTolerance || riskToleranceForPolicy(riskPolicy),
+                    requires_approval: options.requiresApproval,
+                });
+            }
+            catch (error) {
+                if (riskPolicy === 'block_high') {
+                    const failureType = classifyMarrowFailure(error);
+                    return {
+                        ok: false,
+                        blocked: true,
+                        error: safePublicErrorMessage(error),
+                        failure_type: failureType,
+                        decision_id: null,
+                        brief: null,
+                        gate: null,
+                        commit: null,
+                        value_report: null,
+                        summary: `Blocked before execution because Marrow could not run the workflow gate (${failureType}).`,
+                    };
+                }
+            }
+            if (gate && !gate.allow && riskPolicy !== 'off') {
+                return {
+                    ok: false,
+                    blocked: true,
+                    failure_type: 'policy_block',
+                    decision_id: null,
+                    brief: null,
+                    gate,
+                    commit: null,
+                    value_report: null,
+                    summary: `Blocked by Marrow workflow gate: ${gate.decision} (${gate.risk_level}).`,
+                };
+            }
+        }
         try {
             brief = await this.decisionBrief({
                 action: options.action,
@@ -521,6 +602,7 @@ class MarrowClient {
                     failure_type: failureType,
                     decision_id: null,
                     brief: null,
+                    gate,
                     commit: null,
                     value_report: null,
                     summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
@@ -534,6 +616,7 @@ class MarrowClient {
                 failure_type: 'policy_block',
                 decision_id: null,
                 brief,
+                gate,
                 commit: null,
                 value_report: null,
                 summary: `Blocked high-risk action before execution. Recommended workflow: ${brief.workflow.recommended}.`,
@@ -549,6 +632,9 @@ class MarrowClient {
                     role: options.role,
                     surfaces: options.surfaces,
                     risk_level: brief?.risk.level,
+                    gate_decision: gate?.decision,
+                    gate_risk_level: gate?.risk_level,
+                    gate_event_id: gate?.gate_event_id,
                     workflow: brief?.workflow.recommended,
                 },
                 checkLoop: true,
@@ -579,6 +665,7 @@ class MarrowClient {
                     failure_type: failureType,
                     decision_id: decisionId,
                     brief,
+                    gate,
                     commit,
                     value_report: null,
                     summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
@@ -610,6 +697,7 @@ class MarrowClient {
                 failure_type: null,
                 decision_id: decisionId,
                 brief,
+                gate,
                 commit,
                 value_report: valueReport,
                 summary: commitErrorMessage
@@ -638,6 +726,7 @@ class MarrowClient {
                 failure_type: failureType,
                 decision_id: decisionId,
                 brief,
+                gate,
                 commit,
                 value_report: null,
                 summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
@@ -665,17 +754,22 @@ class MarrowClient {
         const ownerToken = Symbol('marrowPassiveRuntimeFetchOwner');
         const buildGuardOptions = (action, execute, actionOptions = {}) => {
             const prefixedAction = `${options.actionPrefix || ''}${action}`;
+            const surfaces = actionOptions.surfaces || inferSurfacesFromText(prefixedAction);
+            const defaultRiskPolicy = isHighRiskPassiveAction(prefixedAction, surfaces) ? 'block_high' : 'warn';
             return {
                 action: prefixedAction,
                 execute,
                 type: actionOptions.type || options.defaultType || inferTypeFromText(prefixedAction),
                 role: actionOptions.role || options.defaultRole || 'general',
-                surfaces: actionOptions.surfaces || inferSurfacesFromText(prefixedAction),
+                surfaces,
                 context: {
                     ...(actionOptions.context || {}),
                     marrow_passive_runtime_layer: 'v2',
                 },
-                riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || 'warn',
+                riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || defaultRiskPolicy,
+                useWorkflowGate: actionOptions.useWorkflowGate ?? options.useWorkflowGate ?? true,
+                requiresApproval: actionOptions.requiresApproval,
+                riskTolerance: actionOptions.riskTolerance,
                 includeValueReport: actionOptions.includeValueReport ?? options.includeValueReport ?? false,
                 valueReportPeriod: actionOptions.valueReportPeriod ?? options.valueReportPeriod ?? '7d',
             };
@@ -1602,6 +1696,10 @@ class MarrowClient {
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
         });
+        return (res.data || res);
+    }
+    async workflowGate(input) {
+        const res = await this.request('POST', '/v1/workflow/gate', input);
         return (res.data || res);
     }
     async agentPerformance(period = '7d', agentId = this.agentId) {

@@ -149,6 +149,66 @@ test('passive command uses runGuarded with redacted command metadata', async () 
   assert.equal(calls[0].context.marrow_passive_runtime_layer, 'v2');
 });
 
+test('runGuarded blocks when workflow gate denies high-risk action', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  let executed = false;
+
+  marrow.workflowGate = async () => ({
+    allow: false,
+    decision: 'review_required',
+    risk_level: 'high',
+    reasons: [{ code: 'high_risk_action', severity: 'high', message: 'review required' }],
+    gate_event_id: 'gate_123',
+  });
+  marrow.decisionBrief = async () => {
+    throw new Error('decision brief should not run after a blocking gate');
+  };
+
+  const result = await marrow.runGuarded({
+    action: 'deploy to production',
+    riskPolicy: 'block_high',
+    execute: () => {
+      executed = true;
+      return 'deployed';
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.blocked, true);
+  assert.equal(result.gate.gate_event_id, 'gate_123');
+  assert.equal(executed, false);
+});
+
+test('passive deploy defaults to strict risk policy and workflow gate', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const calls = [];
+
+  marrow.runGuarded = async (options) => {
+    calls.push(options);
+    return {
+      ok: true,
+      blocked: false,
+      result: await options.execute(),
+      failure_type: null,
+      decision_id: 'decision_123',
+      brief: null,
+      gate: null,
+      commit: null,
+      value_report: null,
+      summary: 'ok',
+    };
+  };
+
+  const runtime = marrow.createPassiveRuntime({ fetch: false });
+  const result = await runtime.deploy('deploy Worker to production', () => 'ok');
+
+  assert.equal(result.result, 'ok');
+  assert.equal(calls[0].riskPolicy, 'block_high');
+  assert.equal(calls[0].useWorkflowGate, true);
+});
+
 test('wrapFetch redacts sensitive query values and internal paths', async () => {
   process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);

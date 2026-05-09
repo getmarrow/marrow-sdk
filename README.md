@@ -58,15 +58,14 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.18
+## What's New in v3.7.19
 
-v3.7.18 adds the Phase 1 passive-value layer for SDK agents:
+v3.7.19 adds actionable degraded-health repair and explicit automatic outcome closure for SDK agents:
 
-- `workflowGate()` calls `/v1/workflow/gate` before risky work and returns allow, warn, review-required, or block.
-- `runGuarded()` now runs the workflow gate before execution by default.
-- Passive deploy/publish wrappers default to stricter high-risk blocking.
-- Guarded runs return the gate result next to the decision brief, commit, and optional value report.
-- `createPassiveRuntime()` can enable workflow gating with `useWorkflowGate`.
+- `quickStatus()` now returns `hookStatus`, `fixCommands`, `nextAction`, and `autoOutcomeClosure`.
+- Passive runtime wrappers explicitly mark automatic outcome closure.
+- Tool, command, deploy, and publish wrappers continue to commit success/failure outcomes without agent follow-up.
+- Degraded passive capture now gives agents exact repair commands instead of vague health text.
 
 ```typescript
 const gate = await marrow.workflowGate({
@@ -110,6 +109,15 @@ await runtime.deploy('deploy Cloudflare Worker to production', async () => {
 
 await runtime.command('wrangler deploy', () => exec('wrangler deploy'));
 await runtime.tool('github.pr.merge', () => mergePr());
+```
+
+Each runtime surface auto-closes the outcome. Successful tool, command, deploy, and publish wrappers commit success; thrown errors commit failure with a redacted failure class. `quickStatus()` now exposes `hookStatus`, `fixCommands`, `nextAction`, and `autoOutcomeClosure` so agents can repair degraded passive capture directly.
+
+```typescript
+const status = await marrow.quickStatus();
+if (status.health === 'degraded' && status.nextAction) {
+  console.log(status.nextAction); // e.g. npx @getmarrow/install --yes
+}
 ```
 
 The runtime redacts URL/action metadata before logging, and Marrow never receives request bodies, headers, response bodies, or command output from this shim. Avoid placing secrets directly in action or command text when you can; the runtime redacts common cases but should not be treated as a license to inline credentials.

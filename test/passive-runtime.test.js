@@ -147,6 +147,8 @@ test('passive command uses runGuarded with redacted command metadata', async () 
   assert.match(calls[0].action, /--api-key=\[REDACTED\]/);
   assert.match(calls[0].action, /-p \[REDACTED\]/);
   assert.equal(calls[0].context.marrow_passive_runtime_layer, 'v2');
+  assert.equal(calls[0].context.marrow_auto_outcome_closure, true);
+  assert.deepEqual(calls[0].context.marrow_auto_outcome_surfaces, ['tool', 'command', 'deploy', 'publish']);
 });
 
 test('runGuarded blocks when workflow gate denies high-risk action', async () => {
@@ -266,7 +268,23 @@ test('quickStatus maps passive install health fields', async () => {
         publishes: 'unknown',
       },
       missed_hooks: [],
+      hook_status: {
+        outcomes: {
+          state: 'detected',
+          missing: false,
+          coverage: 0.75,
+          fix_command: 'npx @getmarrow/install --yes',
+        },
+      },
       recommended_fix: null,
+      fix_commands: [],
+      next_action: null,
+      auto_outcome_closure: {
+        enabled: true,
+        state: 'active',
+        coverage: 0.75,
+        expectation: 'Every captured tool, command, deploy, and publish action should auto-commit success or failure through MCP PostToolUse hooks or SDK passive runtime wrappers.',
+      },
       proof: {
         raw_data_exposed: false,
         last_event_at: '2026-05-08T01:00:00.000Z',
@@ -282,4 +300,8 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.lastEventAt, '2026-05-08T01:00:00.000Z');
   assert.equal(status.captureCoverage.outcomes, 0.75);
   assert.deepEqual(status.missedHooks, []);
+  assert.equal(status.hookStatus.outcomes.state, 'detected');
+  assert.deepEqual(status.fixCommands, []);
+  assert.equal(status.nextAction, null);
+  assert.equal(status.autoOutcomeClosure.enabled, true);
 });

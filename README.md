@@ -58,19 +58,21 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.19
+## What's New in v3.7.20
 
-v3.7.19 adds actionable degraded-health repair and explicit automatic outcome closure for SDK agents:
+v3.7.20 adds the agent-native runtime loop:
 
-- `quickStatus()` now returns `hookStatus`, `fixCommands`, `nextAction`, and `autoOutcomeClosure`.
-- Passive runtime wrappers explicitly mark automatic outcome closure.
-- Tool, command, deploy, and publish wrappers continue to commit success/failure outcomes without agent follow-up.
-- Degraded passive capture now gives agents exact repair commands instead of vague health text.
+- `agentRuntime()` returns status, decision brief, risk gate, lessons, template suggestion, proof-pack requirements, and exact next action in one call.
+- `/v1/workflows/gate` is supported as an alias for `/v1/workflow/gate`.
+- Proof-pack enforcement tells agents which fields are missing before they mark deploy, merge, publish, or security work complete.
+- Passive runtime wrappers continue to commit success/failure outcomes for tools, commands, deploys, and publishes.
 
 ```typescript
-const gate = await marrow.workflowGate({
+const runtime = await marrow.agentRuntime({
   action: 'deploy Cloudflare Worker to production',
-  risk_tolerance: 'medium'
+  type: 'deploy',
+  role: 'deploy',
+  surfaces: ['github', 'cloudflare', 'production']
 });
 
 const result = await marrow.runGuarded({

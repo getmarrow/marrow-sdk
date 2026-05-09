@@ -305,3 +305,28 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.nextAction, null);
   assert.equal(status.autoOutcomeClosure.enabled, true);
 });
+
+test('agentRuntime redacts legacy Marrow keys from action context and proof', async () => {
+  const leakedKey = 'mrw_123e4567-e89b-12d3-a456-426614174000_abcdefabcdefabcdefabcdefabcdefab';
+  const marrow = new MarrowClient('mrw_test_passive_runtime_key_123456789');
+  let captured;
+
+  marrow.request = async (method, path, body) => {
+    captured = { method, path, body };
+    return { data: { ok: true } };
+  };
+
+  await marrow.agentRuntime({
+    action: `Deploy with ${leakedKey} https://example.com/path?token=secretvalue&code=oauthsecret123`,
+    context: { nested: { apiKey: leakedKey, url: `https://example.com?key=${leakedKey}&X-Amz-Signature=signedsecret456&key_id=keysecret123` } },
+    proof: { summary: `proof ${leakedKey} https://example.com?client_secret=clientsecret789&key-id=keydashsecret456` },
+  });
+
+  const text = JSON.stringify(captured);
+  assert.equal(captured.method, 'POST');
+  assert.equal(captured.path, '/v1/agent/runtime');
+  assert.doesNotMatch(text, new RegExp(leakedKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(text, /secretvalue/);
+  assert.doesNotMatch(text, /oauthsecret123|signedsecret456|clientsecret789|keysecret123|keydashsecret456/);
+  assert.match(text, /\[REDACTED_MARROW_KEY\]/);
+});

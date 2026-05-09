@@ -30,7 +30,9 @@ function redactSensitiveText(value) {
         .replace(/\b(Bearer|Token|ApiKey|API_KEY|MARROW_API_KEY|MARROW_KEY)\s+[\w.\-+/=]{12,}\b/gi, '$1 [REDACTED]')
         .replace(/\b([A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|CREDENTIAL|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*[:=]\s*['"]?[^'"\s,;]{6,}/gi, '$1=[REDACTED]')
         .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
+        .replace(/\bmrw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_[A-Fa-f0-9]{16,}\b/gi, '[REDACTED_MARROW_KEY]')
         .replace(/\b(?:sk|pk|ghp|github_pat|npm)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
+        .replace(/([?&])([^=&#\s]*(?:code|token|secret|signature|sig|credential|password|session|auth|api[_-]?key|apikey|client[_-]?secret|(?:^|[-_])key|key(?:[-_]|$))[^=&#\s]*=)[^&#\s]*/gi, '$1$2[redacted]')
         .replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#\s]*/gi, '$1[redacted]');
 }
 function redactSensitiveValue(value, depth = 0) {
@@ -1706,6 +1708,21 @@ class MarrowClient {
     }
     async workflowGate(input) {
         const res = await this.request('POST', '/v1/workflow/gate', input);
+        return (res.data || res);
+    }
+    /**
+     * One-call agent runtime loop: status, decision brief, risk gate, lessons,
+     * template suggestion, proof-pack requirements, and exact next action.
+     */
+    async agentRuntime(input) {
+        const res = await this.request('POST', '/v1/agent/runtime', {
+            ...input,
+            action: redactSensitiveText(input.action),
+            context: input.context ? redactSensitiveValue(input.context) : undefined,
+            proof: input.proof ? redactSensitiveValue(input.proof) : undefined,
+            agent_id: input.agent_id ?? this.agentId ?? undefined,
+            session_id: input.session_id ?? this.sessionId ?? undefined,
+        });
         return (res.data || res);
     }
     async agentPerformance(period = '7d', agentId = this.agentId) {

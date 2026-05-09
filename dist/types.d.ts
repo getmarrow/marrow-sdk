@@ -372,7 +372,25 @@ export interface MarrowQuickStatusResult {
         publishes: 'detected' | 'unknown';
     };
     missedHooks: string[];
+    hookStatus: Record<string, {
+        state: 'detected' | 'missing' | 'unknown' | string;
+        missing: boolean;
+        detail?: string;
+        coverage?: number;
+        fix_command?: string;
+        sdk_fix_command?: string;
+        sdk_fix_snippet?: string;
+        mcp_fix_command?: string;
+    }>;
     recommendedFix: string | null;
+    fixCommands: string[];
+    nextAction: string | null;
+    autoOutcomeClosure: {
+        enabled: boolean;
+        state: 'inactive' | 'active' | 'needs_hook' | string;
+        coverage: number;
+        expectation: string;
+    } | null;
     proof: {
         raw_data_exposed: false;
         last_event_at: string | null;

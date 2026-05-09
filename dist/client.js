@@ -765,6 +765,8 @@ class MarrowClient {
                 context: {
                     ...(actionOptions.context || {}),
                     marrow_passive_runtime_layer: 'v2',
+                    marrow_auto_outcome_closure: true,
+                    marrow_auto_outcome_surfaces: ['tool', 'command', 'deploy', 'publish'],
                 },
                 riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || defaultRiskPolicy,
                 useWorkflowGate: actionOptions.useWorkflowGate ?? options.useWorkflowGate ?? true,
@@ -1403,7 +1405,11 @@ class MarrowClient {
                 publishes: 'unknown',
             },
             missedHooks: Array.isArray(data.missed_hooks) ? data.missed_hooks : [],
+            hookStatus: data.hook_status || {},
             recommendedFix: data.recommended_fix || null,
+            fixCommands: Array.isArray(data.fix_commands) ? data.fix_commands : [],
+            nextAction: data.next_action || null,
+            autoOutcomeClosure: data.auto_outcome_closure || null,
             proof: data.proof || null,
         };
     }

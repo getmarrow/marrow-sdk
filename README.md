@@ -64,7 +64,7 @@ v3.7.21 makes the agent-native runtime loop the SDK default for guarded/passive 
 
 - `runGuarded()` and `createPassiveRuntime()` call `agentRuntime()` before execution by default, so status, risk gate, lessons, templates, proof requirements, and exact next action arrive in one pre-action call.
 - Automatic outcome closure remains mandatory for passive tools, commands, deploys, and publishes; success commits on completion, failures commit with a redacted failure class.
-- `quickStatus()` exposes recent outcome-closure coverage, repair commands, and hook diagnostics so agents can tell exactly what is degraded and how to fix it.
+- `quickStatus()` exposes outcome-eligible closure coverage, repair commands, and hook diagnostics so agents can tell exactly what is degraded and how to fix it without status/runtime guidance calls lowering coverage.
 - `agentRuntime()` responses include `before_you_act_injection`, a structured fleet lesson/playbook signal agents can apply before acting.
 
 ```typescript
@@ -113,7 +113,7 @@ await runtime.command('wrangler deploy', () => exec('wrangler deploy'));
 await runtime.tool('github.pr.merge', () => mergePr());
 ```
 
-Each runtime surface auto-closes the outcome. Successful tool, command, deploy, and publish wrappers commit success; thrown errors commit failure with a redacted failure class. `quickStatus()` now exposes `hookStatus`, `fixCommands`, `nextAction`, and `autoOutcomeClosure` so agents can repair degraded passive capture directly.
+Each runtime surface auto-closes the outcome. Successful tool, command, deploy, and publish wrappers commit success; thrown errors commit failure with a redacted failure class. `quickStatus()` now exposes `hookStatus`, `fixCommands`, `nextAction`, `outcomeEligibleDecisionCount`, `recentOutcomeEligibleDecisions24h`, and `autoOutcomeClosure` so agents can repair degraded passive capture directly. Read-only status checks and one-call runtime guidance are not counted as outcome-eligible actions.
 
 ```typescript
 const status = await marrow.quickStatus();

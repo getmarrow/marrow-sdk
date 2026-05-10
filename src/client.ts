@@ -1822,11 +1822,13 @@ export class MarrowClient {
       hasMemory: Boolean(data.has_memory),
       lowHistory: Boolean(data.low_history),
       decisionCount: data.decision_count || 0,
+      outcomeEligibleDecisionCount: data.outcome_eligible_decision_count || 0,
       outcomeCount: data.outcome_count || 0,
       successRate: data.success_rate ?? null,
       firstEventAt: data.first_event_at || null,
       lastEventAt: data.last_event_at || null,
       recentDecisions24h: data.recent_decisions_24h || 0,
+      recentOutcomeEligibleDecisions24h: data.recent_outcome_eligible_decisions_24h || 0,
       recentOutcomeCount24h: data.recent_outcome_count_24h || 0,
       recentOutcomeCoverage24h: data.recent_outcome_coverage_24h || 0,
       captureCoverage: data.capture_coverage || {

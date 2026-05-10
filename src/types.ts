@@ -435,11 +435,13 @@ export interface MarrowQuickStatusResult {
   hasMemory: boolean;
   lowHistory: boolean;
   decisionCount: number;
+  outcomeEligibleDecisionCount: number;
   outcomeCount: number;
   successRate: number | null;
   firstEventAt: string | null;
   lastEventAt: string | null;
   recentDecisions24h: number;
+  recentOutcomeEligibleDecisions24h: number;
   recentOutcomeCount24h: number;
   recentOutcomeCoverage24h: number;
   captureCoverage: {
@@ -473,6 +475,8 @@ export interface MarrowQuickStatusResult {
     historical_coverage?: number;
     recent_coverage_24h?: number;
     recent_outcomes_24h?: number;
+    outcome_eligible_decisions?: number;
+    recent_outcome_eligible_decisions_24h?: number;
     repair_command?: string;
     expectation: string;
   } | null;

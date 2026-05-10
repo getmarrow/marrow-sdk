@@ -207,6 +207,7 @@ export interface MarrowPassiveRuntimeOptions {
   useWorkflowGate?: boolean;
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
+  requireOutcomeClosure?: boolean;
   actionPrefix?: string;
   fetch?: typeof fetch | false;
   patchGlobalFetch?: boolean;
@@ -225,6 +226,7 @@ export interface MarrowPassiveActionOptions {
   riskTolerance?: MarrowWorkflowGateRiskTolerance;
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
+  requireOutcomeClosure?: boolean;
 }
 
 export interface MarrowPassiveRuntime {
@@ -250,6 +252,7 @@ export type MarrowFailureType =
   | 'tooling'
   | 'missing_context'
   | 'policy_block'
+  | 'outcome_commit_failed'
   | 'unknown';
 
 export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
@@ -297,6 +300,7 @@ export interface MarrowGuardedRunOptions<T> {
   riskTolerance?: MarrowWorkflowGateRiskTolerance;
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
+  requireOutcomeClosure?: boolean;
 }
 
 export interface MarrowGuardedRunResult<T> {
@@ -311,12 +315,18 @@ export interface MarrowGuardedRunResult<T> {
   gate: MarrowWorkflowGateResult | null;
   commit: MarrowCommitResult | null;
   value_report: MarrowValueReportResult | null;
+  outcome_closure_required?: boolean;
+  outcome_closed?: boolean;
+  outcome_commit_error?: string | null;
+  before_action_enforced?: boolean;
   before_action_directive?: {
     required: boolean;
     must_use_before_action: boolean;
     source: string;
     message: string | null;
     exact_next_action: string | null;
+    untrusted_memory_notice?: string | null;
+    untrusted_memory_excerpt?: string | null;
   } | null;
   summary: string;
 }
@@ -839,6 +849,8 @@ export interface MarrowAgentRuntimeResult {
     required: boolean;
     source: string;
     message: string | null;
+    untrusted_memory_notice?: string | null;
+    untrusted_memory_excerpt?: string | null;
     must_use_before_action: boolean;
     lesson_id: string | null;
     lesson_score: number | null;

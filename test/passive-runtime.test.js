@@ -357,11 +357,13 @@ test('quickStatus maps passive install health fields', async () => {
       has_memory: true,
       low_history: false,
       decision_count: 12,
+      outcome_eligible_decision_count: 9,
       outcome_count: 9,
       success_rate: 0.75,
       first_event_at: '2026-05-08T00:00:00.000Z',
       last_event_at: '2026-05-08T01:00:00.000Z',
       recent_decisions_24h: 4,
+      recent_outcome_eligible_decisions_24h: 4,
       recent_outcome_count_24h: 4,
       recent_outcome_coverage_24h: 1,
       capture_coverage: {
@@ -393,6 +395,8 @@ test('quickStatus maps passive install health fields', async () => {
         historical_coverage: 0.75,
         recent_coverage_24h: 1,
         recent_outcomes_24h: 4,
+        outcome_eligible_decisions: 9,
+        recent_outcome_eligible_decisions_24h: 4,
         repair_command: 'npx @getmarrow/install --yes',
         expectation: 'Every captured tool, command, deploy, and publish action should auto-commit success or failure through MCP PostToolUse hooks or SDK passive runtime wrappers.',
       },
@@ -407,7 +411,9 @@ test('quickStatus maps passive install health fields', async () => {
   const status = await marrow.quickStatus();
   assert.equal(status.enabled, true);
   assert.equal(status.decisionCount, 12);
+  assert.equal(status.outcomeEligibleDecisionCount, 9);
   assert.equal(status.outcomeCount, 9);
+  assert.equal(status.recentOutcomeEligibleDecisions24h, 4);
   assert.equal(status.recentOutcomeCount24h, 4);
   assert.equal(status.recentOutcomeCoverage24h, 1);
   assert.equal(status.lastEventAt, '2026-05-08T01:00:00.000Z');
@@ -419,6 +425,7 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.nextAction, null);
   assert.equal(status.autoOutcomeClosure.enabled, true);
   assert.equal(status.autoOutcomeClosure.recent_coverage_24h, 1);
+  assert.equal(status.autoOutcomeClosure.outcome_eligible_decisions, 9);
 });
 
 test('agentRuntime redacts legacy Marrow keys from action context and proof', async () => {

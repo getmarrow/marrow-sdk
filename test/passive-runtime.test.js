@@ -123,6 +123,8 @@ test('passive command uses runGuarded with redacted command metadata', async () 
       failure_type: null,
       decision_id: 'decision_123',
       brief: null,
+      runtime: null,
+      gate: null,
       commit: null,
       value_report: null,
       summary: 'ok',
@@ -149,6 +151,7 @@ test('passive command uses runGuarded with redacted command metadata', async () 
   assert.equal(calls[0].context.marrow_passive_runtime_layer, 'v2');
   assert.equal(calls[0].context.marrow_auto_outcome_closure, true);
   assert.deepEqual(calls[0].context.marrow_auto_outcome_surfaces, ['tool', 'command', 'deploy', 'publish']);
+  assert.equal(calls[0].useAgentRuntime, true);
 });
 
 test('runGuarded blocks when workflow gate denies high-risk action', async () => {
@@ -156,6 +159,11 @@ test('runGuarded blocks when workflow gate denies high-risk action', async () =>
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);
   let executed = false;
 
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: null,
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+  });
   marrow.workflowGate = async () => ({
     allow: false,
     decision: 'review_required',
@@ -182,6 +190,100 @@ test('runGuarded blocks when workflow gate denies high-risk action', async () =>
   assert.equal(executed, false);
 });
 
+test('runGuarded uses one-call agent runtime before executing passive work', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const order = [];
+
+  marrow.agentRuntime = async (input) => {
+    order.push(['runtime', input.action]);
+    return {
+      ok: true,
+      decision_brief: { risk: { level: 'medium' }, workflow: { recommended: 'safe' } },
+      risk_gate: { allow: true, decision: 'warn', risk_level: 'medium', reasons: [] },
+      before_you_act: 'Use the prior deploy lesson before continuing.',
+      exact_next_action: 'Run smoke tests, then commit outcome.',
+    };
+  };
+  marrow.workflowGate = async () => {
+    order.push(['gate']);
+    return { allow: true, decision: 'warn', risk_level: 'medium', reasons: [] };
+  };
+  marrow.decisionBrief = async () => {
+    throw new Error('decision brief should be covered by agent runtime');
+  };
+  marrow.think = async () => {
+    order.push(['think']);
+    return { decisionId: 'decision_123' };
+  };
+  marrow.commit = async () => {
+    order.push(['commit']);
+    return { committed: true };
+  };
+
+  const result = await marrow.runGuarded({
+    action: 'publish package to npm',
+    type: 'publish',
+    riskPolicy: 'warn',
+    execute: () => {
+      order.push(['execute']);
+      return 'published';
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result, 'published');
+  assert.equal(result.runtime.before_you_act, 'Use the prior deploy lesson before continuing.');
+  assert.deepEqual(order.map(([name]) => name), ['runtime', 'gate', 'think', 'execute', 'commit']);
+});
+
+test('runGuarded redacts action and context across runtime, think, commit, and summaries', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const leakedKey = 'mrw_123e4567-e89b-12d3-a456-426614174000_deadbeefdeadbeefdeadbeefdeadbeef';
+  const rawAction = `deploy with ${leakedKey} https://example.com/path?token=secretvalue123`;
+  const context = {
+    token: leakedKey,
+    nested: { url: `https://example.com/callback?client_secret=clientsecret123&key=${leakedKey}` },
+  };
+  const captured = {};
+
+  marrow.agentRuntime = async (input) => {
+    captured.runtime = input;
+    return {
+      ok: true,
+      decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'safe' } },
+      risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+    };
+  };
+  marrow.workflowGate = async (input) => {
+    captured.gate = input;
+    return { allow: true, decision: 'allow', risk_level: 'low', reasons: [] };
+  };
+  marrow.think = async (input) => {
+    captured.think = input;
+    return { decisionId: 'decision_123' };
+  };
+  marrow.commit = async (input) => {
+    captured.commit = input;
+    return { committed: true };
+  };
+
+  const result = await marrow.runGuarded({
+    action: rawAction,
+    context,
+    riskPolicy: 'warn',
+    execute: () => 'ok',
+  });
+
+  const text = JSON.stringify({ captured, result });
+  assert.equal(result.ok, true);
+  assert.doesNotMatch(text, new RegExp(leakedKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(text, /secretvalue123|clientsecret123/);
+  assert.match(text, /\[REDACTED_MARROW_KEY\]/);
+  assert.match(text, /token=\[redacted\]/);
+});
+
 test('passive deploy defaults to strict risk policy and workflow gate', async () => {
   process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);
@@ -196,6 +298,7 @@ test('passive deploy defaults to strict risk policy and workflow gate', async ()
       failure_type: null,
       decision_id: 'decision_123',
       brief: null,
+      runtime: null,
       gate: null,
       commit: null,
       value_report: null,
@@ -259,9 +362,12 @@ test('quickStatus maps passive install health fields', async () => {
       first_event_at: '2026-05-08T00:00:00.000Z',
       last_event_at: '2026-05-08T01:00:00.000Z',
       recent_decisions_24h: 4,
+      recent_outcome_count_24h: 4,
+      recent_outcome_coverage_24h: 1,
       capture_coverage: {
         decisions: true,
         outcomes: 0.75,
+        recent_outcomes: 1,
         tools: 'detected',
         commands: 'detected',
         deploys: 'unknown',
@@ -281,8 +387,13 @@ test('quickStatus maps passive install health fields', async () => {
       next_action: null,
       auto_outcome_closure: {
         enabled: true,
+        required: true,
         state: 'active',
-        coverage: 0.75,
+        coverage: 1,
+        historical_coverage: 0.75,
+        recent_coverage_24h: 1,
+        recent_outcomes_24h: 4,
+        repair_command: 'npx @getmarrow/install --yes',
         expectation: 'Every captured tool, command, deploy, and publish action should auto-commit success or failure through MCP PostToolUse hooks or SDK passive runtime wrappers.',
       },
       proof: {
@@ -297,13 +408,17 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.enabled, true);
   assert.equal(status.decisionCount, 12);
   assert.equal(status.outcomeCount, 9);
+  assert.equal(status.recentOutcomeCount24h, 4);
+  assert.equal(status.recentOutcomeCoverage24h, 1);
   assert.equal(status.lastEventAt, '2026-05-08T01:00:00.000Z');
   assert.equal(status.captureCoverage.outcomes, 0.75);
+  assert.equal(status.captureCoverage.recent_outcomes, 1);
   assert.deepEqual(status.missedHooks, []);
   assert.equal(status.hookStatus.outcomes.state, 'detected');
   assert.deepEqual(status.fixCommands, []);
   assert.equal(status.nextAction, null);
   assert.equal(status.autoOutcomeClosure.enabled, true);
+  assert.equal(status.autoOutcomeClosure.recent_coverage_24h, 1);
 });
 
 test('agentRuntime redacts legacy Marrow keys from action context and proof', async () => {

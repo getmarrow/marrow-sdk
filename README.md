@@ -58,12 +58,14 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.21
+## What's New in v3.7.25
 
-v3.7.21 makes the agent-native runtime loop the SDK default for guarded/passive work:
+v3.7.25 makes passive guarded work fail closed when Marrow cannot prove the outcome was captured:
 
 - `runGuarded()` and `createPassiveRuntime()` call `agentRuntime()` before execution by default, so status, risk gate, lessons, templates, proof requirements, and exact next action arrive in one pre-action call.
-- Automatic outcome closure remains mandatory for passive tools, commands, deploys, and publishes; success commits on completion, failures commit with a redacted failure class.
+- `runGuarded()` now requires outcome closure by default. If execution succeeds but the Marrow outcome commit fails, the guarded result returns `ok: false`, `failure_type: "outcome_commit_failed"`, and the original result for inspection.
+- Passive tools, commands, deploys, and publishes pass `requireOutcomeClosure: true` automatically.
+- `runGuarded()` returns `outcome_closure_required`, `outcome_closed`, `outcome_commit_error`, and `before_action_enforced` so agents can avoid falsely marking work complete.
 - `quickStatus()` exposes outcome-eligible closure coverage, repair commands, and hook diagnostics so agents can tell exactly what is degraded and how to fix it without status/runtime guidance calls lowering coverage.
 - `agentRuntime()` responses include `before_you_act_injection`, a structured fleet lesson/playbook signal agents can apply before acting.
 
@@ -617,6 +619,7 @@ MIT
 
 ## Related Packages
 
+- **[@getmarrow/install](https://www.npmjs.com/package/@getmarrow/install)** — Universal installer for passive agent setup. Detects local agent/runtime surfaces, writes safe config, runs self-tests, and reports first-value proof.
 - **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Code, Claude Desktop, and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol. Includes one-command agent setup for automatic Marrow usage.
 
 **📖 Full API reference with all endpoints:** [https://getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)

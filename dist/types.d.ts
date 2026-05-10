@@ -142,6 +142,7 @@ export interface MarrowPassiveRuntimeOptions {
     useWorkflowGate?: boolean;
     includeValueReport?: boolean;
     valueReportPeriod?: string | number;
+    requireOutcomeClosure?: boolean;
     actionPrefix?: string;
     fetch?: typeof fetch | false;
     patchGlobalFetch?: boolean;
@@ -159,6 +160,7 @@ export interface MarrowPassiveActionOptions {
     riskTolerance?: MarrowWorkflowGateRiskTolerance;
     includeValueReport?: boolean;
     valueReportPeriod?: string | number;
+    requireOutcomeClosure?: boolean;
 }
 export interface MarrowPassiveRuntime {
     readonly installed: boolean;
@@ -172,7 +174,7 @@ export interface MarrowPassiveRuntime {
     deploy<T>(action: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
     publish<T>(action: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
 }
-export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'unknown';
+export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'outcome_commit_failed' | 'unknown';
 export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
 export type MarrowWorkflowGateRiskTolerance = 'low' | 'medium' | 'high';
 export type MarrowWorkflowGateDecision = 'allow' | 'warn' | 'review_required' | 'block';
@@ -215,6 +217,7 @@ export interface MarrowGuardedRunOptions<T> {
     riskTolerance?: MarrowWorkflowGateRiskTolerance;
     includeValueReport?: boolean;
     valueReportPeriod?: string | number;
+    requireOutcomeClosure?: boolean;
 }
 export interface MarrowGuardedRunResult<T> {
     ok: boolean;
@@ -228,12 +231,18 @@ export interface MarrowGuardedRunResult<T> {
     gate: MarrowWorkflowGateResult | null;
     commit: MarrowCommitResult | null;
     value_report: MarrowValueReportResult | null;
+    outcome_closure_required?: boolean;
+    outcome_closed?: boolean;
+    outcome_commit_error?: string | null;
+    before_action_enforced?: boolean;
     before_action_directive?: {
         required: boolean;
         must_use_before_action: boolean;
         source: string;
         message: string | null;
         exact_next_action: string | null;
+        untrusted_memory_notice?: string | null;
+        untrusted_memory_excerpt?: string | null;
     } | null;
     summary: string;
 }
@@ -812,6 +821,8 @@ export interface MarrowAgentRuntimeResult {
         required: boolean;
         source: string;
         message: string | null;
+        untrusted_memory_notice?: string | null;
+        untrusted_memory_excerpt?: string | null;
         must_use_before_action: boolean;
         lesson_id: string | null;
         lesson_score: number | null;

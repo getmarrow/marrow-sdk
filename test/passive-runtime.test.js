@@ -152,6 +152,7 @@ test('passive command uses runGuarded with redacted command metadata', async () 
   assert.equal(calls[0].context.marrow_auto_outcome_closure, true);
   assert.deepEqual(calls[0].context.marrow_auto_outcome_surfaces, ['tool', 'command', 'deploy', 'publish']);
   assert.equal(calls[0].useAgentRuntime, true);
+  assert.equal(calls[0].requireOutcomeClosure, true);
 });
 
 test('runGuarded blocks when workflow gate denies high-risk action', async () => {
@@ -248,8 +249,39 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   assert.equal(result.runtime.before_you_act, 'Use the prior deploy lesson before continuing.');
   assert.equal(result.before_action_directive.must_use_before_action, true);
   assert.equal(result.before_action_directive.source, 'fleet_lesson');
+  assert.equal(result.before_action_enforced, true);
+  assert.equal(result.outcome_closure_required, true);
+  assert.equal(result.outcome_closed, true);
   assert.match(result.summary, /before-action directive applied/i);
   assert.deepEqual(order.map(([name]) => name), ['runtime', 'gate', 'think', 'execute', 'commit']);
+});
+
+test('runGuarded fails closed when mandatory outcome closure cannot commit', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'safe' } },
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
+  marrow.think = async () => ({ decisionId: 'decision_123' });
+  marrow.commit = async () => {
+    throw new Error('network timeout while committing outcome');
+  };
+
+  const result = await marrow.runGuarded({
+    action: 'run deploy smoke test',
+    riskPolicy: 'warn',
+    execute: () => 'smoke passed',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.result, 'smoke passed');
+  assert.equal(result.failure_type, 'outcome_commit_failed');
+  assert.equal(result.outcome_closure_required, true);
+  assert.equal(result.outcome_closed, false);
+  assert.match(result.summary, /outcome closure failed/i);
 });
 
 test('runGuarded redacts action and context across runtime, think, commit, and summaries', async () => {

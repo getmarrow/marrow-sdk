@@ -58,14 +58,14 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.20
+## What's New in v3.7.21
 
-v3.7.20 adds the agent-native runtime loop:
+v3.7.21 makes the agent-native runtime loop the SDK default for guarded/passive work:
 
-- `agentRuntime()` returns status, decision brief, risk gate, lessons, template suggestion, proof-pack requirements, and exact next action in one call.
-- `/v1/workflows/gate` is supported as an alias for `/v1/workflow/gate`.
-- Proof-pack enforcement tells agents which fields are missing before they mark deploy, merge, publish, or security work complete.
-- Passive runtime wrappers continue to commit success/failure outcomes for tools, commands, deploys, and publishes.
+- `runGuarded()` and `createPassiveRuntime()` call `agentRuntime()` before execution by default, so status, risk gate, lessons, templates, proof requirements, and exact next action arrive in one pre-action call.
+- Automatic outcome closure remains mandatory for passive tools, commands, deploys, and publishes; success commits on completion, failures commit with a redacted failure class.
+- `quickStatus()` exposes recent outcome-closure coverage, repair commands, and hook diagnostics so agents can tell exactly what is degraded and how to fix it.
+- `agentRuntime()` responses include `before_you_act_injection`, a structured fleet lesson/playbook signal agents can apply before acting.
 
 ```typescript
 const runtime = await marrow.agentRuntime({

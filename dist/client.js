@@ -535,19 +535,74 @@ class MarrowClient {
     }
     async runGuarded(options) {
         const riskPolicy = options.riskPolicy ?? 'warn';
+        const useAgentRuntime = options.useAgentRuntime ?? riskPolicy !== 'off';
         const useWorkflowGate = options.useWorkflowGate ?? riskPolicy !== 'off';
+        const safeAction = redactSensitiveText(options.action);
+        const safeContext = redactSensitiveValue(options.context || {});
+        let runtime = null;
         let brief = null;
         let gate = null;
         let decisionId = null;
         let commit = null;
         let valueReport = null;
+        if (useAgentRuntime) {
+            try {
+                runtime = await this.agentRuntime({
+                    action: safeAction,
+                    type: options.type,
+                    role: options.role,
+                    surfaces: options.surfaces,
+                    context: {
+                        ...safeContext,
+                        marrow_sdk_guarded_run: true,
+                        marrow_runtime_default_pre_action: true,
+                    },
+                    risk_tolerance: options.riskTolerance || riskToleranceForPolicy(riskPolicy),
+                    requires_approval: options.requiresApproval,
+                });
+                brief = runtime.decision_brief || brief;
+                gate = runtime.risk_gate || gate;
+            }
+            catch (error) {
+                if (riskPolicy === 'block_high') {
+                    const failureType = classifyMarrowFailure(error);
+                    return {
+                        ok: false,
+                        blocked: true,
+                        error: safePublicErrorMessage(error),
+                        failure_type: failureType,
+                        decision_id: null,
+                        brief: null,
+                        runtime: null,
+                        gate: null,
+                        commit: null,
+                        value_report: null,
+                        summary: `Blocked before execution because Marrow could not run the agent runtime check (${failureType}).`,
+                    };
+                }
+            }
+            if (runtime?.risk_gate && !runtime.risk_gate.allow && riskPolicy === 'block_high') {
+                return {
+                    ok: false,
+                    blocked: true,
+                    failure_type: 'policy_block',
+                    decision_id: null,
+                    brief,
+                    runtime,
+                    gate,
+                    commit: null,
+                    value_report: null,
+                    summary: runtime.exact_next_action || `Blocked by Marrow agent runtime: ${runtime.risk_gate.decision} (${runtime.risk_gate.risk_level}).`,
+                };
+            }
+        }
         if (useWorkflowGate) {
             try {
                 gate = await this.workflowGate({
-                    action: redactSensitiveText(options.action),
+                    action: safeAction,
                     description: options.type || options.role ? `${options.type || 'general'}:${options.role || 'general'}` : undefined,
                     context: {
-                        ...redactSensitiveValue(options.context || {}),
+                        ...safeContext,
                         role: options.role,
                         surfaces: options.surfaces,
                     },
@@ -565,6 +620,7 @@ class MarrowClient {
                         failure_type: failureType,
                         decision_id: null,
                         brief: null,
+                        runtime,
                         gate: null,
                         commit: null,
                         value_report: null,
@@ -579,6 +635,7 @@ class MarrowClient {
                     failure_type: 'policy_block',
                     decision_id: null,
                     brief: null,
+                    runtime,
                     gate,
                     commit: null,
                     value_report: null,
@@ -586,29 +643,33 @@ class MarrowClient {
                 };
             }
         }
-        try {
-            brief = await this.decisionBrief({
-                action: options.action,
-                type: options.type,
-                role: options.role,
-                surfaces: options.surfaces,
-            });
-        }
-        catch (error) {
-            if (riskPolicy === 'block_high') {
-                const failureType = classifyMarrowFailure(error);
-                return {
-                    ok: false,
-                    blocked: true,
-                    error: safePublicErrorMessage(error),
-                    failure_type: failureType,
-                    decision_id: null,
-                    brief: null,
-                    gate,
-                    commit: null,
-                    value_report: null,
-                    summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
-                };
+        if (!brief) {
+            try {
+                brief = await this.decisionBrief({
+                    action: safeAction,
+                    type: options.type,
+                    role: options.role,
+                    surfaces: options.surfaces,
+                    context: safeContext,
+                });
+            }
+            catch (error) {
+                if (riskPolicy === 'block_high') {
+                    const failureType = classifyMarrowFailure(error);
+                    return {
+                        ok: false,
+                        blocked: true,
+                        error: safePublicErrorMessage(error),
+                        failure_type: failureType,
+                        decision_id: null,
+                        brief: null,
+                        runtime,
+                        gate,
+                        commit: null,
+                        value_report: null,
+                        summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
+                    };
+                }
             }
         }
         if (riskPolicy === 'block_high' && brief?.risk.level === 'high') {
@@ -618,6 +679,7 @@ class MarrowClient {
                 failure_type: 'policy_block',
                 decision_id: null,
                 brief,
+                runtime,
                 gate,
                 commit: null,
                 value_report: null,
@@ -626,10 +688,10 @@ class MarrowClient {
         }
         try {
             const think = await this.think({
-                action: options.action,
+                action: safeAction,
                 type: options.type || 'general',
                 context: {
-                    ...(options.context || {}),
+                    ...safeContext,
                     marrow_passive_runtime: true,
                     role: options.role,
                     surfaces: options.surfaces,
@@ -667,6 +729,7 @@ class MarrowClient {
                     failure_type: failureType,
                     decision_id: decisionId,
                     brief,
+                    runtime,
                     gate,
                     commit,
                     value_report: null,
@@ -677,7 +740,7 @@ class MarrowClient {
             try {
                 commit = await this.commit({
                     success: true,
-                    outcome: `Guarded run completed: ${options.action}`,
+                    outcome: `Guarded run completed: ${safeAction}`,
                 });
             }
             catch (error) {
@@ -699,12 +762,13 @@ class MarrowClient {
                 failure_type: null,
                 decision_id: decisionId,
                 brief,
+                runtime,
                 gate,
                 commit,
                 value_report: valueReport,
                 summary: commitErrorMessage
                     ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
-                    : valueReport?.summary || `Marrow guarded run completed and outcome was logged for: ${options.action}`,
+                    : valueReport?.summary || runtime?.before_you_act || `Marrow guarded run completed and outcome was logged for: ${safeAction}`,
             };
         }
         catch (error) {
@@ -728,6 +792,7 @@ class MarrowClient {
                 failure_type: failureType,
                 decision_id: decisionId,
                 brief,
+                runtime,
                 gate,
                 commit,
                 value_report: null,
@@ -771,6 +836,7 @@ class MarrowClient {
                     marrow_auto_outcome_surfaces: ['tool', 'command', 'deploy', 'publish'],
                 },
                 riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || defaultRiskPolicy,
+                useAgentRuntime: actionOptions.useAgentRuntime ?? options.useAgentRuntime ?? true,
                 useWorkflowGate: actionOptions.useWorkflowGate ?? options.useWorkflowGate ?? true,
                 requiresApproval: actionOptions.requiresApproval,
                 riskTolerance: actionOptions.riskTolerance,
@@ -1398,6 +1464,8 @@ class MarrowClient {
             firstEventAt: data.first_event_at || null,
             lastEventAt: data.last_event_at || null,
             recentDecisions24h: data.recent_decisions_24h || 0,
+            recentOutcomeCount24h: data.recent_outcome_count_24h || 0,
+            recentOutcomeCoverage24h: data.recent_outcome_coverage_24h || 0,
             captureCoverage: data.capture_coverage || {
                 decisions: Boolean(data.has_memory),
                 outcomes: 0,

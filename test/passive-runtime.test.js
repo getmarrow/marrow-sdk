@@ -202,6 +202,18 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
       decision_brief: { risk: { level: 'medium' }, workflow: { recommended: 'safe' } },
       risk_gate: { allow: true, decision: 'warn', risk_level: 'medium', reasons: [] },
       before_you_act: 'Use the prior deploy lesson before continuing.',
+      before_you_act_injection: {
+        required: true,
+        source: 'fleet_lesson',
+        message: 'Use the prior deploy lesson before continuing.',
+        must_use_before_action: true,
+        lesson_id: 'lesson_123',
+        lesson_score: 0.91,
+        action_pattern: 'safe deploy',
+        outcome_success: true,
+        playbook_id: null,
+        risk_level: 'medium',
+      },
       exact_next_action: 'Run smoke tests, then commit outcome.',
     };
   };
@@ -234,6 +246,9 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   assert.equal(result.ok, true);
   assert.equal(result.result, 'published');
   assert.equal(result.runtime.before_you_act, 'Use the prior deploy lesson before continuing.');
+  assert.equal(result.before_action_directive.must_use_before_action, true);
+  assert.equal(result.before_action_directive.source, 'fleet_lesson');
+  assert.match(result.summary, /before-action directive applied/i);
   assert.deepEqual(order.map(([name]) => name), ['runtime', 'gate', 'think', 'execute', 'commit']);
 });
 

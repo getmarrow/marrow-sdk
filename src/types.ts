@@ -311,6 +311,13 @@ export interface MarrowGuardedRunResult<T> {
   gate: MarrowWorkflowGateResult | null;
   commit: MarrowCommitResult | null;
   value_report: MarrowValueReportResult | null;
+  before_action_directive?: {
+    required: boolean;
+    must_use_before_action: boolean;
+    source: string;
+    message: string | null;
+    exact_next_action: string | null;
+  } | null;
   summary: string;
 }
 

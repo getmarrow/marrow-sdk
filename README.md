@@ -58,11 +58,12 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.21
+## What's New in v3.7.23
 
-v3.7.21 makes the agent-native runtime loop the SDK default for guarded/passive work:
+v3.7.23 makes the agent-native runtime loop harder for agents to ignore during guarded/passive work:
 
 - `runGuarded()` and `createPassiveRuntime()` call `agentRuntime()` before execution by default, so status, risk gate, lessons, templates, proof requirements, and exact next action arrive in one pre-action call.
+- `runGuarded()` now returns `before_action_directive` and logs it into the decision context before execution, so the most relevant prior lesson/proof requirement travels with the action and outcome.
 - Automatic outcome closure remains mandatory for passive tools, commands, deploys, and publishes; success commits on completion, failures commit with a redacted failure class.
 - `quickStatus()` exposes outcome-eligible closure coverage, repair commands, and hook diagnostics so agents can tell exactly what is degraded and how to fix it without status/runtime guidance calls lowering coverage.
 - `agentRuntime()` responses include `before_you_act_injection`, a structured fleet lesson/playbook signal agents can apply before acting.

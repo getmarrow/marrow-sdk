@@ -679,6 +679,7 @@ export class MarrowClient {
     let decisionId: string | null = null;
     let commit: MarrowCommitResult | null = null;
     let valueReport: MarrowValueReportResult | null = null;
+    let beforeActionDirective: MarrowGuardedRunResult<T>['before_action_directive'] = null;
 
     if (useAgentRuntime) {
       try {
@@ -697,6 +698,23 @@ export class MarrowClient {
         });
         brief = runtime.decision_brief || brief;
         gate = runtime.risk_gate || gate;
+        beforeActionDirective = runtime.before_you_act_injection
+          ? {
+              required: Boolean(runtime.before_you_act_injection.required),
+              must_use_before_action: Boolean(runtime.before_you_act_injection.must_use_before_action),
+              source: runtime.before_you_act_injection.source,
+              message: runtime.before_you_act_injection.message || runtime.before_you_act || null,
+              exact_next_action: runtime.exact_next_action || null,
+            }
+          : runtime.before_you_act || runtime.exact_next_action
+          ? {
+              required: true,
+              must_use_before_action: false,
+              source: 'runtime',
+              message: runtime.before_you_act || null,
+              exact_next_action: runtime.exact_next_action || null,
+            }
+          : null;
       } catch (error) {
         if (riskPolicy === 'block_high') {
           const failureType = classifyMarrowFailure(error);
@@ -711,6 +729,7 @@ export class MarrowClient {
             gate: null,
             commit: null,
             value_report: null,
+            before_action_directive: null,
             summary: `Blocked before execution because Marrow could not run the agent runtime check (${failureType}).`,
           };
         }
@@ -727,6 +746,7 @@ export class MarrowClient {
           gate,
           commit: null,
           value_report: null,
+          before_action_directive: beforeActionDirective,
           summary: runtime.exact_next_action || `Blocked by Marrow agent runtime: ${runtime.risk_gate.decision} (${runtime.risk_gate.risk_level}).`,
         };
       }
@@ -759,6 +779,7 @@ export class MarrowClient {
             gate: null,
             commit: null,
             value_report: null,
+            before_action_directive: beforeActionDirective,
             summary: `Blocked before execution because Marrow could not run the workflow gate (${failureType}).`,
           };
         }
@@ -775,6 +796,7 @@ export class MarrowClient {
           gate,
           commit: null,
           value_report: null,
+          before_action_directive: beforeActionDirective,
           summary: `Blocked by Marrow workflow gate: ${gate.decision} (${gate.risk_level}).`,
         };
       }
@@ -803,6 +825,7 @@ export class MarrowClient {
             gate,
             commit: null,
             value_report: null,
+            before_action_directive: beforeActionDirective,
             summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
           };
         }
@@ -820,6 +843,7 @@ export class MarrowClient {
         gate,
         commit: null,
         value_report: null,
+        before_action_directive: beforeActionDirective,
         summary: `Blocked high-risk action before execution. Recommended workflow: ${brief.workflow.recommended}.`,
       };
     }
@@ -838,6 +862,8 @@ export class MarrowClient {
           gate_risk_level: gate?.risk_level,
           gate_event_id: gate?.gate_event_id,
           workflow: brief?.workflow.recommended,
+          before_action_directive: beforeActionDirective,
+          must_use_before_action: beforeActionDirective?.must_use_before_action || false,
         },
         checkLoop: true,
       });
@@ -871,6 +897,7 @@ export class MarrowClient {
           gate,
           commit,
           value_report: null,
+          before_action_directive: beforeActionDirective,
           summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
         };
       }
@@ -905,8 +932,11 @@ export class MarrowClient {
         gate,
         commit,
         value_report: valueReport,
+        before_action_directive: beforeActionDirective,
         summary: commitErrorMessage
           ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
+          : beforeActionDirective?.message
+          ? `Marrow before-action directive applied: ${beforeActionDirective.message}`
           : valueReport?.summary || runtime?.before_you_act || `Marrow guarded run completed and outcome was logged for: ${safeAction}`,
       };
     } catch (error) {
@@ -934,6 +964,7 @@ export class MarrowClient {
         gate,
         commit,
         value_report: null,
+        before_action_directive: beforeActionDirective,
         summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
       };
     }

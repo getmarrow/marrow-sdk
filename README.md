@@ -618,6 +618,7 @@ MIT
 
 ## Related Packages
 
+- **[@getmarrow/install](https://www.npmjs.com/package/@getmarrow/install)** — Universal installer for passive agent setup. Detects local agent/runtime surfaces, writes safe config, runs self-tests, and reports first-value proof.
 - **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Code, Claude Desktop, and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol. Includes one-command agent setup for automatic Marrow usage.
 
 **📖 Full API reference with all endpoints:** [https://getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)

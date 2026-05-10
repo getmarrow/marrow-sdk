@@ -537,6 +537,7 @@ class MarrowClient {
         const riskPolicy = options.riskPolicy ?? 'warn';
         const useAgentRuntime = options.useAgentRuntime ?? riskPolicy !== 'off';
         const useWorkflowGate = options.useWorkflowGate ?? riskPolicy !== 'off';
+        const requireOutcomeClosure = options.requireOutcomeClosure ?? true;
         const safeAction = redactSensitiveText(options.action);
         const safeContext = redactSensitiveValue(options.context || {});
         let runtime = null;
@@ -545,6 +546,7 @@ class MarrowClient {
         let decisionId = null;
         let commit = null;
         let valueReport = null;
+        let beforeActionDirective = null;
         if (useAgentRuntime) {
             try {
                 runtime = await this.agentRuntime({
@@ -562,6 +564,25 @@ class MarrowClient {
                 });
                 brief = runtime.decision_brief || brief;
                 gate = runtime.risk_gate || gate;
+                beforeActionDirective = runtime.before_you_act_injection
+                    ? {
+                        required: Boolean(runtime.before_you_act_injection.required),
+                        must_use_before_action: Boolean(runtime.before_you_act_injection.must_use_before_action),
+                        source: runtime.before_you_act_injection.source,
+                        message: runtime.before_you_act_injection.message || runtime.before_you_act || null,
+                        exact_next_action: runtime.exact_next_action || null,
+                        untrusted_memory_notice: runtime.before_you_act_injection.untrusted_memory_notice || null,
+                        untrusted_memory_excerpt: runtime.before_you_act_injection.untrusted_memory_excerpt || null,
+                    }
+                    : runtime.before_you_act || runtime.exact_next_action
+                        ? {
+                            required: true,
+                            must_use_before_action: false,
+                            source: 'runtime',
+                            message: runtime.before_you_act || null,
+                            exact_next_action: runtime.exact_next_action || null,
+                        }
+                        : null;
             }
             catch (error) {
                 if (riskPolicy === 'block_high') {
@@ -577,6 +598,11 @@ class MarrowClient {
                         gate: null,
                         commit: null,
                         value_report: null,
+                        outcome_closure_required: requireOutcomeClosure,
+                        outcome_closed: false,
+                        outcome_commit_error: null,
+                        before_action_enforced: false,
+                        before_action_directive: null,
                         summary: `Blocked before execution because Marrow could not run the agent runtime check (${failureType}).`,
                     };
                 }
@@ -592,6 +618,11 @@ class MarrowClient {
                     gate,
                     commit: null,
                     value_report: null,
+                    outcome_closure_required: requireOutcomeClosure,
+                    outcome_closed: false,
+                    outcome_commit_error: null,
+                    before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                    before_action_directive: beforeActionDirective,
                     summary: runtime.exact_next_action || `Blocked by Marrow agent runtime: ${runtime.risk_gate.decision} (${runtime.risk_gate.risk_level}).`,
                 };
             }
@@ -624,6 +655,11 @@ class MarrowClient {
                         gate: null,
                         commit: null,
                         value_report: null,
+                        outcome_closure_required: requireOutcomeClosure,
+                        outcome_closed: false,
+                        outcome_commit_error: null,
+                        before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                        before_action_directive: beforeActionDirective,
                         summary: `Blocked before execution because Marrow could not run the workflow gate (${failureType}).`,
                     };
                 }
@@ -639,6 +675,11 @@ class MarrowClient {
                     gate,
                     commit: null,
                     value_report: null,
+                    outcome_closure_required: requireOutcomeClosure,
+                    outcome_closed: false,
+                    outcome_commit_error: null,
+                    before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                    before_action_directive: beforeActionDirective,
                     summary: `Blocked by Marrow workflow gate: ${gate.decision} (${gate.risk_level}).`,
                 };
             }
@@ -667,6 +708,11 @@ class MarrowClient {
                         gate,
                         commit: null,
                         value_report: null,
+                        outcome_closure_required: requireOutcomeClosure,
+                        outcome_closed: false,
+                        outcome_commit_error: null,
+                        before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                        before_action_directive: beforeActionDirective,
                         summary: `Blocked before execution because Marrow could not prepare a decision brief (${failureType}).`,
                     };
                 }
@@ -683,6 +729,11 @@ class MarrowClient {
                 gate,
                 commit: null,
                 value_report: null,
+                outcome_closure_required: requireOutcomeClosure,
+                outcome_closed: false,
+                outcome_commit_error: null,
+                before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                before_action_directive: beforeActionDirective,
                 summary: `Blocked high-risk action before execution. Recommended workflow: ${brief.workflow.recommended}.`,
             };
         }
@@ -700,6 +751,10 @@ class MarrowClient {
                     gate_risk_level: gate?.risk_level,
                     gate_event_id: gate?.gate_event_id,
                     workflow: brief?.workflow.recommended,
+                    before_action_directive: beforeActionDirective,
+                    must_use_before_action: beforeActionDirective?.must_use_before_action || false,
+                    before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                    outcome_closure_required: requireOutcomeClosure,
                 },
                 checkLoop: true,
             });
@@ -733,6 +788,11 @@ class MarrowClient {
                     gate,
                     commit,
                     value_report: null,
+                    outcome_closure_required: requireOutcomeClosure,
+                    outcome_closed: Boolean(commit),
+                    outcome_commit_error: commit ? null : 'failure outcome commit did not complete',
+                    before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                    before_action_directive: beforeActionDirective,
                     summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
                 };
             }
@@ -755,6 +815,27 @@ class MarrowClient {
                     process.stderr.write(`[marrow] Warning: guarded run value report failed: ${safePublicErrorMessage(reportError)}\n`);
                 }
             }
+            if (requireOutcomeClosure && !commit) {
+                return {
+                    ok: false,
+                    blocked: false,
+                    result,
+                    error: commitErrorMessage || 'Marrow outcome commit did not complete',
+                    failure_type: 'outcome_commit_failed',
+                    decision_id: decisionId,
+                    brief,
+                    runtime,
+                    gate,
+                    commit,
+                    value_report: valueReport,
+                    outcome_closure_required: true,
+                    outcome_closed: false,
+                    outcome_commit_error: commitErrorMessage || 'unknown outcome commit error',
+                    before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                    before_action_directive: beforeActionDirective,
+                    summary: `Action completed, but Marrow outcome closure failed: ${commitErrorMessage || 'unknown outcome commit error'}. Do not mark complete until outcome closure is repaired.`,
+                };
+            }
             return {
                 ok: true,
                 blocked: false,
@@ -766,9 +847,16 @@ class MarrowClient {
                 gate,
                 commit,
                 value_report: valueReport,
+                outcome_closure_required: requireOutcomeClosure,
+                outcome_closed: Boolean(commit),
+                outcome_commit_error: commitErrorMessage,
+                before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                before_action_directive: beforeActionDirective,
                 summary: commitErrorMessage
                     ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
-                    : valueReport?.summary || runtime?.before_you_act || `Marrow guarded run completed and outcome was logged for: ${safeAction}`,
+                    : beforeActionDirective?.message
+                        ? `Marrow before-action directive applied: ${beforeActionDirective.message}`
+                        : valueReport?.summary || runtime?.before_you_act || `Marrow guarded run completed and outcome was logged for: ${safeAction}`,
             };
         }
         catch (error) {
@@ -796,6 +884,11 @@ class MarrowClient {
                 gate,
                 commit,
                 value_report: null,
+                outcome_closure_required: requireOutcomeClosure,
+                outcome_closed: Boolean(commit),
+                outcome_commit_error: commit ? null : 'failure outcome commit did not complete',
+                before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
+                before_action_directive: beforeActionDirective,
                 summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
             };
         }
@@ -838,6 +931,7 @@ class MarrowClient {
                 riskPolicy: actionOptions.riskPolicy || options.defaultRiskPolicy || defaultRiskPolicy,
                 useAgentRuntime: actionOptions.useAgentRuntime ?? options.useAgentRuntime ?? true,
                 useWorkflowGate: actionOptions.useWorkflowGate ?? options.useWorkflowGate ?? true,
+                requireOutcomeClosure: actionOptions.requireOutcomeClosure ?? options.requireOutcomeClosure ?? true,
                 requiresApproval: actionOptions.requiresApproval,
                 riskTolerance: actionOptions.riskTolerance,
                 includeValueReport: actionOptions.includeValueReport ?? options.includeValueReport ?? false,

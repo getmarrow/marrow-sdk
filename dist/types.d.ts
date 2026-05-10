@@ -138,6 +138,7 @@ export interface MarrowPassiveRuntimeOptions {
     defaultType?: string;
     defaultRole?: MarrowDecisionBriefRole | string;
     defaultRiskPolicy?: MarrowGuardedRiskPolicy;
+    useAgentRuntime?: boolean;
     useWorkflowGate?: boolean;
     includeValueReport?: boolean;
     valueReportPeriod?: string | number;
@@ -152,6 +153,7 @@ export interface MarrowPassiveActionOptions {
     surfaces?: MarrowPassiveRuntimeSurface[];
     context?: Record<string, unknown>;
     riskPolicy?: MarrowGuardedRiskPolicy;
+    useAgentRuntime?: boolean;
     useWorkflowGate?: boolean;
     requiresApproval?: boolean;
     riskTolerance?: MarrowWorkflowGateRiskTolerance;
@@ -207,6 +209,7 @@ export interface MarrowGuardedRunOptions<T> {
     surfaces?: string[];
     context?: Record<string, unknown>;
     riskPolicy?: MarrowGuardedRiskPolicy;
+    useAgentRuntime?: boolean;
     useWorkflowGate?: boolean;
     requiresApproval?: boolean;
     riskTolerance?: MarrowWorkflowGateRiskTolerance;
@@ -221,6 +224,7 @@ export interface MarrowGuardedRunResult<T> {
     failure_type: MarrowFailureType | null;
     decision_id: string | null;
     brief: MarrowDecisionBriefResult | null;
+    runtime: MarrowAgentRuntimeResult | null;
     gate: MarrowWorkflowGateResult | null;
     commit: MarrowCommitResult | null;
     value_report: MarrowValueReportResult | null;
@@ -363,9 +367,12 @@ export interface MarrowQuickStatusResult {
     firstEventAt: string | null;
     lastEventAt: string | null;
     recentDecisions24h: number;
+    recentOutcomeCount24h: number;
+    recentOutcomeCoverage24h: number;
     captureCoverage: {
         decisions: boolean;
         outcomes: number;
+        recent_outcomes?: number;
         tools: 'detected' | 'unknown';
         commands: 'detected' | 'unknown';
         deploys: 'detected' | 'unknown';
@@ -387,8 +394,13 @@ export interface MarrowQuickStatusResult {
     nextAction: string | null;
     autoOutcomeClosure: {
         enabled: boolean;
+        required?: boolean;
         state: 'inactive' | 'active' | 'needs_hook' | string;
         coverage: number;
+        historical_coverage?: number;
+        recent_coverage_24h?: number;
+        recent_outcomes_24h?: number;
+        repair_command?: string;
         expectation: string;
     } | null;
     proof: {
@@ -785,6 +797,18 @@ export interface MarrowAgentRuntimeResult {
         rule: string;
     };
     before_you_act: string | null;
+    before_you_act_injection?: {
+        required: boolean;
+        source: string;
+        message: string | null;
+        must_use_before_action: boolean;
+        lesson_id: string | null;
+        lesson_score: number | null;
+        action_pattern: string | null;
+        outcome_success: boolean | null;
+        playbook_id: string | null;
+        risk_level: string;
+    };
     exact_next_action: string | null;
     auto_outcome_closure: Record<string, unknown> | null;
 }

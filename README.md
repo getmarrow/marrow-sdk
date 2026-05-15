@@ -92,6 +92,14 @@ Full feature history, examples, and API reference live at [getmarrow.ai/docs](ht
 
 ---
 
+## Human-Directed Attribution Status
+
+The Marrow API supports privacy-preserving provenance fields on direct `POST /v1/decisions` calls: `source_kind`, `human_directed`, `source_confidence`, `instruction_ref`, `instruction_hash`, and `source_meta`. Use them to classify instruction source class without identifying the human or storing raw prompts/PII.
+
+Current SDK passive runtime methods (`think()`, `auto()`, `runGuarded()`, and wrappers) remain backward compatible and do **not** yet expose first-class provenance parameters. SDK/MCP provenance wiring is deferred; do not assume SDK calls automatically mark work as `human_directed`. For direct API behavior and validation rules, see the live API reference at https://getmarrow.ai/docs.
+
+---
+
 ## Passive Runtime Layer v2
 
 `createPassiveRuntime()` is for SDK agents that should benefit from Marrow after one install step.

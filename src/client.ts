@@ -66,6 +66,8 @@ import type {
   MarrowSessionEndResult,
   MarrowTemplateSummary,
   MarrowTemplateDetail,
+  MarrowDecisionProvenanceInput,
+  MarrowDecisionUserIntent,
 } from './types';
 
 const DEFAULT_HINT =
@@ -323,6 +325,31 @@ function inferTypeFromText(value: string): string {
   if (/\b(patch|fix|bug|harden|remediate)\b/.test(lower)) return 'implementation';
   if (/\b(review|merge|pr|pull request)\b/.test(lower)) return 'process';
   return 'general';
+}
+
+function inferUserIntentFromType(type: string | undefined): MarrowDecisionUserIntent {
+  const normalized = String(type || 'general').toLowerCase();
+  if (normalized === 'deploy' || normalized === 'publish') return 'deploy';
+  if (normalized === 'security') return 'audit';
+  if (normalized === 'implementation') return 'build';
+  if (normalized === 'process') return 'operate';
+  return 'other';
+}
+
+function mergeProvenance(
+  provided: MarrowDecisionProvenanceInput | undefined,
+  defaults: MarrowDecisionProvenanceInput
+): MarrowDecisionProvenanceInput {
+  const defaultMeta = defaults.source_meta || {};
+  const providedMeta = provided?.source_meta || {};
+  return {
+    ...defaults,
+    ...(provided || {}),
+    source_meta: {
+      ...defaultMeta,
+      ...providedMeta,
+    },
+  };
 }
 
 /**
@@ -651,6 +678,12 @@ export class MarrowClient {
       action: description,
       type: (options?.type as any) ?? 'general',
       context: options?.context,
+      provenance: {
+        source_kind: 'agent_autonomous',
+        source_confidence: 0.9,
+        human_directed: false,
+        source_meta: { channel: 'sdk', client: 'custom', user_intent: inferUserIntentFromType(options?.type) },
+      },
     });
 
     try {
@@ -895,6 +928,16 @@ export class MarrowClient {
           outcome_closure_required: requireOutcomeClosure,
         },
         checkLoop: true,
+        provenance: mergeProvenance(options.provenance, {
+          source_kind: 'agent_autonomous',
+          source_confidence: 0.9,
+          human_directed: false,
+          source_meta: {
+            channel: 'sdk',
+            client: 'custom',
+            user_intent: inferUserIntentFromType(options.type),
+          },
+        }),
       });
       decisionId = think.decisionId;
 
@@ -1080,6 +1123,16 @@ export class MarrowClient {
         useAgentRuntime: actionOptions.useAgentRuntime ?? options.useAgentRuntime ?? true,
         useWorkflowGate: actionOptions.useWorkflowGate ?? options.useWorkflowGate ?? true,
         requireOutcomeClosure: actionOptions.requireOutcomeClosure ?? options.requireOutcomeClosure ?? true,
+        provenance: mergeProvenance(actionOptions.provenance, {
+          source_kind: 'agent_autonomous',
+          source_confidence: 0.9,
+          human_directed: false,
+          source_meta: {
+            channel: 'sdk',
+            client: 'custom',
+            user_intent: inferUserIntentFromType(actionOptions.type || options.defaultType || inferTypeFromText(prefixedAction)),
+          },
+        }),
         requiresApproval: actionOptions.requiresApproval,
         riskTolerance: actionOptions.riskTolerance,
         includeValueReport: actionOptions.includeValueReport ?? options.includeValueReport ?? false,
@@ -1217,6 +1270,16 @@ export class MarrowClient {
         action: meta.action,
         type: meta.type || 'general',
         context: meta.context,
+        provenance: mergeProvenance(meta.provenance, {
+          source_kind: 'agent_autonomous',
+          source_confidence: 0.9,
+          human_directed: false,
+          source_meta: {
+            channel: 'sdk',
+            client: 'custom',
+            user_intent: inferUserIntentFromType(meta.type),
+          },
+        }),
       });
     }
 
@@ -1400,6 +1463,12 @@ export class MarrowClient {
         meaningful: true,
         actionClass: method === 'GET' || method === 'HEAD' ? 'read_only' : 'external_irreversible',
         chokePoint: method === 'GET' || method === 'HEAD' ? 'other' : 'external_write',
+        provenance: {
+          source_kind: 'agent_autonomous',
+          source_confidence: 0.9,
+          human_directed: false,
+          source_meta: { channel: 'sdk', client: 'custom', user_intent: method === 'GET' || method === 'HEAD' ? 'research' : 'operate' },
+        },
       };
 
       await this.beforeAction(meta);
@@ -1516,11 +1585,22 @@ export class MarrowClient {
     previousOutcome?: string;
     previousCausedBy?: string;
     checkLoop?: boolean;
+    provenance?: MarrowDecisionProvenanceInput;
   }): Promise<MarrowThinkResult> {
     const body: Record<string, unknown> = {
       action: params.action,
       type: params.type || 'general',
       context: params.context,
+      ...mergeProvenance(params.provenance, {
+        source_kind: 'agent_autonomous',
+        source_confidence: 0.9,
+        human_directed: false,
+        source_meta: {
+          channel: 'sdk',
+          client: 'custom',
+          user_intent: inferUserIntentFromType(params.type),
+        },
+      }),
     };
 
     if (params.checkLoop) {

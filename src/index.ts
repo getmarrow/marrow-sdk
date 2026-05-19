@@ -13,6 +13,12 @@ export type {
   // Core Types
   MarrowDecisionType,
   MarrowEnforcementMode,
+  MarrowDecisionSourceKind,
+  MarrowDecisionSourceChannel,
+  MarrowDecisionSourceClient,
+  MarrowDecisionUserIntent,
+  MarrowDecisionSourceMeta,
+  MarrowDecisionProvenanceInput,
   Narrative,
   MarrowLoopRecommendation,
   MarrowBlockReasonCode,

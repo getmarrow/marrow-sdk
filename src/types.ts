@@ -5,6 +5,28 @@
 export type MarrowDecisionType = 'implementation' | 'security' | 'architecture' | 'process' | 'general';
 
 export type MarrowEnforcementMode = 'off' | 'warn' | 'require' | 'auto';
+export type MarrowDecisionSourceKind = 'human_directed' | 'agent_autonomous' | 'scheduled' | 'integration' | 'system' | 'unknown';
+export type MarrowDecisionSourceChannel = 'cli' | 'mcp' | 'sdk' | 'api' | 'cron' | 'ci' | 'webhook' | 'unknown';
+export type MarrowDecisionSourceClient = 'claude-code' | 'cursor' | 'windsurf' | 'openclaw' | 'custom' | 'unknown';
+export type MarrowDecisionUserIntent = 'build' | 'fix' | 'audit' | 'deploy' | 'research' | 'write' | 'operate' | 'other';
+
+export interface MarrowDecisionSourceMeta {
+  channel?: MarrowDecisionSourceChannel;
+  client?: MarrowDecisionSourceClient;
+  agent_id?: string;
+  task_depth?: number;
+  user_intent?: MarrowDecisionUserIntent;
+}
+
+export interface MarrowDecisionProvenanceInput {
+  source_kind?: MarrowDecisionSourceKind;
+  source_confidence?: number;
+  human_directed?: boolean;
+  instruction_ref?: string | null;
+  instruction?: string;
+  instruction_hash?: string;
+  source_meta?: MarrowDecisionSourceMeta | null;
+}
 
 /**
  * Human-readable milestone narrative, returned on commit when a trigger fires
@@ -175,6 +197,7 @@ export interface MarrowActionMeta {
   success?: boolean;
   causedBy?: string;
   skipAutoOutcome?: boolean;
+  provenance?: MarrowDecisionProvenanceInput;
 }
 
 export interface MarrowAutoWrapOptions {
@@ -227,6 +250,7 @@ export interface MarrowPassiveActionOptions {
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
   requireOutcomeClosure?: boolean;
+  provenance?: MarrowDecisionProvenanceInput;
 }
 
 export interface MarrowPassiveRuntime {
@@ -301,6 +325,7 @@ export interface MarrowGuardedRunOptions<T> {
   includeValueReport?: boolean;
   valueReportPeriod?: string | number;
   requireOutcomeClosure?: boolean;
+  provenance?: MarrowDecisionProvenanceInput;
 }
 
 export interface MarrowGuardedRunResult<T> {

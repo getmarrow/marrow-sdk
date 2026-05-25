@@ -44,6 +44,8 @@ import type {
   MarrowDecisionBriefResult,
   MarrowAgentRuntimeRequest,
   MarrowAgentRuntimeResult,
+  MarrowFirstValueRequest,
+  MarrowFirstValueResult,
   MarrowWorkflowGateRequest,
   MarrowWorkflowGateResult,
   MarrowAgentPerformanceResult,
@@ -674,6 +676,20 @@ export class MarrowClient {
       await this.orient();
     }
 
+    try {
+      await this.agentRuntime({
+        action: description,
+        type: options?.type ?? 'general',
+        role: options?.type === 'deploy' ? 'deploy' : 'agent',
+        context: {
+          ...(options?.context || {}),
+          marrow_sdk_run_default_pre_action: true,
+        },
+      });
+    } catch (error) {
+      process.stderr.write(`[marrow] Warning: pre-action runtime check failed during run(): ${safeErrorMessage(error)}\n`);
+    }
+
     await this.think({
       action: description,
       type: (options?.type as any) ?? 'general',
@@ -737,8 +753,14 @@ export class MarrowClient {
               required: Boolean(runtime.before_you_act_injection.required),
               must_use_before_action: Boolean(runtime.before_you_act_injection.must_use_before_action),
               source: runtime.before_you_act_injection.source,
+              state: runtime.before_you_act_injection.state,
               message: runtime.before_you_act_injection.message || runtime.before_you_act || null,
               exact_next_action: runtime.exact_next_action || null,
+              why_now: runtime.before_you_act_injection.why_now || null,
+              noise_policy: runtime.before_you_act_injection.noise_policy || null,
+              required_proof: runtime.before_you_act_injection.required_proof || [],
+              missing_proof: runtime.before_you_act_injection.missing_proof || [],
+              owner_approval_required: Boolean(runtime.before_you_act_injection.owner_approval_required),
               untrusted_memory_notice: runtime.before_you_act_injection.untrusted_memory_notice || null,
               untrusted_memory_excerpt: runtime.before_you_act_injection.untrusted_memory_excerpt || null,
             }
@@ -2412,6 +2434,22 @@ export class MarrowClient {
       session_id: input.session_id ?? this.sessionId ?? undefined,
     });
     return (res.data || res) as MarrowAgentRuntimeResult;
+  }
+
+  /**
+   * First-run value proof for installers and agents: capture status, runtime gate,
+   * first useful lesson, and value-proof counters in one response.
+   */
+  async firstValue(input: MarrowFirstValueRequest = {}): Promise<MarrowFirstValueResult> {
+    const res = await this.request('POST', '/v1/agent/first-value', {
+      ...input,
+      action: input.action ? redactSensitiveText(input.action) : undefined,
+      context: input.context ? redactSensitiveValue(input.context) as Record<string, unknown> : undefined,
+      proof: input.proof ? redactSensitiveValue(input.proof) as Record<string, unknown> : undefined,
+      agent_id: input.agent_id ?? this.agentId ?? undefined,
+      session_id: input.session_id ?? this.sessionId ?? undefined,
+    });
+    return (res.data || res) as MarrowFirstValueResult;
   }
 
   async agentPerformance(period: string | number = '7d', agentId: string | null = this.agentId): Promise<MarrowAgentPerformanceResult> {

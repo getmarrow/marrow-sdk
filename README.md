@@ -23,6 +23,20 @@ That's fine for a toy. It's a problem for anything real.
 
 ---
 
+## Start Here
+
+For most agents and new users, start with the universal installer:
+
+```bash
+npx @getmarrow/install --yes
+```
+
+The installer detects your environment, wires MCP hooks or SDK passive runtime files where appropriate, runs a self-test, and shows first-run value proof.
+
+Use this SDK directly when you are building a custom Node/TypeScript agent integration, want programmatic control, or need to wrap your own tools, commands, deploys, publishes, fetch calls, and guarded actions in code.
+
+For MCP-native clients that need manual setup, use `@getmarrow/mcp`.
+
 ## Auto-Logging
 
 Marrow can log at three layers, but the behavior depends on how you wire it up:
@@ -460,6 +474,14 @@ The value compounds with use. Each decision your agent logs makes the hive smart
 
 ## Install
 
+Default path for new users:
+
+```bash
+npx @getmarrow/install --yes
+```
+
+Advanced SDK path for custom Node/TypeScript integrations:
+
 ```bash
 npm install @getmarrow/sdk
 ```
@@ -627,7 +649,7 @@ MIT
 
 ## Related Packages
 
-- **[@getmarrow/install](https://www.npmjs.com/package/@getmarrow/install)** — Universal installer for passive agent setup. Detects local agent/runtime surfaces, writes safe config, runs self-tests, and reports first-value proof.
+- **[@getmarrow/install](https://www.npmjs.com/package/@getmarrow/install)** — Default front door for new users. Detects local agent/runtime surfaces, writes safe config, runs self-tests, and reports first-value proof.
 - **[@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp)** — MCP server for Claude Code, Claude Desktop, and other MCP-compatible clients. Provides the same memory features through the Model Context Protocol. Includes one-command agent setup for automatic Marrow usage.
 
 **📖 Full API reference with all endpoints:** [https://getmarrow.ai/docs/#api-reference](https://getmarrow.ai/docs/#api-reference)

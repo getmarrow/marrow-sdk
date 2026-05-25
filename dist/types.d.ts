@@ -262,8 +262,14 @@ export interface MarrowGuardedRunResult<T> {
         required: boolean;
         must_use_before_action: boolean;
         source: string;
+        state?: 'proceed' | 'warn' | 'block' | 'owner_approval_required';
         message: string | null;
         exact_next_action: string | null;
+        why_now?: string | null;
+        noise_policy?: string | null;
+        required_proof?: string[];
+        missing_proof?: string[];
+        owner_approval_required?: boolean;
         untrusted_memory_notice?: string | null;
         untrusted_memory_excerpt?: string | null;
     } | null;
@@ -819,6 +825,67 @@ export interface MarrowAgentRuntimeRequest extends MarrowDecisionBriefRequest {
     risk_tolerance?: MarrowWorkflowGateRiskTolerance;
     requires_approval?: boolean;
 }
+export interface MarrowFirstValueRequest {
+    action?: string;
+    type?: string;
+    role?: string;
+    surfaces?: string[];
+    context?: Record<string, unknown>;
+    proof?: Record<string, unknown>;
+    agent_id?: string | null;
+    session_id?: string | null;
+}
+export interface MarrowFirstValueResult {
+    ok: boolean;
+    active: boolean;
+    headline: string;
+    setup_decision_captured: boolean;
+    outcome_closed: boolean;
+    runtime_gate_active: boolean;
+    first_value: {
+        headline: string;
+        proof: string[];
+        first_lesson: string | null;
+        try_this_now: string;
+        expected_response: string;
+        quiet_mode?: string;
+    };
+    history_signal: {
+        found: boolean;
+        lessons_found: number;
+        deployment_playbooks_found: number;
+        summary: string;
+    };
+    capture: {
+        surfaces: string[];
+        decisions: number;
+        outcomes: number;
+        outcome_coverage: number;
+        last_event_at: string | null;
+    };
+    value_proof: {
+        decisions: number;
+        outcomes: number;
+        successes: number;
+        failures: number;
+        outcome_coverage: number;
+        avoided_mistakes: number;
+        reused_winning_decisions: number;
+        lessons: number;
+        prevented_bad_actions: number;
+        risk_gate_checks: number;
+        estimated_tokens_saved: number;
+        estimated_minutes_saved: number;
+        reliability_score: number | null;
+    };
+    next_action: {
+        endpoint: string;
+        method: string;
+        action: string;
+        reason: string;
+    };
+    runtime: MarrowAgentRuntimeResult;
+}
 export interface MarrowAgentRuntimeResult {
     ok: boolean;
     action: string;
@@ -842,8 +909,14 @@ export interface MarrowAgentRuntimeResult {
     before_you_act: string | null;
     before_you_act_injection?: {
         required: boolean;
+        state?: 'proceed' | 'warn' | 'block' | 'owner_approval_required';
         source: string;
         message: string | null;
+        why_now?: string | null;
+        noise_policy?: string | null;
+        required_proof?: string[];
+        missing_proof?: string[];
+        owner_approval_required?: boolean;
         untrusted_memory_notice?: string | null;
         untrusted_memory_excerpt?: string | null;
         must_use_before_action: boolean;
@@ -853,6 +926,12 @@ export interface MarrowAgentRuntimeResult {
         outcome_success: boolean | null;
         playbook_id: string | null;
         risk_level: string;
+    };
+    runtime_policy?: {
+        interruption: 'proceed' | 'warn' | 'block' | 'owner_approval_required';
+        quiet_for_normal_work: boolean;
+        interrupts_when: string[];
+        blocks_only_when: string[];
     };
     exact_next_action: string | null;
     auto_outcome_closure: Record<string, unknown> | null;

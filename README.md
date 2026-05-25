@@ -32,6 +32,7 @@ npx @getmarrow/install --yes
 ```
 
 The installer detects your environment, wires MCP hooks or SDK passive runtime files where appropriate, runs a self-test, and shows first-run value proof.
+For custom SDK agents, `firstValue()` returns the same first-run proof payload and `run()` now performs a soft pre-action runtime check before logging intent.
 
 Use this SDK directly when you are building a custom Node/TypeScript agent integration, want programmatic control, or need to wrap your own tools, commands, deploys, publishes, fetch calls, and guarded actions in code.
 
@@ -72,9 +73,15 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.25
+## What's New in v3.7.29
 
-v3.7.25 makes passive guarded work fail closed when Marrow cannot prove the outcome was captured:
+v3.7.29 adds first-run value proof and makes the default SDK loop more agent-native:
+
+- `firstValue()` calls `/v1/agent/first-value` so custom SDK agents can show the same five-minute proof payload as the universal installer.
+- `run()` now performs a soft pre-action `agentRuntime()` check before logging intent, so agents get risk/proof/lesson guidance even when using the simple SDK helper.
+- `before_you_act_injection` types now expose `state`, `why_now`, `noise_policy`, `required_proof`, `missing_proof`, and `owner_approval_required`.
+
+Previous guarded-runtime behavior remains current:
 
 - `runGuarded()` and `createPassiveRuntime()` call `agentRuntime()` before execution by default, so status, risk gate, lessons, templates, proof requirements, and exact next action arrive in one pre-action call.
 - `runGuarded()` now requires outcome closure by default. If execution succeeds but the Marrow outcome commit fails, the guarded result returns `ok: false`, `failure_type: "outcome_commit_failed"`, and the original result for inspection.

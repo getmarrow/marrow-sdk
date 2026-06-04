@@ -349,6 +349,9 @@ export interface MarrowGuardedRunResult<T> {
     must_use_before_action: boolean;
     source: string;
     state?: 'proceed' | 'warn' | 'block' | 'owner_approval_required';
+    contract?: string;
+    intervention_decision?: MarrowInterventionDecision;
+    playbook_source?: string | null;
     message: string | null;
     exact_next_action: string | null;
     why_now?: string | null;
@@ -913,6 +916,49 @@ export interface MarrowFirstValueResult {
   runtime: MarrowAgentRuntimeResult;
 }
 
+export type MarrowInterventionDecision = 'proceed' | 'warn' | 'block' | 'owner_approval_required';
+
+export interface MarrowBeforeActionIntervention {
+  contract: 'marrow.before-action-intervention.v1';
+  decision: MarrowInterventionDecision;
+  allow: boolean;
+  must_stop: boolean;
+  must_use_before_action: boolean;
+  headline: string;
+  before_action: string | null;
+  exact_next_action: string | null;
+  relevant_prior_signal: Record<string, unknown> | null;
+  playbook: {
+    source: 'fleet_lesson' | 'deployment_memory' | 'workflow_template' | 'marrow_policy' | string;
+    lesson: Record<string, unknown> | null;
+    deployment_memory: Record<string, unknown> | null;
+    template: Record<string, unknown> | null;
+    required_steps: string[];
+    required_proof: string[];
+    missing_proof: string[];
+    rollback_required: boolean;
+    smoke_required: boolean;
+    [key: string]: unknown;
+  };
+  enforcement: {
+    runtime_required_before_side_effects: boolean;
+    completion_requires_outcome_commit: boolean;
+    commit_endpoint: string;
+    proof_pack_required: boolean;
+    owner_approval_required: boolean;
+    [key: string]: unknown;
+  };
+  learning_loop: {
+    records_warning_followed_or_ignored: boolean;
+    records_lesson_reuse: boolean;
+    success_updates_future_rankings: boolean;
+    failure_becomes_future_warning: boolean;
+    [key: string]: unknown;
+  };
+  agent_copy: string;
+  [key: string]: unknown;
+}
+
 export interface MarrowAgentRuntimeResult {
   ok: boolean;
   action: string;
@@ -934,6 +980,24 @@ export interface MarrowAgentRuntimeResult {
     rule: string;
   };
   before_you_act: string | null;
+  intervention?: MarrowBeforeActionIntervention;
+  runtime_contract?: {
+    version: 'agent-runtime-contract.v3' | string;
+    source_of_truth?: boolean;
+    required_before_side_effects?: boolean;
+    one_call_payload?: string[];
+    outcome_closure_required?: boolean;
+    commit_endpoint?: string;
+    idempotency_key_hint?: string;
+    fail_open_policy?: string;
+    [key: string]: unknown;
+  };
+  risk_gate_event?: {
+    id: string | null;
+    persistence: 'complete' | 'queued' | 'skipped_low_risk' | 'not_recorded_degraded' | string;
+    [key: string]: unknown;
+  };
+  behavior_governance?: Record<string, unknown>;
   before_you_act_injection?: {
     required: boolean;
     state?: 'proceed' | 'warn' | 'block' | 'owner_approval_required';

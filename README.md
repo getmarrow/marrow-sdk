@@ -73,13 +73,19 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.29
+## What's New in v3.7.30
 
-v3.7.29 adds first-run value proof and makes the default SDK loop more agent-native:
+v3.7.30 adds the backend-first before-action intervention contract to SDK runtime calls:
+
+- `agentRuntime()` responses now expose `intervention`, `runtime_contract`, `risk_gate_event`, and `behavior_governance` for the `/v1/agent/runtime` contract.
+- `runGuarded()` now prefers `intervention.agent_copy` and returns intervention metadata in `before_action_directive`, including the contract, decision, playbook source, and required proof.
+- The SDK now types the backend-first contracts `marrow.before-action-intervention.v1` and `agent-runtime-contract.v3`.
+
+First-run value proof remains current:
 
 - `firstValue()` calls `/v1/agent/first-value` so custom SDK agents can show the same five-minute proof payload as the universal installer.
-- `run()` now performs a soft pre-action `agentRuntime()` check before logging intent, so agents get risk/proof/lesson guidance even when using the simple SDK helper.
-- `before_you_act_injection` types now expose `state`, `why_now`, `noise_policy`, `required_proof`, `missing_proof`, and `owner_approval_required`.
+- `run()` performs a soft pre-action `agentRuntime()` check before logging intent, so agents get risk/proof/lesson guidance even when using the simple SDK helper.
+- Legacy `before_you_act_injection` types still expose `state`, `why_now`, `noise_policy`, `required_proof`, `missing_proof`, and `owner_approval_required`.
 
 Previous guarded-runtime behavior remains current:
 

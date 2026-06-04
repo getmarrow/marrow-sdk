@@ -202,6 +202,44 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
       ok: true,
       decision_brief: { risk: { level: 'medium' }, workflow: { recommended: 'safe' } },
       risk_gate: { allow: true, decision: 'warn', risk_level: 'medium', reasons: [] },
+      intervention: {
+        contract: 'marrow.before-action-intervention.v1',
+        decision: 'owner_approval_required',
+        allow: false,
+        must_stop: true,
+        must_use_before_action: true,
+        headline: 'Do not repeat prior failure.',
+        before_action: 'Use the prior deploy lesson before continuing.',
+        exact_next_action: 'Run smoke tests, then commit outcome.',
+        relevant_prior_signal: { source: 'fleet_lesson', lesson_id: 'lesson_123' },
+        playbook: {
+          source: 'fleet_lesson',
+          lesson: { lesson_id: 'lesson_123' },
+          deployment_memory: null,
+          template: null,
+          required_steps: ['Run smoke tests', 'Capture rollback'],
+          required_proof: ['summary', 'checks', 'outcome'],
+          missing_proof: ['checks'],
+          rollback_required: true,
+          smoke_required: true,
+        },
+        enforcement: {
+          runtime_required_before_side_effects: true,
+          completion_requires_outcome_commit: true,
+          commit_endpoint: '/v1/agent/commit',
+          proof_pack_required: true,
+          owner_approval_required: true,
+        },
+        learning_loop: {
+          records_warning_followed_or_ignored: true,
+          records_lesson_reuse: true,
+          success_updates_future_rankings: true,
+          failure_becomes_future_warning: true,
+        },
+        agent_copy: 'Intervention says stop and run smoke tests before deploy.',
+      },
+      runtime_contract: { version: 'agent-runtime-contract.v3' },
+      risk_gate_event: { id: 'gate_runtime_123', persistence: 'complete' },
       before_you_act: 'Use the prior deploy lesson before continuing.',
       before_you_act_injection: {
         required: true,
@@ -248,7 +286,12 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   assert.equal(result.result, 'published');
   assert.equal(result.runtime.before_you_act, 'Use the prior deploy lesson before continuing.');
   assert.equal(result.before_action_directive.must_use_before_action, true);
+  assert.equal(result.before_action_directive.contract, 'marrow.before-action-intervention.v1');
+  assert.equal(result.before_action_directive.intervention_decision, 'owner_approval_required');
+  assert.equal(result.before_action_directive.message, 'Intervention says stop and run smoke tests before deploy.');
+  assert.equal(result.before_action_directive.playbook_source, 'fleet_lesson');
   assert.equal(result.before_action_directive.source, 'fleet_lesson');
+  assert.deepEqual(result.before_action_directive.required_proof, ['summary', 'checks', 'outcome']);
   assert.equal(result.before_action_enforced, true);
   assert.equal(result.outcome_closure_required, true);
   assert.equal(result.outcome_closed, true);

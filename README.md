@@ -73,6 +73,14 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
+## What's New in v3.7.32
+
+v3.7.32 is a docs-sync release for Marrow's enterprise readiness contract. Runtime behavior is unchanged from v3.7.31.
+
+- Business agents and owners can now use `GET /v1/agent/enterprise-readiness?agents=20` to pull tenant isolation, data-boundary, fail behavior, policy, scale proof, and pilot readiness in one owner-safe response.
+- Marrow is explicit about what is ready today: controlled 20-agent business pilots are supported when production gates pass; regulated enterprise use still requires formal SOC 2/legal/SLA completion.
+- The source-of-truth docs now include the enterprise trust and scale readiness page at [getmarrow.ai/docs](https://getmarrow.ai/docs/).
+
 ## What's New in v3.7.31
 
 v3.7.31 is a docs-sync release. It keeps npm and GitHub README copy aligned with Marrow's current backend-first runtime contract and proof/gate enforcement loop. Runtime behavior is unchanged from v3.7.30.

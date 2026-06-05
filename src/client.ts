@@ -748,7 +748,26 @@ export class MarrowClient {
         });
         brief = runtime.decision_brief || brief;
         gate = runtime.risk_gate || gate;
-        beforeActionDirective = runtime.before_you_act_injection
+        beforeActionDirective = runtime.intervention
+          ? {
+              required: Boolean(runtime.intervention.must_use_before_action),
+              must_use_before_action: Boolean(runtime.intervention.must_use_before_action),
+              source: String(runtime.intervention.playbook?.source || 'intervention'),
+              state: runtime.intervention.decision,
+              contract: runtime.intervention.contract,
+              intervention_decision: runtime.intervention.decision,
+              playbook_source: typeof runtime.intervention.playbook?.source === 'string' ? runtime.intervention.playbook.source : null,
+              message: runtime.intervention.agent_copy || runtime.intervention.headline || runtime.before_you_act || null,
+              exact_next_action: runtime.intervention.exact_next_action || runtime.exact_next_action || null,
+              why_now: runtime.intervention.headline || null,
+              noise_policy: runtime.before_you_act_injection?.noise_policy || null,
+              required_proof: runtime.intervention.playbook?.required_proof || runtime.before_you_act_injection?.required_proof || [],
+              missing_proof: runtime.intervention.playbook?.missing_proof || runtime.before_you_act_injection?.missing_proof || [],
+              owner_approval_required: Boolean(runtime.intervention.enforcement?.owner_approval_required),
+              untrusted_memory_notice: runtime.before_you_act_injection?.untrusted_memory_notice || null,
+              untrusted_memory_excerpt: runtime.before_you_act_injection?.untrusted_memory_excerpt || null,
+            }
+          : runtime.before_you_act_injection
           ? {
               required: Boolean(runtime.before_you_act_injection.required),
               must_use_before_action: Boolean(runtime.before_you_act_injection.must_use_before_action),

@@ -73,13 +73,24 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.29
+## What's New in v3.7.31
 
-v3.7.29 adds first-run value proof and makes the default SDK loop more agent-native:
+v3.7.31 is a docs-sync release. It keeps npm and GitHub README copy aligned with Marrow's current backend-first runtime contract and proof/gate enforcement loop. Runtime behavior is unchanged from v3.7.30.
+
+v3.7.30 brings the SDK up to Marrow's current backend-first runtime contract and proof/gate enforcement loop:
+
+- `agentRuntime()` responses now expose `intervention`, `runtime_contract`, `risk_gate_event`, and `behavior_governance` for `/v1/agent/runtime`.
+- `runGuarded()` now prefers `intervention.agent_copy` and returns intervention metadata in `before_action_directive`, including the contract, decision, playbook source, and required proof.
+- The SDK now types the backend-first contracts `marrow.before-action-intervention.v1` and `agent-runtime-contract.v3`.
+- `commit()` accepts `proof`, `gateReceiptId`, `gate_receipt_id`, and explicit `decisionId` so agents can close gated work without fighting the policy layer.
+- `run()`, `runGuarded()`, and passive runtime wrappers attach a standard proof pack on success/failure outcome closure.
+- `runGuarded()` forwards the runtime `gate_receipt.id` into `commit()` when Marrow requires a pre-action receipt.
+
+First-run value proof remains current:
 
 - `firstValue()` calls `/v1/agent/first-value` so custom SDK agents can show the same five-minute proof payload as the universal installer.
-- `run()` now performs a soft pre-action `agentRuntime()` check before logging intent, so agents get risk/proof/lesson guidance even when using the simple SDK helper.
-- `before_you_act_injection` types now expose `state`, `why_now`, `noise_policy`, `required_proof`, `missing_proof`, and `owner_approval_required`.
+- `run()` performs a soft pre-action `agentRuntime()` check before logging intent, so agents get risk/proof/lesson guidance even when using the simple SDK helper.
+- Legacy `before_you_act_injection` types still expose `state`, `why_now`, `noise_policy`, `required_proof`, `missing_proof`, and `owner_approval_required`.
 
 Previous guarded-runtime behavior remains current:
 

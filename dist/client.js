@@ -31,7 +31,7 @@ function redactSensitiveText(value) {
         .replace(/\b([A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|CREDENTIAL|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*[:=]\s*['"]?[^'"\s,;]{6,}/gi, '$1=[REDACTED]')
         .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
         .replace(/\bmrw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_[A-Fa-f0-9]{16,}\b/gi, '[REDACTED_MARROW_KEY]')
-        .replace(/\b(?:sk|pk|ghp|github_pat|npm)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
+        .replace(/\b(?:sk|pk|ghp|github_pat|npm|cfut)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
         .replace(/([?&])([^=&#\s]*(?:code|token|secret|signature|sig|credential|password|session|auth|api[_-]?key|apikey|client[_-]?secret|(?:^|[-_])key|key(?:[-_]|$))[^=&#\s]*=)[^&#\s]*/gi, '$1$2[redacted]')
         .replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#\s]*/gi, '$1[redacted]');
 }
@@ -258,6 +258,35 @@ function inferUserIntentFromType(type) {
     if (normalized === 'process')
         return 'operate';
     return 'other';
+}
+function runtimeGateReceiptId(runtime) {
+    if (!runtime)
+        return null;
+    return runtime.gate_receipt?.id || runtime.gate_receipt_id || null;
+}
+function buildOutcomeProof(input) {
+    const provided = input.proof || {};
+    return redactSensitiveValue({
+        summary: provided.summary || input.action,
+        checks: provided.checks || input.checks || ['execution completed', 'outcome captured'],
+        outcome: provided.outcome || input.outcome,
+        blockers: provided.blockers || (input.success ? 'none' : 'see outcome'),
+        commits_prs_shas: provided.commits_prs_shas || 'not applicable',
+        rollback_target: provided.rollback_target || 'not applicable',
+        handoff_result_file: provided.handoff_result_file || 'not applicable',
+        deployment_and_smoke: provided.deployment_and_smoke || 'not applicable',
+        ...provided,
+        marrow_runtime_gate: input.runtime?.gate_receipt ? {
+            receipt_id: input.runtime.gate_receipt.id,
+            decision: input.runtime.gate_receipt.decision || null,
+            required: input.runtime.gate_receipt.required,
+        } : undefined,
+        marrow_workflow_gate: input.gate ? {
+            decision: input.gate.decision,
+            risk_level: input.gate.risk_level,
+            gate_event_id: input.gate.gate_event_id || null,
+        } : undefined,
+    });
 }
 function mergeProvenance(provided, defaults) {
     const defaultMeta = defaults.source_meta || {};
@@ -564,12 +593,12 @@ class MarrowClient {
         });
         try {
             const result = await fn();
-            await this.commit({ success: true, outcome: 'Task completed: ' + description });
+            await this.commit({ success: true, outcome: 'Task completed: ' + description, proof: buildOutcomeProof({ action: description, success: true, outcome: 'Task completed: ' + description }) });
             return result;
         }
         catch (error) {
             try {
-                await this.commit({ success: false, outcome: safeErrorMessage(error) });
+                await this.commit({ success: false, outcome: safeErrorMessage(error), proof: buildOutcomeProof({ action: description, success: false, outcome: safeErrorMessage(error) }) });
             }
             catch (commitErr) {
                 process.stderr.write(`[marrow] Warning: commit failed during run() error handling: ${safeErrorMessage(commitErr)}\n`);
@@ -850,6 +879,8 @@ class MarrowClient {
                         commit = await this.commit({
                             success: false,
                             outcome: `Guarded run failed (${failureType}): ${publicError}`,
+                            gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+                            proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
                         });
                     }
                     catch (commitError) {
@@ -880,6 +911,8 @@ class MarrowClient {
                 commit = await this.commit({
                     success: true,
                     outcome: `Guarded run completed: ${safeAction}`,
+                    gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+                    proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
                 });
             }
             catch (error) {
@@ -946,6 +979,8 @@ class MarrowClient {
                     commit = await this.commit({
                         success: false,
                         outcome: `Guarded run failed (${failureType}): ${publicError}`,
+                        gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+                        proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
                     });
                 }
                 catch (commitError) {
@@ -1174,6 +1209,7 @@ class MarrowClient {
                 success: meta.success ?? true,
                 outcome: meta.result || 'Action completed',
                 causedBy: meta.causedBy,
+                proof: buildOutcomeProof({ action: meta.action, success: meta.success ?? true, outcome: meta.result || 'Action completed' }),
             });
         }
         this.loopState.inFlightAction = null;
@@ -1357,20 +1393,21 @@ class MarrowClient {
         }, fn);
     }
     async think(params) {
+        const provenance = redactSensitiveValue(mergeProvenance(params.provenance, {
+            source_kind: 'agent_autonomous',
+            source_confidence: 0.9,
+            human_directed: false,
+            source_meta: {
+                channel: 'sdk',
+                client: 'custom',
+                user_intent: inferUserIntentFromType(params.type),
+            },
+        }));
         const body = {
-            action: params.action,
+            action: redactSensitiveText(params.action),
             type: params.type || 'general',
-            context: params.context,
-            ...mergeProvenance(params.provenance, {
-                source_kind: 'agent_autonomous',
-                source_confidence: 0.9,
-                human_directed: false,
-                source_meta: {
-                    channel: 'sdk',
-                    client: 'custom',
-                    user_intent: inferUserIntentFromType(params.type),
-                },
-            }),
+            context: params.context ? redactSensitiveValue(params.context) : undefined,
+            ...provenance,
         };
         if (params.checkLoop) {
             body.checkLoop = true;
@@ -1378,9 +1415,9 @@ class MarrowClient {
         if (this.decisionId) {
             body.previous_decision_id = this.decisionId;
             body.previous_success = params.previousSuccess ?? true;
-            body.previous_outcome = params.previousOutcome ?? '';
+            body.previous_outcome = redactSensitiveText(params.previousOutcome ?? '');
             if (params.previousCausedBy)
-                body.previous_caused_by = params.previousCausedBy;
+                body.previous_caused_by = redactSensitiveText(params.previousCausedBy);
         }
         const res = await this.request('POST', '/v1/agent/think', body);
         const data = res.data ?? res; // Unwrap {data: {...}} envelope
@@ -1476,15 +1513,22 @@ class MarrowClient {
         };
     }
     async commit(params) {
-        if (!this.decisionId) {
+        const decisionId = params.decisionId || this.decisionId;
+        if (!decisionId) {
             throw new Error('No active decision. Call think() first.');
         }
-        const res = await this.request('POST', '/v1/agent/commit', {
-            decision_id: this.decisionId,
+        const body = {
+            decision_id: decisionId,
             success: params.success,
-            outcome: params.outcome,
-            caused_by: params.causedBy,
-        });
+            outcome: redactSensitiveText(params.outcome),
+            caused_by: params.causedBy ? redactSensitiveText(params.causedBy) : undefined,
+        };
+        const gateReceiptId = params.gateReceiptId || params.gate_receipt_id;
+        if (gateReceiptId)
+            body.gate_receipt_id = gateReceiptId;
+        if (params.proof)
+            body.proof = redactSensitiveValue(params.proof);
+        const res = await this.request('POST', '/v1/agent/commit', body);
         const data = res.data ?? res;
         this.decisionId = null;
         this.loopState.lastOutcomeAt = nowIso();
@@ -1510,6 +1554,7 @@ class MarrowClient {
             successRate: data.success_rate,
             insight: data.insight,
             narrative: data.narrative ?? null,
+            pre_action_gate: data.pre_action_gate ?? null,
             acceptedAs: 'outcome',
             recommendedNext: loop.recommendedNext,
             loop,
@@ -2001,6 +2046,43 @@ class MarrowClient {
             proof: input.proof ? redactSensitiveValue(input.proof) : undefined,
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
+        });
+        return (res.data || res);
+    }
+    async recommendGovernanceMode(input) {
+        const res = await this.request('POST', '/v1/agent/mode/recommend', {
+            ...input,
+            agent: {
+                ...(input.agent || {}),
+                id: input.agent?.id ?? this.agentId ?? undefined,
+            },
+        });
+        return (res.data || res);
+    }
+    async listPolicyProfiles() {
+        const res = await this.request('GET', '/v1/agent/policy-profiles');
+        return (res.data || res);
+    }
+    async createPolicyProfile(input) {
+        const res = await this.request('POST', '/v1/agent/policy-profiles', input);
+        return (res.data || res);
+    }
+    async updatePolicyProfile(id, input) {
+        const safeId = validatePathParam(id, 'profile id');
+        const res = await this.request('PUT', `/v1/agent/policy-profiles/${safeId}`, input);
+        return (res.data || res);
+    }
+    async assignProjectPolicyProfile(input) {
+        const res = await this.request('POST', '/v1/agent/project-policy-profile', input);
+        return (res.data || res);
+    }
+    async resolvePolicy(input) {
+        const res = await this.request('POST', '/v1/agent/policy/resolve', {
+            ...input,
+            agent: {
+                ...(input.agent || {}),
+                id: input.agent?.id ?? this.agentId ?? undefined,
+            },
         });
         return (res.data || res);
     }

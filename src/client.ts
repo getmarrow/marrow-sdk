@@ -48,6 +48,15 @@ import type {
   MarrowFirstValueResult,
   MarrowWorkflowGateRequest,
   MarrowWorkflowGateResult,
+  MarrowModeRecommendationRequest,
+  MarrowModeRecommendationResult,
+  MarrowPolicyProfilesResult,
+  MarrowCreatePolicyProfileRequest,
+  MarrowPolicyProfileResult,
+  MarrowAssignProjectPolicyProfileRequest,
+  MarrowProjectPolicyProfileAssignmentResult,
+  MarrowPolicyResolveRequest,
+  MarrowPolicyResolveResult,
   MarrowAgentPerformanceResult,
   MarrowRecordFleetLessonInput,
   MarrowFleetLessonsResult,
@@ -107,7 +116,7 @@ function redactSensitiveText(value: string): string {
     .replace(/\b([A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|CREDENTIAL|PASSWORD|PRIVATE[_-]?KEY)[A-Z0-9_]*)\s*[:=]\s*['"]?[^'"\s,;]{6,}/gi, '$1=[REDACTED]')
     .replace(/\b(mrw_(?:live|test)_[A-Za-z0-9_\-]{8,})\b/g, '[REDACTED_MARROW_KEY]')
     .replace(/\bmrw_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_[A-Fa-f0-9]{16,}\b/gi, '[REDACTED_MARROW_KEY]')
-    .replace(/\b(?:sk|pk|ghp|github_pat|npm)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
+    .replace(/\b(?:sk|pk|ghp|github_pat|npm|cfut)_[A-Za-z0-9_\-]{12,}\b/g, '[REDACTED_TOKEN]')
     .replace(/([?&])([^=&#\s]*(?:code|token|secret|signature|sig|credential|password|session|auth|api[_-]?key|apikey|client[_-]?secret|(?:^|[-_])key|key(?:[-_]|$))[^=&#\s]*=)[^&#\s]*/gi, '$1$2[redacted]')
     .replace(/([?&](?:token|key|secret|password|auth|signature|sig|session)=)[^&#\s]*/gi, '$1[redacted]');
 }
@@ -336,6 +345,44 @@ function inferUserIntentFromType(type: string | undefined): MarrowDecisionUserIn
   if (normalized === 'implementation') return 'build';
   if (normalized === 'process') return 'operate';
   return 'other';
+}
+
+function runtimeGateReceiptId(runtime: MarrowAgentRuntimeResult | null): string | null {
+  if (!runtime) return null;
+  return runtime.gate_receipt?.id || runtime.gate_receipt_id || null;
+}
+
+function buildOutcomeProof(input: {
+  action: string;
+  success: boolean;
+  outcome: string;
+  checks?: string[];
+  proof?: Record<string, unknown>;
+  runtime?: MarrowAgentRuntimeResult | null;
+  gate?: MarrowWorkflowGateResult | null;
+}): Record<string, unknown> {
+  const provided = input.proof || {};
+  return redactSensitiveValue({
+    summary: provided.summary || input.action,
+    checks: provided.checks || input.checks || ['execution completed', 'outcome captured'],
+    outcome: provided.outcome || input.outcome,
+    blockers: provided.blockers || (input.success ? 'none' : 'see outcome'),
+    commits_prs_shas: provided.commits_prs_shas || 'not applicable',
+    rollback_target: provided.rollback_target || 'not applicable',
+    handoff_result_file: provided.handoff_result_file || 'not applicable',
+    deployment_and_smoke: provided.deployment_and_smoke || 'not applicable',
+    ...provided,
+    marrow_runtime_gate: input.runtime?.gate_receipt ? {
+      receipt_id: input.runtime.gate_receipt.id,
+      decision: input.runtime.gate_receipt.decision || null,
+      required: input.runtime.gate_receipt.required,
+    } : undefined,
+    marrow_workflow_gate: input.gate ? {
+      decision: input.gate.decision,
+      risk_level: input.gate.risk_level,
+      gate_event_id: input.gate.gate_event_id || null,
+    } : undefined,
+  }) as Record<string, unknown>;
 }
 
 function mergeProvenance(
@@ -704,11 +751,11 @@ export class MarrowClient {
 
     try {
       const result = await fn();
-      await this.commit({ success: true, outcome: 'Task completed: ' + description });
+      await this.commit({ success: true, outcome: 'Task completed: ' + description, proof: buildOutcomeProof({ action: description, success: true, outcome: 'Task completed: ' + description }) });
       return result;
     } catch (error) {
       try {
-        await this.commit({ success: false, outcome: safeErrorMessage(error) });
+        await this.commit({ success: false, outcome: safeErrorMessage(error), proof: buildOutcomeProof({ action: description, success: false, outcome: safeErrorMessage(error) }) });
       } catch (commitErr) {
         process.stderr.write(`[marrow] Warning: commit failed during run() error handling: ${safeErrorMessage(commitErr)}\n`);
       }
@@ -993,6 +1040,8 @@ export class MarrowClient {
             commit = await this.commit({
               success: false,
               outcome: `Guarded run failed (${failureType}): ${publicError}`,
+              gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+              proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
             });
           } catch (commitError) {
             process.stderr.write(`[marrow] Warning: guarded run failure commit failed: ${safePublicErrorMessage(commitError)}\n`);
@@ -1024,6 +1073,8 @@ export class MarrowClient {
         commit = await this.commit({
           success: true,
           outcome: `Guarded run completed: ${safeAction}`,
+          gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+          proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
         });
       } catch (error) {
         commitErrorMessage = safePublicErrorMessage(error);
@@ -1090,6 +1141,8 @@ export class MarrowClient {
           commit = await this.commit({
             success: false,
             outcome: `Guarded run failed (${failureType}): ${publicError}`,
+            gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+            proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
           });
         } catch (commitError) {
           process.stderr.write(`[marrow] Warning: guarded run commit failed: ${safePublicErrorMessage(commitError)}\n`);
@@ -1378,6 +1431,7 @@ export class MarrowClient {
         success: meta.success ?? true,
         outcome: meta.result || 'Action completed',
         causedBy: meta.causedBy,
+        proof: buildOutcomeProof({ action: meta.action, success: meta.success ?? true, outcome: meta.result || 'Action completed' }),
       });
     }
 
@@ -1628,20 +1682,22 @@ export class MarrowClient {
     checkLoop?: boolean;
     provenance?: MarrowDecisionProvenanceInput;
   }): Promise<MarrowThinkResult> {
+    const provenance = redactSensitiveValue(mergeProvenance(params.provenance, {
+      source_kind: 'agent_autonomous',
+      source_confidence: 0.9,
+      human_directed: false,
+      source_meta: {
+        channel: 'sdk',
+        client: 'custom',
+        user_intent: inferUserIntentFromType(params.type),
+      },
+    })) as Record<string, unknown>;
+
     const body: Record<string, unknown> = {
-      action: params.action,
+      action: redactSensitiveText(params.action),
       type: params.type || 'general',
-      context: params.context,
-      ...mergeProvenance(params.provenance, {
-        source_kind: 'agent_autonomous',
-        source_confidence: 0.9,
-        human_directed: false,
-        source_meta: {
-          channel: 'sdk',
-          client: 'custom',
-          user_intent: inferUserIntentFromType(params.type),
-        },
-      }),
+      context: params.context ? redactSensitiveValue(params.context) as Record<string, unknown> : undefined,
+      ...provenance,
     };
 
     if (params.checkLoop) {
@@ -1651,9 +1707,9 @@ export class MarrowClient {
     if (this.decisionId) {
       body.previous_decision_id = this.decisionId;
       body.previous_success = params.previousSuccess ?? true;
-      body.previous_outcome = params.previousOutcome ?? '';
+      body.previous_outcome = redactSensitiveText(params.previousOutcome ?? '');
       if (params.previousCausedBy)
-        body.previous_caused_by = params.previousCausedBy;
+        body.previous_caused_by = redactSensitiveText(params.previousCausedBy);
     }
 
     const res = await this.request('POST', '/v1/agent/think', body);
@@ -1784,17 +1840,27 @@ export class MarrowClient {
     success: boolean;
     outcome: string;
     causedBy?: string;
+    decisionId?: string;
+    gateReceiptId?: string;
+    gate_receipt_id?: string;
+    proof?: Record<string, unknown>;
   }): Promise<MarrowCommitResult> {
-    if (!this.decisionId) {
+    const decisionId = params.decisionId || this.decisionId;
+    if (!decisionId) {
       throw new Error('No active decision. Call think() first.');
     }
 
-    const res = await this.request('POST', '/v1/agent/commit', {
-      decision_id: this.decisionId,
+    const body: Record<string, unknown> = {
+      decision_id: decisionId,
       success: params.success,
-      outcome: params.outcome,
-      caused_by: params.causedBy,
-    });
+      outcome: redactSensitiveText(params.outcome),
+      caused_by: params.causedBy ? redactSensitiveText(params.causedBy) : undefined,
+    };
+    const gateReceiptId = params.gateReceiptId || params.gate_receipt_id;
+    if (gateReceiptId) body.gate_receipt_id = gateReceiptId;
+    if (params.proof) body.proof = redactSensitiveValue(params.proof) as Record<string, unknown>;
+
+    const res = await this.request('POST', '/v1/agent/commit', body);
     const data = res.data ?? res;
 
     this.decisionId = null;
@@ -1823,6 +1889,7 @@ export class MarrowClient {
       successRate: data.success_rate,
       insight: data.insight,
       narrative: data.narrative ?? null,
+      pre_action_gate: data.pre_action_gate ?? null,
       acceptedAs: 'outcome',
       recommendedNext: loop.recommendedNext,
       loop,
@@ -2453,6 +2520,49 @@ export class MarrowClient {
       session_id: input.session_id ?? this.sessionId ?? undefined,
     });
     return (res.data || res) as MarrowAgentRuntimeResult;
+  }
+
+  async recommendGovernanceMode(input: MarrowModeRecommendationRequest): Promise<MarrowModeRecommendationResult> {
+    const res = await this.request('POST', '/v1/agent/mode/recommend', {
+      ...input,
+      agent: {
+        ...(input.agent || {}),
+        id: input.agent?.id ?? this.agentId ?? undefined,
+      },
+    });
+    return (res.data || res) as MarrowModeRecommendationResult;
+  }
+
+  async listPolicyProfiles(): Promise<MarrowPolicyProfilesResult> {
+    const res = await this.request('GET', '/v1/agent/policy-profiles');
+    return (res.data || res) as MarrowPolicyProfilesResult;
+  }
+
+  async createPolicyProfile(input: MarrowCreatePolicyProfileRequest): Promise<MarrowPolicyProfileResult> {
+    const res = await this.request('POST', '/v1/agent/policy-profiles', input);
+    return (res.data || res) as MarrowPolicyProfileResult;
+  }
+
+  async updatePolicyProfile(id: string, input: MarrowCreatePolicyProfileRequest): Promise<MarrowPolicyProfileResult> {
+    const safeId = validatePathParam(id, 'profile id');
+    const res = await this.request('PUT', `/v1/agent/policy-profiles/${safeId}`, input);
+    return (res.data || res) as MarrowPolicyProfileResult;
+  }
+
+  async assignProjectPolicyProfile(input: MarrowAssignProjectPolicyProfileRequest): Promise<MarrowProjectPolicyProfileAssignmentResult> {
+    const res = await this.request('POST', '/v1/agent/project-policy-profile', input);
+    return (res.data || res) as MarrowProjectPolicyProfileAssignmentResult;
+  }
+
+  async resolvePolicy(input: MarrowPolicyResolveRequest): Promise<MarrowPolicyResolveResult> {
+    const res = await this.request('POST', '/v1/agent/policy/resolve', {
+      ...input,
+      agent: {
+        ...(input.agent || {}),
+        id: input.agent?.id ?? this.agentId ?? undefined,
+      },
+    });
+    return (res.data || res) as MarrowPolicyResolveResult;
   }
 
   /**

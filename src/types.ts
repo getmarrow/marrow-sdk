@@ -458,6 +458,7 @@ export interface MarrowCommitResult {
   insight: string | null;
   narrative: Narrative;
   marrow_contributed?: CommitContribution;
+  pre_action_gate?: { receipt_id?: string | null; decision?: string | null; enforced: boolean } | null;
   acceptedAs: 'outcome';
   recommendedNext: MarrowLoopRecommendation;
   loop: MarrowCheckResult;
@@ -856,6 +857,133 @@ export interface MarrowDecisionBriefResult {
 export interface MarrowAgentRuntimeRequest extends MarrowDecisionBriefRequest {
   risk_tolerance?: MarrowWorkflowGateRiskTolerance;
   requires_approval?: boolean;
+  project?: MarrowGovernanceProject;
+  profile_id?: string;
+  profile_name?: string;
+  branch?: string;
+  environment?: string;
+}
+
+export type MarrowGovernanceMode = 'passive' | 'pilot' | 'enforce';
+
+export interface MarrowGovernanceProject {
+  name?: string;
+  key?: string;
+  type?: string;
+  frameworks?: string[];
+  signals?: string[];
+  package_scripts?: string[];
+  config_files?: string[];
+}
+
+export interface MarrowGovernanceWorkflow {
+  action?: string;
+  type?: string;
+  branch?: string;
+  environment?: string;
+}
+
+export interface MarrowGovernanceAgent {
+  id?: string | null;
+  role?: string;
+}
+
+export interface MarrowModeRecommendationRequest {
+  project?: MarrowGovernanceProject;
+  workflow?: MarrowGovernanceWorkflow;
+  agent?: MarrowGovernanceAgent;
+  selected_mode?: MarrowGovernanceMode;
+  selection_source?: 'accepted' | 'overridden' | 'ignored' | 'system';
+}
+
+export interface MarrowModeRecommendationResult {
+  id: string;
+  recommended_mode: MarrowGovernanceMode;
+  confidence: number;
+  reasons: string[];
+  suggested_next_step: string;
+  auto_applied: false;
+  requires_user_approval: boolean;
+  safe_default: MarrowGovernanceMode;
+  project_key: string | null;
+  policy_profile_available: boolean;
+  detected: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MarrowPolicyRule {
+  match?: {
+    environment?: string;
+    type?: string;
+    branch?: string;
+    signal?: string;
+    framework?: string;
+    action_contains?: string;
+  };
+  mode: MarrowGovernanceMode;
+  reason?: string;
+}
+
+export interface MarrowPolicyProfile {
+  id: string;
+  account_id: string;
+  name: string;
+  description: string | null;
+  rules: MarrowPolicyRule[];
+  status: 'active' | 'disabled';
+  created_by_agent_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarrowPolicyProfilesResult {
+  profiles: MarrowPolicyProfile[];
+}
+
+export interface MarrowCreatePolicyProfileRequest {
+  name: string;
+  description?: string | null;
+  rules?: MarrowPolicyRule[];
+}
+
+export interface MarrowPolicyProfileResult {
+  profile: MarrowPolicyProfile;
+}
+
+export interface MarrowAssignProjectPolicyProfileRequest {
+  project_key: string;
+  profile_id: string;
+}
+
+export interface MarrowProjectPolicyProfileAssignment {
+  id: string;
+  account_id: string;
+  project_key: string;
+  profile_id: string;
+  profile_name: string;
+  status: 'active' | 'disabled';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarrowProjectPolicyProfileAssignmentResult {
+  assignment: MarrowProjectPolicyProfileAssignment;
+}
+
+export interface MarrowPolicyResolveRequest extends MarrowModeRecommendationRequest {
+  profile_id?: string;
+  profile_name?: string;
+}
+
+export interface MarrowPolicyResolveResult {
+  mode: MarrowGovernanceMode;
+  source: 'policy_profile' | 'recommendation';
+  profile: { id: string; name: string; project_key?: string | null };
+  matched_rule: MarrowPolicyRule | null;
+  recommendation: MarrowModeRecommendationResult;
+  auto_applied: false;
+  requires_user_approval: boolean;
+  explanation: string;
 }
 
 export interface MarrowFirstValueRequest {
@@ -970,6 +1098,16 @@ export interface MarrowAgentRuntimeResult {
   relevant_lessons: MarrowFleetLesson[];
   deployment_playbooks: MarrowDeploymentMemory[];
   template_suggestion: Record<string, unknown>;
+  gate_receipt_id?: string | null;
+  gate_receipt?: {
+    id: string;
+    required: boolean;
+    decision?: string;
+    expires_at?: string;
+    owner_approval_required?: boolean;
+    required_steps?: string[];
+    exact_fix?: string;
+  } | null;
   proof_pack: {
     required: boolean;
     enforced: boolean;

@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput } from './types';
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
@@ -80,6 +80,10 @@ export declare class MarrowClient {
         success: boolean;
         outcome: string;
         causedBy?: string;
+        decisionId?: string;
+        gateReceiptId?: string;
+        gate_receipt_id?: string;
+        proof?: Record<string, unknown>;
     }): Promise<MarrowCommitResult>;
     orient(params?: {
         taskType?: string;
@@ -233,6 +237,12 @@ export declare class MarrowClient {
      * template suggestion, proof-pack requirements, and exact next action.
      */
     agentRuntime(input: MarrowAgentRuntimeRequest): Promise<MarrowAgentRuntimeResult>;
+    recommendGovernanceMode(input: MarrowModeRecommendationRequest): Promise<MarrowModeRecommendationResult>;
+    listPolicyProfiles(): Promise<MarrowPolicyProfilesResult>;
+    createPolicyProfile(input: MarrowCreatePolicyProfileRequest): Promise<MarrowPolicyProfileResult>;
+    updatePolicyProfile(id: string, input: MarrowCreatePolicyProfileRequest): Promise<MarrowPolicyProfileResult>;
+    assignProjectPolicyProfile(input: MarrowAssignProjectPolicyProfileRequest): Promise<MarrowProjectPolicyProfileAssignmentResult>;
+    resolvePolicy(input: MarrowPolicyResolveRequest): Promise<MarrowPolicyResolveResult>;
     /**
      * First-run value proof for installers and agents: capture status, runtime gate,
      * first useful lesson, and value-proof counters in one response.

@@ -21,6 +21,12 @@ That's fine for a toy. It's a problem for anything real.
 
 **Marrow turns agent memory from a passive log into an operating loop.**
 
+## Trust and Data Boundaries
+
+Marrow is tenant-aware by design. Private account, fleet, memory, workflow, and proof-pack data stays scoped to the authenticated account and authorized agent-bound keys. Shared/hive learning uses visibility-controlled, sanitized aggregate signals; it is not raw cross-customer decision sharing.
+
+For business pilots, review the live trust notes before production rollout: https://getmarrow.ai/docs#trust-boundaries
+
 ---
 
 ## Start Here
@@ -32,6 +38,7 @@ npx @getmarrow/install --yes
 ```
 
 The installer detects your environment, wires MCP hooks or SDK passive runtime files where appropriate, runs a self-test, and shows first-run value proof.
+It now also includes a governed runner: `npx @getmarrow/install run --agent <agent-id> -- <command>`, which places Marrow's pre-action risk gate and automatic outcome closure in front of existing shell, deploy, publish, merge, and migration commands without replacing your agent harness.
 For custom SDK agents, `firstValue()` returns the same first-run proof payload and `run()` now performs a soft pre-action runtime check before logging intent.
 
 Use this SDK directly when you are building a custom Node/TypeScript agent integration, want programmatic control, or need to wrap your own tools, commands, deploys, publishes, fetch calls, and guarded actions in code.
@@ -45,6 +52,7 @@ Marrow can log at three layers, but the behavior depends on how you wire it up:
 | Layer | How | Agent effort |
 |-------|-----|-------------|
 | Server-side | Authenticated Marrow API calls are auto-logged server-side | Zero |
+| Governed runner | `npx @getmarrow/install run --agent <id> -- <command>` — pre-action gate + outcome proof around existing commands | Minimal |
 | SDK | `createPassiveRuntime()`, `runGuarded()`, `think()` / `commit()` after install/wrapping | Minimal |
 | MCP hooks | `npx @getmarrow/mcp setup` — PostToolUse + UserPromptSubmit hooks after setup | Minimal |
 
@@ -73,13 +81,36 @@ Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_
 
 ---
 
-## What's New in v3.7.32
+## What's New in v3.7.33
 
-v3.7.32 is a docs-sync release for Marrow's enterprise readiness contract. Runtime behavior is unchanged from v3.7.31.
+v3.7.33 adds adaptive governance mode and policy-profile helpers, while keeping the enterprise readiness contract documented for business pilots.
 
-- Business agents and owners can now use `GET /v1/agent/enterprise-readiness?agents=20` to pull tenant isolation, data-boundary, fail behavior, policy, scale proof, and pilot readiness in one owner-safe response.
-- Marrow is explicit about what is ready today: controlled 20-agent business pilots are supported when production gates pass; regulated enterprise use still requires formal SOC 2/legal/SLA completion.
-- The source-of-truth docs now include the enterprise trust and scale readiness page at [getmarrow.ai/docs](https://getmarrow.ai/docs/).
+- `recommendGovernanceMode()` calls `/v1/agent/mode/recommend` and returns an explainable `passive`, `pilot`, or `enforce` recommendation.
+- `listPolicyProfiles()`, `createPolicyProfile()`, `updatePolicyProfile()`, `assignProjectPolicyProfile()`, and `resolvePolicy()` expose explicit account/project policy profiles for business fleets.
+- `agentRuntime()` can include project/profile context and returns `adaptive_governance` when supplied.
+- Marrow does not silently auto-switch modes. Agents and owners must accept or override the recommendation.
+- Business agents and owners can use `GET /v1/agent/enterprise-readiness?agents=20` to pull tenant isolation, data-boundary, fail behavior, policy, scale proof, and pilot readiness in one owner-safe response.
+- The source-of-truth docs include the enterprise trust and scale readiness page at [getmarrow.ai/docs](https://getmarrow.ai/docs/).
+
+```typescript
+const recommendation = await marrow.recommendGovernanceMode({
+  project: {
+    name: 'marrow-api',
+    type: 'node',
+    frameworks: ['cloudflare-workers'],
+    signals: ['package_json', 'wrangler_config', 'github_actions'],
+    package_scripts: ['deploy', 'test']
+  },
+  workflow: {
+    action: 'deploy production worker',
+    type: 'deploy',
+    branch: 'master',
+    environment: 'production'
+  }
+});
+
+console.log(recommendation.recommended_mode, recommendation.reasons);
+```
 
 ## What's New in v3.7.31
 
@@ -240,7 +271,27 @@ Full feature history, examples, and API reference live at [getmarrow.ai/docs](ht
 Example:
 
 ```typescript
-const result = await marrow.commit({ success: true, outcome: 'Deploy succeeded' });
+const runtime = await marrow.agentRuntime({
+  action: 'deploy to production',
+  type: 'deploy',
+  surfaces: ['production']
+});
+
+const result = await marrow.commit({
+  success: true,
+  outcome: 'Deploy succeeded',
+  gateReceiptId: runtime.gate_receipt?.id,
+  proof: {
+    summary: 'Production deploy completed',
+    checks: ['tests passed', 'smoke passed'],
+    outcome: 'success',
+    blockers: 'none',
+    commits_prs_shas: 'abc123',
+    rollback_target: 'previous Worker version',
+    handoff_result_file: '/tmp/marrow-handoffs/release/result.md',
+    deployment_and_smoke: 'production smoke passed'
+  }
+});
 if (result.narrative) { console.log('Marrow:', result.narrative); }
 ```
 

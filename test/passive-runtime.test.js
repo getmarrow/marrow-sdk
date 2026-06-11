@@ -542,3 +542,68 @@ test('agentRuntime redacts legacy Marrow keys from action context and proof', as
   assert.doesNotMatch(text, /oauthsecret123|signedsecret456|clientsecret789|keysecret123|keydashsecret456/);
   assert.match(text, /\[REDACTED_MARROW_KEY\]/);
 });
+
+
+test('commit redacts outcome causedBy and proof token shapes', async () => {
+  const leaked = 'cfut_abcdefghijklmnopqrstuvwxyz1234567890';
+  const marrow = new MarrowClient('mrw_test_passive_runtime_key_123456789');
+  let captured;
+
+  marrow.request = async (method, path, body) => {
+    captured = { method, path, body };
+    return {
+      data: {
+        committed: true,
+        decision_id: 'decision_123',
+        success_rate: 1,
+        insight: null,
+        narrative: null,
+      },
+    };
+  };
+
+  await marrow.commit({
+    decisionId: 'decision_123',
+    success: true,
+    outcome: `deploy ok with ${leaked} https://example.com?token=tokensecret123`,
+    causedBy: `manual command ${leaked}`,
+    proof: { summary: `proof ${leaked}`, url: 'https://example.com?client_secret=clientsecret123' },
+  });
+
+  const text = JSON.stringify(captured);
+  assert.equal(captured.method, 'POST');
+  assert.equal(captured.path, '/v1/agent/commit');
+  assert.doesNotMatch(text, new RegExp(leaked));
+  assert.doesNotMatch(text, /tokensecret123|clientsecret123/);
+  assert.match(text, /\[REDACTED_TOKEN\]|\[redacted\]/);
+});
+
+
+test('think redacts direct action context provenance and previous outcome', async () => {
+  const leaked = 'cfut_abcdefghijklmnopqrstuvwxyz1234567890';
+  const marrow = new MarrowClient('mrw_test_passive_runtime_key_123456789');
+  let captured;
+  marrow.decisionId = 'decision_previous';
+
+  marrow.request = async (method, path, body) => {
+    captured = { method, path, body };
+    return { data: { decision_id: 'decision_next', intelligence: {} } };
+  };
+
+  await marrow.think({
+    action: `deploy with ${leaked} https://example.com?token=tokensecret123`,
+    context: { token: leaked, nested: { url: 'https://example.com?client_secret=clientsecret123' } },
+    previousOutcome: `prior outcome ${leaked} https://example.com?code=oauthsecret123`,
+    previousCausedBy: `caused by ${leaked}`,
+    provenance: {
+      source_meta: { api_key: leaked, callback: 'https://example.com?signature=signedsecret123' },
+    },
+  });
+
+  const text = JSON.stringify(captured);
+  assert.equal(captured.method, 'POST');
+  assert.equal(captured.path, '/v1/agent/think');
+  assert.doesNotMatch(text, new RegExp(leaked));
+  assert.doesNotMatch(text, /tokensecret123|clientsecret123|signedsecret123|oauthsecret123/);
+  assert.match(text, /\[REDACTED_TOKEN\]|\[redacted\]/);
+});

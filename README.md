@@ -95,14 +95,14 @@ v3.7.33 adds adaptive governance mode and policy-profile helpers, while keeping 
 ```typescript
 const recommendation = await marrow.recommendGovernanceMode({
   project: {
-    name: 'marrow-api',
+    name: 'agent-api',
     type: 'node',
-    frameworks: ['cloudflare-workers'],
-    signals: ['package_json', 'wrangler_config', 'github_actions'],
+    frameworks: ['edge-service'],
+    signals: ['package_json', 'platform_config', 'github_actions'],
     package_scripts: ['deploy', 'test']
   },
   workflow: {
-    action: 'deploy production worker',
+    action: 'deploy production service',
     type: 'deploy',
     branch: 'master',
     environment: 'production'
@@ -142,17 +142,17 @@ Previous guarded-runtime behavior remains current:
 
 ```typescript
 const runtime = await marrow.agentRuntime({
-  action: 'deploy Cloudflare Worker to production',
+  action: 'deploy edge service to production',
   type: 'deploy',
   role: 'deploy',
-  surfaces: ['github', 'cloudflare', 'production']
+  surfaces: ['github', 'deployment-platform', 'production']
 });
 
 const result = await marrow.runGuarded({
-  action: 'deploy Cloudflare Worker to production',
+  action: 'deploy edge service to production',
   type: 'deploy',
   role: 'deploy',
-  surfaces: ['github', 'cloudflare', 'production'],
+  surfaces: ['github', 'deployment-platform', 'production'],
   riskPolicy: 'block_high',
   includeValueReport: true,
   execute: async () => deploy(),
@@ -184,13 +184,13 @@ const runtime = marrow.createPassiveRuntime({
 
 runtime.install(); // wraps global fetch when available
 
-await runtime.deploy('deploy Cloudflare Worker to production', async () => {
+await runtime.deploy('deploy edge service to production', async () => {
   return deploy();
 }, {
-  surfaces: ['github', 'cloudflare', 'production']
+  surfaces: ['github', 'deployment-platform', 'production']
 });
 
-await runtime.command('wrangler deploy', () => exec('wrangler deploy'));
+await runtime.command('npm run deploy', () => exec('npm run deploy'));
 await runtime.tool('github.pr.merge', () => mergePr());
 ```
 
@@ -211,10 +211,10 @@ The runtime redacts URL/action metadata before logging, and Marrow never receive
 
 ```typescript
 const guarded = await marrow.runGuarded({
-  action: 'deploy Cloudflare Worker to production',
+  action: 'deploy edge service to production',
   type: 'deploy',
   role: 'deploy',
-  surfaces: ['github', 'cloudflare', 'production'],
+  surfaces: ['github', 'deployment-platform', 'production'],
   includeValueReport: true,
   execute: async () => deploy(),
 });

@@ -526,7 +526,8 @@ export class MarrowClient {
       apiKey.startsWith('mrw_')
     ) {
       const fromEnv = Object.values(process.env || {}).includes(apiKey);
-      if (!fromEnv) {
+      const trustedEnvFile = typeof options === 'object' && options?.apiKeySource === 'env-file';
+      if (!fromEnv && !trustedEnvFile) {
         throw new Error(
           '[marrow] SECURITY: API key appears hardcoded in source code. Use process.env.MARROW_API_KEY instead. See: https://getmarrow.ai/docs/security'
         );

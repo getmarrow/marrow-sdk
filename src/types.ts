@@ -544,6 +544,7 @@ export interface MarrowClientOptions {
   sessionId?: string;
   agentId?: string;
   mode?: MarrowEnforcementMode;
+  apiKeySource?: 'env' | 'env-file' | 'explicit';
 }
 
 export interface MemoryShareOptions {

@@ -712,9 +712,24 @@ Full-text search with filters.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MARROW_API_KEY` | Yes | Your API key from getmarrow.ai |
+| `MARROW_API_KEY` | Yes | Your API key from getmarrow.ai. Prefer env vars or secret storage. SDK helpers also auto-load `.marrow/env`, `.marrow/env.local`, `.env`, `.env.local`, `~/.marrow/env`, and `~/.marrow/env.local`. |
+| `MARROW_KEY` | No | Alias accepted by SDK helpers for fleet runners and secret managers. |
 | `MARROW_BASE_URL` | No | Custom API URL (default: `https://api.getmarrow.ai`). Must use HTTPS. |
 | `MARROW_SESSION_ID` | No | Session identifier for multi-agent setups |
+
+`marrowFromEnv()` now uses the same resolver as the installer and MCP package. If an agent says Marrow is missing, run:
+
+```bash
+npx @getmarrow/install doctor
+```
+
+For a stable project-local setup:
+
+```bash
+mkdir -p .marrow
+printf "MARROW_API_KEY=mrw_live_...\\n" > .marrow/env
+chmod 600 .marrow/env
+```
 
 ---
 

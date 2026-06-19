@@ -8,6 +8,8 @@ import { MarrowClient, MarrowLoopRequiredError, classifyMarrowFailure } from './
 
 export { MarrowClient, MarrowLoopRequiredError, classifyMarrowFailure } from './client';
 export { createMarrowClient, marrowFromEnv } from './factory';
+export { resolveMarrowEnv } from './env';
+export type { MarrowResolvedEnv, MarrowResolveEnvOptions } from './env';
 
 export type {
   // Core Types

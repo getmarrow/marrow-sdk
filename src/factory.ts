@@ -4,6 +4,7 @@
 
 import { MarrowClient } from './client';
 import type { MarrowClientOptions, MarrowEnforcementMode } from './types';
+import { resolveMarrowEnv } from './env';
 
 /**
  * Create a MarrowClient with explicit API key and options.
@@ -17,24 +18,32 @@ export function createMarrowClient(
 
 /**
  * Create a MarrowClient from environment variables.
- * Reads MARROW_API_KEY (required) and MARROW_BASE_URL (optional).
+ * Reads MARROW_API_KEY or MARROW_KEY from the process environment.
+ * If missing, also checks .marrow/env, .env, and ~/.marrow/env so agent
+ * runtimes can keep Marrow active without brittle shell setup.
  */
 export function marrowFromEnv(options?: {
   sessionId?: string;
   mode?: MarrowEnforcementMode;
+  cwd?: string;
 }): MarrowClient {
-  const apiKey = process.env.MARROW_API_KEY;
-  const baseUrl = process.env.MARROW_BASE_URL;
+  const resolved = resolveMarrowEnv({ cwd: options?.cwd });
 
-  if (!apiKey) {
-    throw new Error(
-      'MARROW_API_KEY environment variable is required. Set it or pass apiKey explicitly.'
-    );
+  if (!resolved.apiKey) {
+    throw new Error(`MARROW_API_KEY is required. ${resolved.exactFix}`);
   }
 
-  return new MarrowClient(apiKey, {
-    baseUrl: baseUrl || undefined,
-    sessionId: options?.sessionId,
+  return new MarrowClient(resolved.apiKey, {
+    baseUrl: resolved.baseUrl || undefined,
+    agentId: resolved.agentId,
+    sessionId: options?.sessionId || resolved.sessionId,
     mode: options?.mode,
+    apiKeySource: resolved.source && resolved.source.includes(pathSeparator())
+      ? 'env-file'
+      : 'env',
   });
+}
+
+function pathSeparator(): string {
+  return process.platform === 'win32' ? '\\' : '/';
 }

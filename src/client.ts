@@ -92,6 +92,15 @@ const REQUIRE_EXTERNAL_ERROR =
 const REQUIRE_COMPLETION_ERROR =
   'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 
+type RetryQueueItem = {
+  method: string;
+  path: string;
+  body?: unknown;
+  attempts: number;
+  lastError: string;
+  queuedAt: string;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -500,6 +509,8 @@ export class MarrowClient {
   private agentId: string | null;
   private reminderBudget: ReminderBudget;
   private baseUrl: string;
+  private retryQueue: RetryQueueItem[] = [];
+  private retryQueueDraining = false;
 
   constructor(apiKey: string, options?: MarrowClientOptions | string) {
     this.apiKey = apiKey;
@@ -2130,6 +2141,11 @@ export class MarrowClient {
       nextAction: data.next_action || null,
       autoOutcomeClosure: data.auto_outcome_closure || null,
       proof: data.proof || null,
+      failureReasons: Array.isArray(data.failure_reasons) ? data.failure_reasons : [],
+      agentWarnings: Array.isArray(data.agent_warnings) ? data.agent_warnings : [],
+      staleAgentHours: Number.isFinite(Number(data.stale_agent_hours)) ? Number(data.stale_agent_hours) : null,
+      staleAgentWarning: data.stale_agent_warning || null,
+      diagnostics: data.diagnostics || null,
     };
   }
 
@@ -2710,6 +2726,22 @@ export class MarrowClient {
     path: string,
     body?: unknown
   ): Promise<any> {
+    await this.drainRetryQueue();
+    try {
+      return await this.requestOnce(method, path, body);
+    } catch (error) {
+      if (this.shouldQueueRequest(method, path, error)) {
+        this.enqueueRetry(method, path, body, error);
+      }
+      throw error;
+    }
+  }
+
+  private async requestOnce(
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<any> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
@@ -2743,5 +2775,49 @@ export class MarrowClient {
     }
 
     return res.json();
+  }
+
+  private shouldQueueRequest(method: string, path: string, error: unknown): boolean {
+    if (method.toUpperCase() !== 'POST') return false;
+    if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end'].includes(path)) return false;
+    const message = safeErrorMessage(error).toLowerCase();
+    if (/\b(401|403|unauthorized|forbidden|invalid api key|insufficient scope|proof pack|required proof|policy|blocked)\b/.test(message)) {
+      return false;
+    }
+    return /\b(408|425|429|500|502|503|504|timeout|timed out|econnreset|enotfound|eai_again|network|fetch failed|temporar|rate limit)\b/.test(message);
+  }
+
+  private enqueueRetry(method: string, path: string, body: unknown, error: unknown): void {
+    if (this.retryQueue.length >= 25) this.retryQueue.shift();
+    this.retryQueue.push({
+      method,
+      path,
+      body,
+      attempts: 0,
+      lastError: safePublicErrorMessage(error),
+      queuedAt: nowIso(),
+    });
+  }
+
+  private async drainRetryQueue(): Promise<void> {
+    if (this.retryQueueDraining || this.retryQueue.length === 0) return;
+    this.retryQueueDraining = true;
+    const remaining: RetryQueueItem[] = [];
+    try {
+      const queued = this.retryQueue.splice(0, 5);
+      for (const item of queued) {
+        try {
+          await this.requestOnce(item.method, item.path, item.body);
+        } catch (error) {
+          const attempts = item.attempts + 1;
+          if (attempts < 3 && this.shouldQueueRequest(item.method, item.path, error)) {
+            remaining.push({ ...item, attempts, lastError: safePublicErrorMessage(error) });
+          }
+        }
+      }
+    } finally {
+      this.retryQueue.unshift(...remaining);
+      this.retryQueueDraining = false;
+    }
   }
 }

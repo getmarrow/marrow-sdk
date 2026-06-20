@@ -376,6 +376,8 @@ class MarrowClient {
     agentId;
     reminderBudget;
     baseUrl;
+    retryQueue = [];
+    retryQueueDraining = false;
     constructor(apiKey, options) {
         this.apiKey = apiKey;
         // Support legacy positional baseUrl: new MarrowClient(key, 'https://...')
@@ -1738,6 +1740,11 @@ class MarrowClient {
             nextAction: data.next_action || null,
             autoOutcomeClosure: data.auto_outcome_closure || null,
             proof: data.proof || null,
+            failureReasons: Array.isArray(data.failure_reasons) ? data.failure_reasons : [],
+            agentWarnings: Array.isArray(data.agent_warnings) ? data.agent_warnings : [],
+            staleAgentHours: Number.isFinite(Number(data.stale_agent_hours)) ? Number(data.stale_agent_hours) : null,
+            staleAgentWarning: data.stale_agent_warning || null,
+            diagnostics: data.diagnostics || null,
         };
     }
     // Memory Control Methods
@@ -2224,6 +2231,18 @@ class MarrowClient {
         };
     }
     async request(method, path, body) {
+        await this.drainRetryQueue();
+        try {
+            return await this.requestOnce(method, path, body);
+        }
+        catch (error) {
+            if (this.shouldQueueRequest(method, path, error)) {
+                this.enqueueRetry(method, path, body, error);
+            }
+            throw error;
+        }
+    }
+    async requestOnce(method, path, body) {
         const url = `${this.baseUrl}${path}`;
         const headers = {
             Authorization: `Bearer ${this.apiKey}`,
@@ -2255,6 +2274,53 @@ class MarrowClient {
             throw new Error(`Marrow API error: ${res.status} ${res.statusText} — ${errorDetail}`);
         }
         return res.json();
+    }
+    shouldQueueRequest(method, path, error) {
+        if (method.toUpperCase() !== 'POST')
+            return false;
+        if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end'].includes(path))
+            return false;
+        const message = safeErrorMessage(error).toLowerCase();
+        if (/\b(401|403|unauthorized|forbidden|invalid api key|insufficient scope|proof pack|required proof|policy|blocked)\b/.test(message)) {
+            return false;
+        }
+        return /\b(408|425|429|500|502|503|504|timeout|timed out|econnreset|enotfound|eai_again|network|fetch failed|temporar|rate limit)\b/.test(message);
+    }
+    enqueueRetry(method, path, body, error) {
+        if (this.retryQueue.length >= 25)
+            this.retryQueue.shift();
+        this.retryQueue.push({
+            method,
+            path,
+            body,
+            attempts: 0,
+            lastError: safePublicErrorMessage(error),
+            queuedAt: nowIso(),
+        });
+    }
+    async drainRetryQueue() {
+        if (this.retryQueueDraining || this.retryQueue.length === 0)
+            return;
+        this.retryQueueDraining = true;
+        const remaining = [];
+        try {
+            const queued = this.retryQueue.splice(0, 5);
+            for (const item of queued) {
+                try {
+                    await this.requestOnce(item.method, item.path, item.body);
+                }
+                catch (error) {
+                    const attempts = item.attempts + 1;
+                    if (attempts < 3 && this.shouldQueueRequest(item.method, item.path, error)) {
+                        remaining.push({ ...item, attempts, lastError: safePublicErrorMessage(error) });
+                    }
+                }
+            }
+        }
+        finally {
+            this.retryQueue.unshift(...remaining);
+            this.retryQueueDraining = false;
+        }
     }
 }
 exports.MarrowClient = MarrowClient;

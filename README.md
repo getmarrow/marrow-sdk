@@ -194,14 +194,19 @@ await runtime.command('npm run deploy', () => exec('npm run deploy'));
 await runtime.tool('github.pr.merge', () => mergePr());
 ```
 
-Each runtime surface auto-closes the outcome. Successful tool, command, deploy, and publish wrappers commit success; thrown errors commit failure with a redacted failure class. `quickStatus()` now exposes `hookStatus`, `fixCommands`, `nextAction`, `outcomeEligibleDecisionCount`, `recentOutcomeEligibleDecisions24h`, and `autoOutcomeClosure` so agents can repair degraded passive capture directly. Read-only status checks and one-call runtime guidance are not counted as outcome-eligible actions.
+Each runtime surface auto-closes the outcome. Successful tool, command, deploy, and publish wrappers commit success; thrown errors commit failure with a redacted failure class. `quickStatus()` now exposes `hookStatus`, `fixCommands`, `nextAction`, `outcomeEligibleDecisionCount`, `recentOutcomeEligibleDecisions24h`, `autoOutcomeClosure`, `failureReasons`, `agentWarnings`, `staleAgentWarning`, and `diagnostics` so agents can repair degraded passive capture directly. Read-only status checks and one-call runtime guidance are not counted as outcome-eligible actions.
 
 ```typescript
 const status = await marrow.quickStatus();
 if (status.health === 'degraded' && status.nextAction) {
   console.log(status.nextAction); // e.g. npx @getmarrow/install --yes
 }
+if (status.failureReasons?.length) {
+  console.log(status.failureReasons[0].exact_fix);
+}
 ```
+
+The SDK queues retryable transient failures for `think`, `commit`, and session-end writes in memory, then drains the queue on the next successful Marrow request. Auth, policy, proof-pack, and validation failures are not queued because those need an exact fix instead of blind retries.
 
 The runtime redacts URL/action metadata before logging, and Marrow never receives request bodies, headers, response bodies, or command output from this shim. Avoid placing secrets directly in action or command text when you can; the runtime redacts common cases but should not be treated as a license to inline credentials.
 
@@ -722,6 +727,14 @@ Full-text search with filters.
 ```bash
 npx @getmarrow/install doctor
 ```
+
+Deep doctor with harmless write/outcome verification:
+
+```bash
+MARROW_API_KEY=mrw_live_... npx @getmarrow/install doctor --self-test
+```
+
+Healthy output should confirm `key valid: yes`, `account active: yes`, `agent identity accepted: yes`, `write test event: passed`, and `outcome closed: passed`. If it fails, Marrow returns an exact reason such as `missing_key`, `invalid_key`, `wrong_agent_id`, `network_blocked`, or `proof_required` with the next fix command.
 
 For a stable project-local setup:
 

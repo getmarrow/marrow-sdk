@@ -466,6 +466,24 @@ test('quickStatus maps passive install health fields', async () => {
         publishes: 'unknown',
       },
       missed_hooks: [],
+      failure_reasons: [],
+      agent_warnings: [{
+        code: 'agent_not_logging',
+        severity: 'warn',
+        message: 'This agent has not logged in 25 hours.',
+        stale_hours: 25,
+      }],
+      stale_agent_hours: 25,
+      stale_agent_warning: {
+        code: 'agent_not_logging',
+        message: 'This agent has not logged in 25 hours.',
+      },
+      diagnostics: {
+        key_found: true,
+        key_valid: true,
+        account_active: true,
+        agent_identity_accepted: true,
+      },
       hook_status: {
         outcomes: {
           state: 'detected',
@@ -510,12 +528,80 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.captureCoverage.outcomes, 0.75);
   assert.equal(status.captureCoverage.recent_outcomes, 1);
   assert.deepEqual(status.missedHooks, []);
+  assert.deepEqual(status.failureReasons, []);
+  assert.equal(status.agentWarnings[0].code, 'agent_not_logging');
+  assert.equal(status.staleAgentHours, 25);
+  assert.equal(status.staleAgentWarning.code, 'agent_not_logging');
+  assert.equal(status.diagnostics.key_valid, true);
   assert.equal(status.hookStatus.outcomes.state, 'detected');
   assert.deepEqual(status.fixCommands, []);
   assert.equal(status.nextAction, null);
   assert.equal(status.autoOutcomeClosure.enabled, true);
   assert.equal(status.autoOutcomeClosure.recent_coverage_24h, 1);
   assert.equal(status.autoOutcomeClosure.outcome_eligible_decisions, 9);
+});
+
+test('commit queues transient network failures and drains on next request', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), body: options?.body ? JSON.parse(options.body) : null });
+    if (calls.length === 1) throw new Error('fetch failed: network timeout');
+    return new Response(JSON.stringify({ data: { committed: true, success_rate: 1 } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+    marrow.decisionId = 'decision_retry';
+    await assert.rejects(
+      () => marrow.commit({ success: true, outcome: 'retry me' }),
+      /network timeout/
+    );
+    await marrow.commit({ success: true, outcome: 'drain queue' });
+    assert.equal(calls.length, 3);
+    assert.equal(calls[1].body.decision_id, 'decision_retry');
+    assert.equal(calls[2].body.outcome, 'drain queue');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('commit does not queue 409 proof or idempotency conflicts', async () => {
+  process.env.MARROW_API_KEY = 'mrw_test_passive_runtime_key_123456789';
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), body: options?.body ? JSON.parse(options.body) : null });
+    if (calls.length === 1) {
+      return new Response(JSON.stringify({ error: 'Required proof pack is incomplete' }), {
+        status: 409,
+        statusText: 'Conflict',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ data: { committed: true, success_rate: 1 } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+    marrow.decisionId = 'decision_conflict';
+    await assert.rejects(
+      () => marrow.commit({ success: true, outcome: 'needs proof' }),
+      /409/
+    );
+    await marrow.commit({ success: true, outcome: 'no queued conflict retry' });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].body.outcome, 'no queued conflict retry');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('agentRuntime redacts legacy Marrow keys from action context and proof', async () => {

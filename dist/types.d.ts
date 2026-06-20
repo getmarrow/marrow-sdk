@@ -434,6 +434,32 @@ export interface MarrowQuickStatusResult {
         publishes: 'detected' | 'unknown';
     };
     missedHooks: string[];
+    failureReasons: Array<{
+        code: string;
+        severity: 'info' | 'warn' | 'block' | string;
+        message: string;
+        exact_fix?: string;
+        fix_command?: string;
+    }>;
+    agentWarnings: Array<{
+        code: string;
+        severity: 'info' | 'warn' | 'block' | string;
+        message: string;
+        stale_hours?: number;
+        exact_fix?: string;
+        fix_command?: string;
+    }>;
+    staleAgentHours: number | null;
+    staleAgentWarning: Record<string, unknown> | null;
+    diagnostics: {
+        key_found?: boolean;
+        key_valid?: boolean;
+        account_active?: boolean;
+        agent_identity_accepted?: boolean;
+        write_test_required?: boolean;
+        exact_fix?: string | null;
+        [key: string]: unknown;
+    } | null;
     hookStatus: Record<string, {
         state: 'detected' | 'missing' | 'unknown' | string;
         missing: boolean;

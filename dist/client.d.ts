@@ -18,6 +18,8 @@ export declare class MarrowClient {
     private agentId;
     private reminderBudget;
     private baseUrl;
+    private retryQueue;
+    private retryQueueDraining;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
     enforce(options?: MarrowEnforceOptions): MarrowCheckResult;
     check(): MarrowCheckResult;
@@ -308,5 +310,9 @@ export declare class MarrowClient {
     }>;
     private mapApiKey;
     private request;
+    private requestOnce;
+    private shouldQueueRequest;
+    private enqueueRetry;
+    private drainRetryQueue;
 }
 //# sourceMappingURL=client.d.ts.map

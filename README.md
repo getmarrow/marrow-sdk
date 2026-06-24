@@ -56,9 +56,9 @@ Marrow can log at three layers, but the behavior depends on how you wire it up:
 | SDK | `createPassiveRuntime()`, `runGuarded()`, `think()` / `commit()` after install/wrapping | Minimal |
 | MCP hooks | `npx @getmarrow/mcp setup` — PostToolUse + UserPromptSubmit hooks after setup | Minimal |
 
-**Passive mode for SDK:** Use `marrow.createPassiveRuntime()` once in the agent process, then install or wrap the surfaces you want covered. It can wrap global `fetch`, guard tools, commands, deploys, and publishes with the full Marrow loop. Use `autoWrap()` and `wrapFetch()` when you need lower-level control.
+**Passive mode for SDK:** Use `marrow.createPassiveRuntime()` once in the agent process, then install or wrap the surfaces you want covered. It can wrap global `fetch`, guard tools, commands, deploys, and publishes with the full Marrow loop. Wrapped `fetch` calls automatically capture compact token usage from common model-provider JSON `usage` blocks when present, so agents can show token/time savings after work completes without sending raw prompts or completions. When your harness exposes usage metadata outside fetch, send compact token counts with `modelUsage()` or `commit({ modelUsage })`. Use `autoWrap()` and `wrapFetch()` when you need lower-level control.
 
-Disable passive: skip wrapping. Debug: check `decision_id` on returned objects.
+Disable passive: skip wrapping. Disable passive token capture only: set `MARROW_PASSIVE_TOKEN_USAGE=false` or call `createPassiveRuntime({ captureModelUsage: false })`. Debug: check `decision_id` on returned objects.
 
 ---
 
@@ -77,9 +77,37 @@ if (dash.improvement.status === 'active') {
 
 Four measured deltas: `attempts_per_success`, `time_to_success_seconds`, `drift_rate`, `success_rate`, each with `baseline`, `current`, and `delta_pct`.
 
-**No heuristics, no estimates.** The baseline is a frozen snapshot of your agents' own first week. Everything is computed from real decision data. Token-usage savings estimates remain on the enterprise roadmap.
+**No raw prompts required.** The baseline is a frozen snapshot of your agents' own first week. Token usage proof stores compact counts and labels only: provider/model, input/output/cached/total tokens, latency, optional cost, and optional explicit saved-token estimates.
+
+```typescript
+await marrow.commit({
+  success: true,
+  outcome: 'Deployment completed after Marrow risk gate and smoke checks.',
+  modelUsage: {
+    provider: 'openai',
+    model: 'codex-5.5',
+    input_tokens: 1800,
+    output_tokens: 620,
+    cached_tokens: 400,
+    estimated_tokens_saved: 900,
+    marrow_intervention: 'runtime_gate'
+  }
+});
+```
+
+Commit responses include `token_value_signal`, and `marrow.modelUsage(...)` is available when your agent wants to record usage independently of an outcome commit.
 
 ---
+
+## What's New in v3.7.36
+
+v3.7.36 adds passive token-value proof support.
+
+- `modelUsage()` records compact token/cost/latency counts through `/v1/agent/model-usage`.
+- `commit({ modelUsage })` attaches model usage to completed work and returns `token_value_signal`.
+- `runGuarded({ modelUsage })` forwards usage metadata into automatic outcome closure.
+- Wrapped SDK `fetch` captures standard provider response `usage` blocks by default for OpenAI, Anthropic, Google, xAI, DeepSeek, Groq, OpenRouter, Qwen, Kimi, and Minimax endpoints.
+- Raw prompts, completions, tool logs, and secrets are not required and should not be sent.
 
 ## What's New in v3.7.33
 

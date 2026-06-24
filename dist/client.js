@@ -215,6 +215,114 @@ function stripSensitiveUrl(input) {
         return redactFallback(input);
     }
 }
+function inferModelUsageProvider(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl);
+        const host = parsed.hostname.toLowerCase();
+        if (host.endsWith('openai.com'))
+            return 'openai';
+        if (host.endsWith('anthropic.com'))
+            return 'anthropic';
+        if (host.endsWith('generativelanguage.googleapis.com') || host.endsWith('googleapis.com'))
+            return 'google';
+        if (host.endsWith('x.ai'))
+            return 'xai';
+        if (host.endsWith('deepseek.com'))
+            return 'deepseek';
+        if (host.endsWith('groq.com'))
+            return 'groq';
+        if (host.endsWith('openrouter.ai'))
+            return 'openrouter';
+        if (host.endsWith('dashscope.aliyuncs.com') || host.endsWith('alibaba-inc.com'))
+            return 'qwen';
+        if (host.endsWith('moonshot.cn') || host.endsWith('kimi.com'))
+            return 'kimi';
+        if (host.endsWith('minimax.chat') || host.endsWith('minimaxi.com'))
+            return 'minimax';
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+function numberFrom(value) {
+    const numeric = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
+}
+function firstNumber(...values) {
+    for (const value of values) {
+        const numeric = numberFrom(value);
+        if (numeric !== undefined)
+            return numeric;
+    }
+    return undefined;
+}
+function valueAtPath(source, path) {
+    return path.split('.').reduce((current, segment) => {
+        if (!current || typeof current !== 'object')
+            return undefined;
+        return current[segment];
+    }, source);
+}
+function firstValueAtPath(source, paths) {
+    for (const path of paths) {
+        const value = valueAtPath(source, path);
+        if (value !== undefined && value !== null)
+            return value;
+    }
+    return undefined;
+}
+async function extractModelUsageFromResponse(rawUrl, response) {
+    const provider = inferModelUsageProvider(rawUrl);
+    if (!provider || !response.ok)
+        return null;
+    const contentType = response.headers.get('content-type') || '';
+    if (!/\bjson\b/i.test(contentType))
+        return null;
+    let data;
+    try {
+        const parsed = await response.clone().json();
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            return null;
+        data = parsed;
+    }
+    catch {
+        return null;
+    }
+    const usage = firstValueAtPath(data, [
+        'usage',
+        'meta.usage',
+        'response.usage',
+        'usageMetadata',
+    ]);
+    if (!usage || typeof usage !== 'object')
+        return null;
+    const modelValue = firstValueAtPath(data, [
+        'model',
+        'modelVersion',
+        'response.model',
+        'metadata.model',
+    ]);
+    const usageObj = usage;
+    const inputTokens = firstNumber(usageObj.input_tokens, usageObj.prompt_tokens, usageObj.inputTokenCount, usageObj.promptTokenCount, usageObj.totalInputTokens);
+    const outputTokens = firstNumber(usageObj.output_tokens, usageObj.completion_tokens, usageObj.outputTokenCount, usageObj.candidatesTokenCount, usageObj.totalOutputTokens);
+    const cachedTokens = firstNumber(usageObj.cached_tokens, usageObj.cache_read_input_tokens, valueAtPath(usageObj, 'prompt_tokens_details.cached_tokens'), valueAtPath(usageObj, 'input_token_details.cache_read'), usageObj.cachedContentTokenCount);
+    const totalTokens = firstNumber(usageObj.total_tokens, usageObj.totalTokenCount, usageObj.totalTokens) ?? ((inputTokens || outputTokens || cachedTokens)
+        ? (inputTokens || 0) + (outputTokens || 0) + (cachedTokens || 0)
+        : undefined);
+    if (!inputTokens && !outputTokens && !cachedTokens && !totalTokens)
+        return null;
+    return {
+        provider,
+        model: typeof modelValue === 'string' ? modelValue.slice(0, 180) : undefined,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cached_tokens: cachedTokens,
+        total_tokens: totalTokens,
+        source: 'sdk_passive_fetch',
+        marrow_intervention: 'passive_model_usage_capture',
+    };
+}
 const GLOBAL_FETCH_PATCH_KEY = Symbol.for('marrow.passiveRuntime.fetchPatch');
 function inferSurfacesFromText(value) {
     const lower = value.toLowerCase();
@@ -884,6 +992,7 @@ class MarrowClient {
                             outcome: `Guarded run failed (${failureType}): ${publicError}`,
                             gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
                             proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
+                            modelUsage: options.modelUsage ? { ...options.modelUsage, success: false, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
                         });
                     }
                     catch (commitError) {
@@ -916,6 +1025,7 @@ class MarrowClient {
                     outcome: `Guarded run completed: ${safeAction}`,
                     gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
                     proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
+                    modelUsage: options.modelUsage ? { ...options.modelUsage, success: true, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
                 });
             }
             catch (error) {
@@ -984,6 +1094,7 @@ class MarrowClient {
                         outcome: `Guarded run failed (${failureType}): ${publicError}`,
                         gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
                         proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
+                        modelUsage: options.modelUsage ? { ...options.modelUsage, success: false, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
                     });
                 }
                 catch (commitError) {
@@ -1066,7 +1177,7 @@ class MarrowClient {
             };
         };
         const passiveFetch = fetchFn
-            ? client.wrapFetch(fetchFn.bind(globalThis))
+            ? client.wrapFetch(fetchFn.bind(globalThis), { captureModelUsage: options.captureModelUsage })
             : (async () => {
                 throw new Error('No fetch implementation available for Marrow passive runtime');
             });
@@ -1297,7 +1408,7 @@ class MarrowClient {
      * await wrappedFetch('https://api.example.com/deploy', { method: 'POST' });
      * // auto-logs 'POST https://api.example.com/deploy'
      */
-    wrapFetch(fetchFn) {
+    wrapFetch(fetchFn, options = {}) {
         return (async (input, init) => {
             const requestMethod = (() => {
                 if (init?.method)
@@ -1336,6 +1447,18 @@ class MarrowClient {
             await this.beforeAction(meta);
             try {
                 const response = await fetchFn(input, init);
+                if (options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false') {
+                    void extractModelUsageFromResponse(rawUrl, response)
+                        .then((usage) => {
+                        if (!usage)
+                            return;
+                        return this.modelUsage({
+                            ...usage,
+                            action_type: method,
+                        });
+                    })
+                        .catch(() => undefined);
+                }
                 await this.afterAction({
                     ...meta,
                     success: response.ok,
@@ -1531,6 +1654,9 @@ class MarrowClient {
             body.gate_receipt_id = gateReceiptId;
         if (params.proof)
             body.proof = redactSensitiveValue(params.proof);
+        const modelUsage = params.modelUsage || params.model_usage;
+        if (modelUsage)
+            body.model_usage = this.normalizeModelUsage(modelUsage);
         const res = await this.request('POST', '/v1/agent/commit', body);
         const data = res.data ?? res;
         this.decisionId = null;
@@ -1557,12 +1683,17 @@ class MarrowClient {
             successRate: data.success_rate,
             insight: data.insight,
             narrative: data.narrative ?? null,
+            token_value_signal: data.token_value_signal ?? null,
             pre_action_gate: data.pre_action_gate ?? null,
             acceptedAs: 'outcome',
             recommendedNext: loop.recommendedNext,
             loop,
             summary,
         };
+    }
+    async modelUsage(params) {
+        const res = await this.request('POST', '/v1/agent/model-usage', this.normalizeModelUsage(params));
+        return (res.data ?? res);
     }
     async orient(params) {
         // When autoWarn is enabled, hit the new orient endpoint directly
@@ -2275,10 +2406,46 @@ class MarrowClient {
         }
         return res.json();
     }
+    normalizeModelUsage(input) {
+        const body = {};
+        const copyString = (from, to = from) => {
+            const value = input[from];
+            if (typeof value === 'string' && value.trim())
+                body[String(to)] = redactSensitiveText(value).slice(0, 180);
+        };
+        const copyNumber = (from, to = from) => {
+            const value = Number(input[from]);
+            if (Number.isFinite(value) && value >= 0)
+                body[String(to)] = value;
+        };
+        copyString('agent_id');
+        copyString('session_id');
+        copyString('workflow_id');
+        copyString('decision_id');
+        copyString('provider');
+        copyString('model');
+        copyString('task_type');
+        copyString('action_type');
+        copyString('source');
+        copyString('marrow_intervention');
+        copyNumber('input_tokens');
+        copyNumber('output_tokens');
+        copyNumber('cached_tokens');
+        copyNumber('total_tokens');
+        copyNumber('cost_usd');
+        copyNumber('latency_ms');
+        copyNumber('baseline_tokens');
+        copyNumber('estimated_tokens_saved');
+        copyNumber('estimated_cost_saved_usd');
+        copyNumber('estimated_minutes_saved');
+        if (typeof input.success === 'boolean')
+            body.success = input.success;
+        return body;
+    }
     shouldQueueRequest(method, path, error) {
         if (method.toUpperCase() !== 'POST')
             return false;
-        if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end'].includes(path))
+        if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end', '/v1/agent/model-usage'].includes(path))
             return false;
         const message = safeErrorMessage(error).toLowerCase();
         if (/\b(401|403|unauthorized|forbidden|invalid api key|insufficient scope|proof pack|required proof|policy|blocked)\b/.test(message)) {

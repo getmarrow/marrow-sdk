@@ -232,6 +232,7 @@ export interface MarrowPassiveRuntimeOptions {
   valueReportPeriod?: string | number;
   requireOutcomeClosure?: boolean;
   actionPrefix?: string;
+  captureModelUsage?: boolean;
   fetch?: typeof fetch | false;
   patchGlobalFetch?: boolean;
 }
@@ -251,6 +252,7 @@ export interface MarrowPassiveActionOptions {
   valueReportPeriod?: string | number;
   requireOutcomeClosure?: boolean;
   provenance?: MarrowDecisionProvenanceInput;
+  modelUsage?: MarrowModelUsageInput;
 }
 
 export interface MarrowPassiveRuntime {
@@ -326,6 +328,7 @@ export interface MarrowGuardedRunOptions<T> {
   valueReportPeriod?: string | number;
   requireOutcomeClosure?: boolean;
   provenance?: MarrowDecisionProvenanceInput;
+  modelUsage?: MarrowModelUsageInput;
 }
 
 export interface MarrowGuardedRunResult<T> {
@@ -458,11 +461,74 @@ export interface MarrowCommitResult {
   insight: string | null;
   narrative: Narrative;
   marrow_contributed?: CommitContribution;
+  token_value_signal?: MarrowTokenValueSignal | null;
   pre_action_gate?: { receipt_id?: string | null; decision?: string | null; enforced: boolean } | null;
   acceptedAs: 'outcome';
   recommendedNext: MarrowLoopRecommendation;
   loop: MarrowCheckResult;
   summary: string;
+}
+
+export interface MarrowModelUsageInput {
+  agent_id?: string | null;
+  session_id?: string | null;
+  workflow_id?: string | null;
+  decision_id?: string | null;
+  provider?: string;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_tokens?: number;
+  total_tokens?: number;
+  cost_usd?: number;
+  latency_ms?: number;
+  task_type?: string;
+  action_type?: string;
+  source?: string;
+  marrow_intervention?: string;
+  success?: boolean;
+  baseline_tokens?: number;
+  estimated_tokens_saved?: number;
+  estimated_cost_saved_usd?: number;
+  estimated_minutes_saved?: number;
+}
+
+export interface MarrowTokenValueSignal {
+  enabled: true;
+  capture_default: string;
+  observed: {
+    model_calls: number;
+    agents_seen: number;
+    workflows_seen: number;
+    tokens: {
+      input: number;
+      output: number;
+      cached: number;
+      total: number;
+    };
+    cost_usd: number;
+    avg_latency_ms: number | null;
+  };
+  savings: {
+    estimated_tokens_saved: number;
+    estimated_cost_saved_usd: number;
+    estimated_minutes_saved: number;
+    confidence: 'none' | 'low' | 'medium' | 'high';
+    method: string;
+  };
+  trend: Record<string, unknown>;
+  top_models: Array<{ provider: string; model: string; calls: number; tokens: number }>;
+  proof_line: string;
+  exact_next_action: string;
+}
+
+export interface MarrowModelUsageResult {
+  recorded: boolean;
+  usage_id: string;
+  token_value_signal: MarrowTokenValueSignal;
+  value_proof_endpoint: string;
+  batch_ingest_equivalent?: Record<string, unknown>;
+  exact_next_action: string;
 }
 
 export interface MarrowAskResult {

@@ -624,6 +624,23 @@ export interface MarrowQuickStatusResult {
     repair_command?: string;
     expectation: string;
   } | null;
+  tokenCapture: {
+    enabled: boolean;
+    capture_default?: string;
+    detected: boolean;
+    coverage: 'observed' | 'warming_up' | string;
+    source?: 'account_summary_cache' | 'live_query' | string;
+    observed_model_calls_30d: number;
+    observed_tokens_30d: number;
+    estimated_tokens_saved_30d: number;
+    estimated_minutes_saved_30d: number;
+    confidence: 'none' | 'low' | 'medium' | 'high' | string;
+    proof_line?: string;
+    exact_fix?: string | null;
+    fix_command?: string;
+    exact_next_action?: string;
+    [key: string]: unknown;
+  } | null;
   proof: {
     raw_data_exposed: false;
     last_event_at: string | null;

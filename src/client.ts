@@ -14,6 +14,8 @@ import type {
   MarrowOrientResult,
   MarrowThinkResult,
   MarrowCommitResult,
+  MarrowModelUsageInput,
+  MarrowModelUsageResult,
   MarrowAskResult,
   MarrowQuickStatusResult,
   MarrowMemory,
@@ -318,11 +320,137 @@ function stripSensitiveUrl(input: string): string {
   }
 }
 
+function inferModelUsageProvider(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith('openai.com')) return 'openai';
+    if (host.endsWith('anthropic.com')) return 'anthropic';
+    if (host.endsWith('generativelanguage.googleapis.com') || host.endsWith('googleapis.com')) return 'google';
+    if (host.endsWith('x.ai')) return 'xai';
+    if (host.endsWith('deepseek.com')) return 'deepseek';
+    if (host.endsWith('groq.com')) return 'groq';
+    if (host.endsWith('openrouter.ai')) return 'openrouter';
+    if (host.endsWith('dashscope.aliyuncs.com') || host.endsWith('alibaba-inc.com')) return 'qwen';
+    if (host.endsWith('moonshot.cn') || host.endsWith('kimi.com')) return 'kimi';
+    if (host.endsWith('minimax.chat') || host.endsWith('minimaxi.com')) return 'minimax';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function numberFrom(value: unknown): number | undefined {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const numeric = numberFrom(value);
+    if (numeric !== undefined) return numeric;
+  }
+  return undefined;
+}
+
+function valueAtPath(source: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, source);
+}
+
+function firstValueAtPath(source: unknown, paths: string[]): unknown {
+  for (const path of paths) {
+    const value = valueAtPath(source, path);
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
+async function extractModelUsageFromResponse(rawUrl: string, response: Response): Promise<MarrowModelUsageInput | null> {
+  const provider = inferModelUsageProvider(rawUrl);
+  if (!provider || !response.ok) return null;
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!/\bjson\b/i.test(contentType)) return null;
+
+  let data: Record<string, unknown>;
+  try {
+    const parsed = await response.clone().json();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    data = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const usage = firstValueAtPath(data, [
+    'usage',
+    'meta.usage',
+    'response.usage',
+    'usageMetadata',
+  ]);
+  if (!usage || typeof usage !== 'object') return null;
+
+  const modelValue = firstValueAtPath(data, [
+    'model',
+    'modelVersion',
+    'response.model',
+    'metadata.model',
+  ]);
+  const usageObj = usage as Record<string, unknown>;
+  const inputTokens = firstNumber(
+    usageObj.input_tokens,
+    usageObj.prompt_tokens,
+    usageObj.inputTokenCount,
+    usageObj.promptTokenCount,
+    usageObj.totalInputTokens,
+  );
+  const outputTokens = firstNumber(
+    usageObj.output_tokens,
+    usageObj.completion_tokens,
+    usageObj.outputTokenCount,
+    usageObj.candidatesTokenCount,
+    usageObj.totalOutputTokens,
+  );
+  const cachedTokens = firstNumber(
+    usageObj.cached_tokens,
+    usageObj.cache_read_input_tokens,
+    valueAtPath(usageObj, 'prompt_tokens_details.cached_tokens'),
+    valueAtPath(usageObj, 'input_token_details.cache_read'),
+    usageObj.cachedContentTokenCount,
+  );
+  const totalTokens = firstNumber(
+    usageObj.total_tokens,
+    usageObj.totalTokenCount,
+    usageObj.totalTokens,
+  ) ?? ((inputTokens || outputTokens || cachedTokens)
+    ? (inputTokens || 0) + (outputTokens || 0) + (cachedTokens || 0)
+    : undefined);
+
+  if (!inputTokens && !outputTokens && !cachedTokens && !totalTokens) return null;
+
+  return {
+    provider,
+    model: typeof modelValue === 'string' ? modelValue.slice(0, 180) : undefined,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cached_tokens: cachedTokens,
+    total_tokens: totalTokens,
+    source: 'sdk_passive_fetch',
+    marrow_intervention: 'passive_model_usage_capture',
+  };
+}
+
 const GLOBAL_FETCH_PATCH_KEY = Symbol.for('marrow.passiveRuntime.fetchPatch');
 
 interface GlobalFetchPatchState {
   originalFetch: typeof fetch;
   owners: Array<{ token: symbol; wrapper: typeof fetch }>;
+}
+
+interface MarrowFetchWrapOptions {
+  captureModelUsage?: boolean;
 }
 
 function inferSurfacesFromText(value: string): string[] {
@@ -1054,6 +1182,7 @@ export class MarrowClient {
               outcome: `Guarded run failed (${failureType}): ${publicError}`,
               gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
               proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
+              modelUsage: options.modelUsage ? { ...options.modelUsage, success: false, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
             });
           } catch (commitError) {
             process.stderr.write(`[marrow] Warning: guarded run failure commit failed: ${safePublicErrorMessage(commitError)}\n`);
@@ -1087,6 +1216,7 @@ export class MarrowClient {
           outcome: `Guarded run completed: ${safeAction}`,
           gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
           proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
+          modelUsage: options.modelUsage ? { ...options.modelUsage, success: true, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
         });
       } catch (error) {
         commitErrorMessage = safePublicErrorMessage(error);
@@ -1155,6 +1285,7 @@ export class MarrowClient {
             outcome: `Guarded run failed (${failureType}): ${publicError}`,
             gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
             proof: buildOutcomeProof({ action: safeAction, success: false, outcome: `Guarded run failed (${failureType}): ${publicError}`, runtime, gate }),
+            modelUsage: options.modelUsage ? { ...options.modelUsage, success: false, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
           });
         } catch (commitError) {
           process.stderr.write(`[marrow] Warning: guarded run commit failed: ${safePublicErrorMessage(commitError)}\n`);
@@ -1247,7 +1378,7 @@ export class MarrowClient {
     };
 
     const passiveFetch = fetchFn
-      ? client.wrapFetch(fetchFn.bind(globalThis))
+      ? client.wrapFetch(fetchFn.bind(globalThis), { captureModelUsage: options.captureModelUsage })
       : (async () => {
           throw new Error('No fetch implementation available for Marrow passive runtime');
         }) as typeof fetch;
@@ -1542,7 +1673,7 @@ export class MarrowClient {
    * await wrappedFetch('https://api.example.com/deploy', { method: 'POST' });
    * // auto-logs 'POST https://api.example.com/deploy'
    */
-  wrapFetch(fetchFn: typeof fetch): typeof fetch {
+  wrapFetch(fetchFn: typeof fetch, options: MarrowFetchWrapOptions = {}): typeof fetch {
     return (async (input: Request | string | URL, init?: RequestInit) => {
       const requestMethod = (() => {
         if (init?.method) return init.method;
@@ -1581,6 +1712,17 @@ export class MarrowClient {
       await this.beforeAction(meta);
       try {
         const response = await fetchFn(input, init);
+        if (options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false') {
+          void extractModelUsageFromResponse(rawUrl, response)
+            .then((usage) => {
+              if (!usage) return;
+              return this.modelUsage({
+                ...usage,
+                action_type: method,
+              });
+            })
+            .catch(() => undefined);
+        }
         await this.afterAction({
           ...meta,
           success: response.ok,
@@ -1856,6 +1998,8 @@ export class MarrowClient {
     gateReceiptId?: string;
     gate_receipt_id?: string;
     proof?: Record<string, unknown>;
+    modelUsage?: MarrowModelUsageInput;
+    model_usage?: MarrowModelUsageInput;
   }): Promise<MarrowCommitResult> {
     const decisionId = params.decisionId || this.decisionId;
     if (!decisionId) {
@@ -1871,6 +2015,8 @@ export class MarrowClient {
     const gateReceiptId = params.gateReceiptId || params.gate_receipt_id;
     if (gateReceiptId) body.gate_receipt_id = gateReceiptId;
     if (params.proof) body.proof = redactSensitiveValue(params.proof) as Record<string, unknown>;
+    const modelUsage = params.modelUsage || params.model_usage;
+    if (modelUsage) body.model_usage = this.normalizeModelUsage(modelUsage);
 
     const res = await this.request('POST', '/v1/agent/commit', body);
     const data = res.data ?? res;
@@ -1901,12 +2047,18 @@ export class MarrowClient {
       successRate: data.success_rate,
       insight: data.insight,
       narrative: data.narrative ?? null,
+      token_value_signal: data.token_value_signal ?? null,
       pre_action_gate: data.pre_action_gate ?? null,
       acceptedAs: 'outcome',
       recommendedNext: loop.recommendedNext,
       loop,
       summary,
     };
+  }
+
+  async modelUsage(params: MarrowModelUsageInput): Promise<MarrowModelUsageResult> {
+    const res = await this.request('POST', '/v1/agent/model-usage', this.normalizeModelUsage(params));
+    return (res.data ?? res) as MarrowModelUsageResult;
   }
 
   async orient(params?: { taskType?: string; autoWarn?: boolean }): Promise<MarrowOrientResult> {
@@ -2777,9 +2929,43 @@ export class MarrowClient {
     return res.json();
   }
 
+  private normalizeModelUsage(input: MarrowModelUsageInput): Record<string, unknown> {
+    const body: Record<string, unknown> = {};
+    const copyString = (from: keyof MarrowModelUsageInput, to = from) => {
+      const value = input[from];
+      if (typeof value === 'string' && value.trim()) body[String(to)] = redactSensitiveText(value).slice(0, 180);
+    };
+    const copyNumber = (from: keyof MarrowModelUsageInput, to = from) => {
+      const value = Number(input[from]);
+      if (Number.isFinite(value) && value >= 0) body[String(to)] = value;
+    };
+    copyString('agent_id');
+    copyString('session_id');
+    copyString('workflow_id');
+    copyString('decision_id');
+    copyString('provider');
+    copyString('model');
+    copyString('task_type');
+    copyString('action_type');
+    copyString('source');
+    copyString('marrow_intervention');
+    copyNumber('input_tokens');
+    copyNumber('output_tokens');
+    copyNumber('cached_tokens');
+    copyNumber('total_tokens');
+    copyNumber('cost_usd');
+    copyNumber('latency_ms');
+    copyNumber('baseline_tokens');
+    copyNumber('estimated_tokens_saved');
+    copyNumber('estimated_cost_saved_usd');
+    copyNumber('estimated_minutes_saved');
+    if (typeof input.success === 'boolean') body.success = input.success;
+    return body;
+  }
+
   private shouldQueueRequest(method: string, path: string, error: unknown): boolean {
     if (method.toUpperCase() !== 'POST') return false;
-    if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end'].includes(path)) return false;
+    if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end', '/v1/agent/model-usage'].includes(path)) return false;
     const message = safeErrorMessage(error).toLowerCase();
     if (/\b(401|403|unauthorized|forbidden|invalid api key|insufficient scope|proof pack|required proof|policy|blocked)\b/.test(message)) {
       return false;

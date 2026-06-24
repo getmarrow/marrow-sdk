@@ -99,13 +99,14 @@ Commit responses include `token_value_signal`, and `marrow.modelUsage(...)` is a
 
 ---
 
-## What's New in v3.7.36
+## What's New in v3.7.37
 
-v3.7.36 adds passive token-value proof support.
+v3.7.37 adds passive token-value proof status parity.
 
 - `modelUsage()` records compact token/cost/latency counts through `/v1/agent/model-usage`.
 - `commit({ modelUsage })` attaches model usage to completed work and returns `token_value_signal`.
 - `runGuarded({ modelUsage })` forwards usage metadata into automatic outcome closure.
+- `quickStatus()` exposes `tokenCapture`, including source (`account_summary_cache` or `live_query`), observed model calls/tokens, estimated savings, confidence, and exact repair command.
 - Wrapped SDK `fetch` captures standard provider response `usage` blocks by default for OpenAI, Anthropic, Google, xAI, DeepSeek, Groq, OpenRouter, Qwen, Kimi, and Minimax endpoints.
 - Raw prompts, completions, tool logs, and secrets are not required and should not be sent.
 

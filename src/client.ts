@@ -2292,6 +2292,7 @@ export class MarrowClient {
       fixCommands: Array.isArray(data.fix_commands) ? data.fix_commands : [],
       nextAction: data.next_action || null,
       autoOutcomeClosure: data.auto_outcome_closure || null,
+      tokenCapture: data.token_capture || null,
       proof: data.proof || null,
       failureReasons: Array.isArray(data.failure_reasons) ? data.failure_reasons : [],
       agentWarnings: Array.isArray(data.agent_warnings) ? data.agent_warnings : [],

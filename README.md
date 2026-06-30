@@ -141,7 +141,20 @@ const recommendation = await marrow.recommendGovernanceMode({
 console.log(recommendation.recommended_mode, recommendation.reasons);
 ```
 
-## What's New in v3.7.31
+## What's New in v3.7.38
+
+v3.7.38 improves passive attribution quality for external/customer decisions.
+
+- SDK requests now send `X-Marrow-Client` from `MARROW_CLIENT`, `MARROW_HARNESS`, or `MARROW_AGENT_CLIENT`.
+- `think()`, `run()`, `runGuarded()`, `autoWrap()`, and passive runtime defaults attach safe `agent_id`, source channel, client/harness, and inferred workflow intent metadata.
+- Supported client labels now include `codex`, `gemini`, `grok`, `deepseek`, `qwen`, `kimi`, `minimax`, `cline`, `opencode`, `hermes`, `glm`, `claude-code`, `cursor`, `windsurf`, `openclaw`, and `custom`.
+- Invalid client labels fall back to `custom`; Marrow still rejects malformed structured `source_meta` instead of storing bad metadata.
+
+Business value: Marrow dashboards and reports can show which agents, harnesses, and workflow types are improving instead of grouping too much work into `unknown`.
+
+## Previous Release Notes
+
+### v3.7.31
 
 v3.7.31 is a docs-sync release. It keeps npm and GitHub README copy aligned with Marrow's current backend-first runtime contract and proof/gate enforcement loop. Runtime behavior is unchanged from v3.7.30.
 
@@ -196,7 +209,7 @@ Full feature history, examples, and API reference live at [getmarrow.ai/docs](ht
 
 The Marrow API supports privacy-preserving provenance fields on direct `POST /v1/decisions` calls: `source_kind`, `human_directed`, `source_confidence`, `instruction_ref`, `instruction_hash`, and `source_meta`. Use them to classify instruction source class without identifying the human or storing raw prompts/PII.
 
-Current SDK passive runtime methods (`think()`, `auto()`, `runGuarded()`, and wrappers) remain backward compatible and do **not** yet expose first-class provenance parameters. SDK/MCP provenance wiring is deferred; do not assume SDK calls automatically mark work as `human_directed`. For direct API behavior and validation rules, see the live API reference at https://getmarrow.ai/docs.
+SDK passive runtime methods (`think()`, `auto()`, `runGuarded()`, and wrappers) now attach structured attribution by default. Marrow sends `X-Marrow-Agent-Id` when `agentId`, `MARROW_FLEET_AGENT_ID`, or `MARROW_AGENT_ID` is configured, and it fills `source_meta.channel`, `source_meta.client`, `source_meta.agent_id`, and `source_meta.user_intent` where safe. Set `MARROW_CLIENT`, `MARROW_HARNESS`, or `MARROW_AGENT_CLIENT` to one of the supported client labels (`codex`, `claude-code`, `cursor`, `gemini`, `grok`, `deepseek`, `qwen`, `kimi`, `minimax`, `cline`, `opencode`, `hermes`, `glm`, `openclaw`, `windsurf`, or `custom`) for cleaner per-harness reporting.
 
 ---
 
@@ -750,6 +763,8 @@ Full-text search with filters.
 | `MARROW_KEY` | No | Alias accepted by SDK helpers for fleet runners and secret managers. |
 | `MARROW_BASE_URL` | No | Custom API URL (default: `https://api.getmarrow.ai`). Must use HTTPS. |
 | `MARROW_SESSION_ID` | No | Session identifier for multi-agent setups |
+| `MARROW_FLEET_AGENT_ID` / `MARROW_AGENT_ID` | No | Agent identity sent as `X-Marrow-Agent-Id` and mirrored into safe attribution metadata |
+| `MARROW_CLIENT` / `MARROW_HARNESS` / `MARROW_AGENT_CLIENT` | No | Harness/client label used for per-client reporting, such as `codex`, `claude-code`, `cursor`, `gemini`, `qwen`, `opencode`, or `custom` |
 
 `marrowFromEnv()` now uses the same resolver as the installer and MCP package. If an agent says Marrow is missing, run:
 

@@ -5,7 +5,7 @@ export type MarrowDecisionType = 'implementation' | 'security' | 'architecture' 
 export type MarrowEnforcementMode = 'off' | 'warn' | 'require' | 'auto';
 export type MarrowDecisionSourceKind = 'human_directed' | 'agent_autonomous' | 'scheduled' | 'integration' | 'system' | 'unknown';
 export type MarrowDecisionSourceChannel = 'cli' | 'mcp' | 'sdk' | 'api' | 'cron' | 'ci' | 'webhook' | 'unknown';
-export type MarrowDecisionSourceClient = 'claude-code' | 'cursor' | 'windsurf' | 'openclaw' | 'custom' | 'unknown';
+export type MarrowDecisionSourceClient = 'claude-code' | 'cursor' | 'windsurf' | 'openclaw' | 'codex' | 'gemini' | 'grok' | 'deepseek' | 'qwen' | 'kimi' | 'minimax' | 'cline' | 'opencode' | 'hermes' | 'glm' | 'custom' | 'unknown';
 export type MarrowDecisionUserIntent = 'build' | 'fix' | 'audit' | 'deploy' | 'research' | 'write' | 'operate' | 'other';
 export interface MarrowDecisionSourceMeta {
     channel?: MarrowDecisionSourceChannel;

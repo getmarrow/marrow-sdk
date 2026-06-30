@@ -44,6 +44,9 @@ const ALLOWED_ENV_KEYS = new Set([
     'MARROW_BASE_URL',
     'MARROW_FLEET_AGENT_ID',
     'MARROW_AGENT_ID',
+    'MARROW_CLIENT',
+    'MARROW_HARNESS',
+    'MARROW_AGENT_CLIENT',
     'MARROW_SESSION_ID',
 ]);
 function stripQuotes(value) {

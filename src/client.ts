@@ -80,6 +80,7 @@ import type {
   MarrowTemplateSummary,
   MarrowTemplateDetail,
   MarrowDecisionProvenanceInput,
+  MarrowDecisionSourceClient,
   MarrowDecisionUserIntent,
 } from './types';
 
@@ -93,6 +94,7 @@ const REQUIRE_EXTERNAL_ERROR =
   'Marrow require mode: log intent with marrow.think() before external actions.';
 const REQUIRE_COMPLETION_ERROR =
   'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
+const SOURCE_CLIENTS = new Set<MarrowDecisionSourceClient>(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
 
 type RetryQueueItem = {
   method: string;
@@ -105,6 +107,36 @@ type RetryQueueItem = {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function defaultSourceClient(): MarrowDecisionSourceClient {
+  const env = typeof process !== 'undefined' ? process.env || {} : {};
+  const raw = String(env.MARROW_CLIENT || env.MARROW_HARNESS || env.MARROW_AGENT_CLIENT || '').trim().toLowerCase().replace(/\s+/g, '-').replace(/^@/, '');
+  const aliases: Record<string, MarrowDecisionSourceClient> = {
+    claude: 'claude-code',
+    claude_code: 'claude-code',
+    'claude-code': 'claude-code',
+    cursor: 'cursor',
+    windsurf: 'windsurf',
+    openclaw: 'openclaw',
+    codex: 'codex',
+    'openai-codex': 'codex',
+    gemini: 'gemini',
+    google: 'gemini',
+    grok: 'grok',
+    deepseek: 'deepseek',
+    qwen: 'qwen',
+    kimi: 'kimi',
+    minimax: 'minimax',
+    cline: 'cline',
+    opencode: 'opencode',
+    'open-code': 'opencode',
+    hermes: 'hermes',
+    'hermes-agent': 'hermes',
+    glm: 'glm',
+  };
+  const mapped = aliases[raw] || (SOURCE_CLIENTS.has(raw as MarrowDecisionSourceClient) ? raw as MarrowDecisionSourceClient : null);
+  return mapped || 'custom';
 }
 
 function cloneState(state: MarrowLoopState): MarrowLoopState {
@@ -885,7 +917,7 @@ export class MarrowClient {
         source_kind: 'agent_autonomous',
         source_confidence: 0.9,
         human_directed: false,
-        source_meta: { channel: 'sdk', client: 'custom', user_intent: inferUserIntentFromType(options?.type) },
+        source_meta: { channel: 'sdk', client: defaultSourceClient(), user_intent: inferUserIntentFromType(options?.type) },
       },
     });
 
@@ -1162,7 +1194,7 @@ export class MarrowClient {
           human_directed: false,
           source_meta: {
             channel: 'sdk',
-            client: 'custom',
+            client: defaultSourceClient(),
             user_intent: inferUserIntentFromType(options.type),
           },
         }),
@@ -1366,7 +1398,7 @@ export class MarrowClient {
           human_directed: false,
           source_meta: {
             channel: 'sdk',
-            client: 'custom',
+            client: defaultSourceClient(),
             user_intent: inferUserIntentFromType(actionOptions.type || options.defaultType || inferTypeFromText(prefixedAction)),
           },
         }),
@@ -1513,7 +1545,7 @@ export class MarrowClient {
           human_directed: false,
           source_meta: {
             channel: 'sdk',
-            client: 'custom',
+            client: defaultSourceClient(),
             user_intent: inferUserIntentFromType(meta.type),
           },
         }),
@@ -1705,7 +1737,7 @@ export class MarrowClient {
           source_kind: 'agent_autonomous',
           source_confidence: 0.9,
           human_directed: false,
-          source_meta: { channel: 'sdk', client: 'custom', user_intent: method === 'GET' || method === 'HEAD' ? 'research' : 'operate' },
+          source_meta: { channel: 'sdk', client: defaultSourceClient(), user_intent: method === 'GET' || method === 'HEAD' ? 'research' : 'operate' },
         },
       };
 
@@ -1842,7 +1874,8 @@ export class MarrowClient {
       human_directed: false,
       source_meta: {
         channel: 'sdk',
-        client: 'custom',
+        client: defaultSourceClient(),
+        ...(this.agentId ? { agent_id: this.agentId } : {}),
         user_intent: inferUserIntentFromType(params.type),
       },
     })) as Record<string, unknown>;
@@ -2907,6 +2940,7 @@ export class MarrowClient {
     if (this.agentId) {
       headers['X-Marrow-Agent-Id'] = this.agentId;
     }
+    headers['X-Marrow-Client'] = defaultSourceClient();
 
     const res = await fetch(url, {
       method,

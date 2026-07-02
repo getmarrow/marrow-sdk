@@ -27,9 +27,9 @@ Marrow is tenant-aware by design. Private account, fleet, memory, workflow, and 
 
 For business pilots, review the live trust notes before production rollout: https://getmarrow.ai/docs#trust-boundaries
 
-## What's New in v3.7.39
+## What's New in v3.7.40
 
-v3.7.39 adds the governance-control API helpers that make Marrow easier to position as a business control plane around every agent harness, including Hermes Agent.
+v3.7.40 adds the governance-control API helpers that make Marrow easier to position as a business control plane around every agent harness, including Hermes Agent.
 
 - `governanceControlPlane()` returns Marrow's cross-harness control-plane contract.
 - `hermesIntegration()` maps Hermes `/goal`, verification evidence, `/learn`, `/journey`, and background subagents into Marrow proof/outcome workflows.

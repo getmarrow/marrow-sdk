@@ -1,7 +1,7 @@
 {
   "name": "@getmarrow/sdk",
-  "version": "3.7.38",
-  "description": "Your go-to memory provider for all agents, for any AI model.",
+  "version": "3.7.39",
+  "description": "Governance, proof, and intelligence controls for AI agent fleets.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -12,6 +12,9 @@
   "keywords": [
     "ai",
     "agents",
+    "governance",
+    "proof-packs",
+    "agent-control-plane",
     "memory",
     "hive",
     "collective-intelligence",

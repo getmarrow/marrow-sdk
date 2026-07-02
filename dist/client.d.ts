@@ -245,6 +245,18 @@ export declare class MarrowClient {
      * template suggestion, proof-pack requirements, and exact next action.
      */
     agentRuntime(input: MarrowAgentRuntimeRequest): Promise<MarrowAgentRuntimeResult>;
+    governanceControlPlane(): Promise<Record<string, unknown>>;
+    hermesIntegration(): Promise<Record<string, unknown>>;
+    completionContracts(): Promise<Record<string, unknown>>;
+    evaluateCompletionContract(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+    governanceTimeline(options?: {
+        agentId?: string;
+        limit?: number;
+    }): Promise<Record<string, unknown>>;
+    buyerProof(options?: {
+        agentId?: string;
+        periodDays?: number;
+    }): Promise<Record<string, unknown>>;
     recommendGovernanceMode(input: MarrowModeRecommendationRequest): Promise<MarrowModeRecommendationResult>;
     listPolicyProfiles(): Promise<MarrowPolicyProfilesResult>;
     createPolicyProfile(input: MarrowCreatePolicyProfileRequest): Promise<MarrowPolicyProfileResult>;

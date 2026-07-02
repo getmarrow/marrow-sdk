@@ -1,6 +1,6 @@
 # @getmarrow/sdk
 
-> **Memory and decision intelligence for agents that need to get better over time.**
+> **Governance, proof, and decision intelligence for agents that need to get safer over time.**
 
 ![npm](https://img.shields.io/npm/v/@getmarrow/sdk)
 ![npm](https://img.shields.io/npm/dw/@getmarrow/sdk)
@@ -17,15 +17,26 @@ Most agents still work like this:
 
 That's fine for a toy. It's a problem for anything real.
 
-`@getmarrow/sdk` gives your agent a memory that compounds. It lets you log intent before meaningful work, pull back useful decision intelligence, and commit the outcome afterward so the next run starts smarter instead of blank.
+`@getmarrow/sdk` gives your agent a governance loop that compounds. It lets agents check risk before meaningful work, receive proof requirements, attach evidence, and commit the outcome afterward so the next run starts safer instead of blank.
 
-**Marrow turns agent memory from a passive log into an operating loop.**
+**Marrow turns agent history from a passive log into a control loop for business fleets.**
 
 ## Trust and Data Boundaries
 
 Marrow is tenant-aware by design. Private account, fleet, memory, workflow, and proof-pack data stays scoped to the authenticated account and authorized agent-bound keys. Shared/hive learning uses visibility-controlled, sanitized aggregate signals; it is not raw cross-customer decision sharing.
 
 For business pilots, review the live trust notes before production rollout: https://getmarrow.ai/docs#trust-boundaries
+
+## What's New in v3.7.39
+
+v3.7.39 adds the governance-control API helpers that make Marrow easier to position as a business control plane around every agent harness, including Hermes Agent.
+
+- `governanceControlPlane()` returns Marrow's cross-harness control-plane contract.
+- `hermesIntegration()` maps Hermes `/goal`, verification evidence, `/learn`, `/journey`, and background subagents into Marrow proof/outcome workflows.
+- `completionContracts()` lists built-in proof contracts for deploy, merge, publish, migration, security, support, and Hermes goal workflows.
+- `evaluateCompletionContract()` checks whether an agent has enough proof to mark work complete.
+- `governanceTimeline()` returns a fleet journey timeline across decisions, gates, and proof packs.
+- `buyerProof()` returns owner/procurement-ready value proof: failures avoided, risky actions reviewed, proofs completed, token/time saved, failure classes, and reliability score.
 
 ---
 
@@ -556,7 +567,7 @@ const decision = await marrow.think({
 
 ## The Problem
 
-Without durable decision memory:
+Without durable governance:
 - agents repeat bad calls
 - successful patterns get lost
 - work gets marked "done" without outcome context
@@ -564,24 +575,25 @@ Without durable decision memory:
 - every new session wastes time rediscovering what already failed
 
 A bigger context window doesn't solve this.
-You need a system that remembers:
+You need a control layer that proves:
 - what the agent was trying to do
 - what it actually did
 - whether it worked
 - what pattern that should teach the next attempt
+- what proof was required before the action could be called complete
 
 ---
 
 ## The Solution
 
-Marrow gives you a simple SDK for decision memory and loop discipline.
+Marrow gives you a simple SDK for governance, proof, and loop discipline.
 
 With `@getmarrow/sdk`, your agent can:
 - **orient** at session start
 - **think** before meaningful action
 - **check** whether the loop is still open
 - **wrap** important actions so intent and outcome stay connected
-- **commit** the result back into memory
+- **commit** the result back into Marrow with proof and outcome
 
 That gives you a usable operating loop:
 
@@ -589,8 +601,8 @@ That gives you a usable operating loop:
 orient -> think -> act -> check -> commit
 ```
 
-Not just memory for memory's sake —
-memory that improves execution.
+Not memory for memory's sake:
+governance that improves execution.
 
 The value compounds with use. Each decision your agent logs makes the hive smarter — failure rates drop, patterns emerge, and the next session starts with real intelligence instead of a blank slate.
 

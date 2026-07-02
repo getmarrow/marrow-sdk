@@ -2725,6 +2725,45 @@ export class MarrowClient {
     return (res.data || res) as MarrowAgentRuntimeResult;
   }
 
+  async governanceControlPlane(): Promise<Record<string, unknown>> {
+    const res = await this.request('GET', '/v1/agent/governance/control-plane');
+    return (res.data || res) as Record<string, unknown>;
+  }
+
+  async hermesIntegration(): Promise<Record<string, unknown>> {
+    const res = await this.request('GET', '/v1/agent/integrations/hermes');
+    return (res.data || res) as Record<string, unknown>;
+  }
+
+  async completionContracts(): Promise<Record<string, unknown>> {
+    const res = await this.request('GET', '/v1/agent/governance/completion-contracts');
+    return (res.data || res) as Record<string, unknown>;
+  }
+
+  async evaluateCompletionContract(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const res = await this.request('POST', '/v1/agent/governance/completion-contracts/evaluate', {
+      ...input,
+      evidence: input.evidence ? redactSensitiveValue(input.evidence) as Record<string, unknown> : undefined,
+    });
+    return (res.data || res) as Record<string, unknown>;
+  }
+
+  async governanceTimeline(options: { agentId?: string; limit?: number } = {}): Promise<Record<string, unknown>> {
+    const qs = new URLSearchParams();
+    if (options.agentId) qs.set('agent_id', options.agentId);
+    if (options.limit) qs.set('limit', String(options.limit));
+    const res = await this.request('GET', `/v1/agent/governance/timeline${qs.toString() ? `?${qs.toString()}` : ''}`);
+    return (res.data || res) as Record<string, unknown>;
+  }
+
+  async buyerProof(options: { agentId?: string; periodDays?: number } = {}): Promise<Record<string, unknown>> {
+    const qs = new URLSearchParams();
+    if (options.agentId) qs.set('agent_id', options.agentId);
+    if (options.periodDays) qs.set('period_days', String(options.periodDays));
+    const res = await this.request('GET', `/v1/agent/governance/buyer-proof${qs.toString() ? `?${qs.toString()}` : ''}`);
+    return (res.data || res) as Record<string, unknown>;
+  }
+
   async recommendGovernanceMode(input: MarrowModeRecommendationRequest): Promise<MarrowModeRecommendationResult> {
     const res = await this.request('POST', '/v1/agent/mode/recommend', {
       ...input,

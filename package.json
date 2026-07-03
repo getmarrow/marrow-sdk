@@ -1,6 +1,6 @@
 {
   "name": "@getmarrow/sdk",
-  "version": "3.7.40",
+  "version": "3.7.41",
   "description": "Governance, proof, and intelligence controls for AI agent fleets.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -23,7 +23,9 @@ That's fine for a toy. It's a problem for anything real.
 
 ## Trust and Data Boundaries
 
-Marrow is tenant-aware by design. Private account, fleet, memory, workflow, and proof-pack data stays scoped to the authenticated account and authorized agent-bound keys. Shared/hive learning uses visibility-controlled, sanitized aggregate signals; it is not raw cross-customer decision sharing.
+Marrow is tenant-aware by design. Private account, fleet, workflow, proof-pack, and agent data stays scoped to the authenticated account and authorized agent-bound keys.
+
+Enterprise tenants receive a strong private governance baseline from day one: risk gates, proof requirements, workflow templates, private/account learning, and exact next actions. Teams that enable sanitized aggregate contribution unlock richer k-anonymous collective workflow guidance. Contribution never means raw prompts, decisions, proof packs, code, secrets, account identifiers, agent identifiers, or customer identities.
 
 For business pilots, review the live trust notes before production rollout: https://getmarrow.ai/docs#trust-boundaries
 
@@ -490,7 +492,8 @@ await marrow.acceptDetectedWorkflow(detectedId);
 ## Intelligence Fields in think() Response
 
 - `onboarding_hint` — contextual tip for new accounts (first 50 decisions)
-- `intelligence.collective` — anonymized insights aggregated from all Marrow accounts (k-anonymity ≥5)
+- `intelligence.collective` — entitlement-gated, k-anonymous aggregate patterns when the tenant contributes sanitized aggregate signals and the minimum-account threshold is met
+- `curated_baseline_guidance` — strong private baseline guidance for private or non-contributing tenants
 - `intelligence.team_context` — recent decisions from other sessions in the same account
 
 ---

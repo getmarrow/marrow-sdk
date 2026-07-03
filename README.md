@@ -40,6 +40,17 @@ v3.7.40 adds the governance-control API helpers that make Marrow easier to posit
 
 ---
 
+## Current Backend Surfaces
+
+The Marrow API also exposes two agent-facing surfaces that help teams verify whether their installation is collecting useful fleet data:
+
+- `GET /v1/agent/data-quality` returns an authenticated attribution scorecard for the current account or bound agent, including `agent_id`, `source_meta`, harness/client, workflow type, outcome closure, and non-trivial data coverage.
+- `GET /v1/agent/integrations/{client}` returns a per-harness setup guide for supported clients such as Codex, Claude Code, Cursor, Composer, Windsurf, Cline, OpenCode, Hermes, OpenClaw, Gemini, Grok, DeepSeek, Qwen, Kimi, MiniMax, GLM, MCP clients, CI runners, and custom harnesses.
+
+These endpoints are protected by Marrow API-key or agent-bound-key auth and are documented in the source-of-truth docs at [getmarrow.ai/docs](https://getmarrow.ai/docs/).
+
+---
+
 ## Start Here
 
 For most agents and new users, start with the universal installer:
@@ -787,7 +798,7 @@ npx @getmarrow/install doctor
 Deep doctor with harmless write/outcome verification:
 
 ```bash
-MARROW_API_KEY=mrw_live_... npx @getmarrow/install doctor --self-test
+MARROW_API_KEY=<your_marrow_key> npx @getmarrow/install doctor --self-test
 ```
 
 Healthy output should confirm `key valid: yes`, `account active: yes`, `agent identity accepted: yes`, `write test event: passed`, and `outcome closed: passed`. If it fails, Marrow returns an exact reason such as `missing_key`, `invalid_key`, `wrong_agent_id`, `network_blocked`, or `proof_required` with the next fix command.
@@ -796,7 +807,7 @@ For a stable project-local setup:
 
 ```bash
 mkdir -p .marrow
-printf "MARROW_API_KEY=mrw_live_...\\n" > .marrow/env
+printf "MARROW_API_KEY=<your_marrow_key>\\n" > .marrow/env
 chmod 600 .marrow/env
 ```
 

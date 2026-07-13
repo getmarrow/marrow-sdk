@@ -1211,6 +1211,17 @@ export interface MarrowAgentRuntimeResult {
         [key: string]: unknown;
     };
     behavior_governance?: Record<string, unknown>;
+    capacity_guidance?: {
+        state: 'normal' | 'watch' | 'backpressure' | 'blocked';
+        cache_ttl_seconds: number;
+        recommended_batch_size: number;
+        retry_after_seconds: number;
+        safe_parallelism_hint: number;
+        status_poll_interval_seconds: number;
+        low_risk_continue_after_accept: boolean;
+        high_risk_requires_fresh_gate: true;
+        exact_next_action: string;
+    };
     before_you_act_injection?: {
         required: boolean;
         state?: 'proceed' | 'warn' | 'block' | 'owner_approval_required';

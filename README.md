@@ -165,16 +165,15 @@ const recommendation = await marrow.recommendGovernanceMode({
 console.log(recommendation.recommended_mode, recommendation.reasons);
 ```
 
-## What's New in v3.7.38
+## What's New in v3.7.42
 
-v3.7.38 improves passive attribution quality for external/customer decisions.
+v3.7.42 adds typed adaptive capacity instructions to Marrow's one-call runtime response.
 
-- SDK requests now send `X-Marrow-Client` from `MARROW_CLIENT`, `MARROW_HARNESS`, or `MARROW_AGENT_CLIENT`.
-- `think()`, `run()`, `runGuarded()`, `autoWrap()`, and passive runtime defaults attach safe `agent_id`, source channel, client/harness, and inferred workflow intent metadata.
-- Supported client labels now include `codex`, `gemini`, `grok`, `deepseek`, `qwen`, `kimi`, `minimax`, `cline`, `opencode`, `hermes`, `glm`, `claude-code`, `cursor`, `windsurf`, `openclaw`, and `custom`.
-- Invalid client labels fall back to `custom`; Marrow still rejects malformed structured `source_meta` instead of storing bad metadata.
+- `agentRuntime()` now types `capacity_guidance` with the current capacity state, safe cache duration, recommended batch size, retry delay, safe parallelism, and polling interval.
+- Low-risk agents can follow the returned batching/cache instructions after durable acceptance; high-risk actions still require a fresh runtime gate and proof.
+- The field is additive and backwards compatible with existing `runGuarded()` and passive runtime integrations.
 
-Business value: Marrow dashboards and reports can show which agents, harnesses, and workflow types are improving instead of grouping too much work into `unknown`.
+Business value: large fleets can respond to backpressure predictably without inventing retry behavior or slowing every normal action.
 
 ## Previous Release Notes
 

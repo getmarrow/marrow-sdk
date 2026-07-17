@@ -1,12 +1,13 @@
 {
   "name": "@getmarrow/sdk",
-  "version": "3.7.42",
-  "description": "Governance, proof, and intelligence controls for AI agent fleets.",
+  "version": "3.7.43",
+  "description": "Runtime control, proof, and fleet intelligence for Node.js AI agents.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test test/*.test.js",
+    "test": "npm run build && npm run test:docs && node --test test/*.test.js",
+    "test:docs": "tsc --noEmit --target ES2022 --module commonjs --lib ES2022,DOM --strict --esModuleInterop --skipLibCheck --moduleResolution node test/readme-quickstart.ts",
     "prepublishOnly": "npm test"
   },
   "keywords": [

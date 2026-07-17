@@ -1,6 +1,6 @@
 "use strict";
 /**
- * @getmarrow/sdk — Memory and Decision Intelligence for Agents
+ * @getmarrow/sdk - Runtime control, proof, and fleet intelligence for AI agents
  *
  * @packageDocumentation
  */

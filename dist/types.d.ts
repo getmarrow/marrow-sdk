@@ -583,6 +583,42 @@ export interface MarrowClientOptions {
     agentId?: string;
     mode?: MarrowEnforcementMode;
     apiKeySource?: 'env' | 'env-file' | 'explicit';
+    durableEventSpool?: boolean;
+    eventSpoolPath?: string;
+}
+export type MarrowLifecycleEventType = 'prompt_submitted' | 'goal_started' | 'pre_action_checked' | 'risk_gate_requested' | 'tool_completed' | 'tool_failed' | 'command_completed' | 'command_failed' | 'verification_evidence_added' | 'workflow_completed' | 'session_completed' | 'learned_workflow_created' | 'journey_update' | 'subagent_completed' | 'handoff_started' | 'handoff_completed' | 'proof_pack_closed' | 'outcome_committed';
+export interface MarrowLifecycleEventInput {
+    event_id?: string;
+    event_type: MarrowLifecycleEventType;
+    harness?: string;
+    agent_id?: string;
+    action: string;
+    workflow_id?: string;
+    session_id?: string;
+    decision_id?: string;
+    risk_level?: 'low' | 'medium' | 'high';
+    outcome_state?: 'pending' | 'closed' | 'unknown' | 'timed_out';
+    success?: boolean;
+    occurred_at?: string;
+}
+export interface MarrowLifecycleEventResult {
+    accepted: boolean;
+    queued: boolean;
+    event_id: string;
+    pending_spool_events: number;
+    normalized_event?: Record<string, unknown>;
+}
+export interface MarrowDecisionTraceResult {
+    trace: {
+        decision: Record<string, unknown>;
+        prior_failure: Record<string, unknown> | null;
+        lessons: Array<Record<string, unknown>>;
+        gate: Record<string, unknown> | null;
+        proof: Record<string, unknown> | null;
+        workflow: Record<string, unknown> | null;
+        path: string[];
+        generated_at: string;
+    };
 }
 export interface MemoryShareOptions {
     agentIds: string[];
@@ -1073,6 +1109,8 @@ export interface MarrowFirstValueRequest {
 export interface MarrowFirstValueResult {
     ok: boolean;
     active: boolean;
+    value_state: 'demonstration' | 'warming_up' | 'observed';
+    evidence_label: 'safe demonstration' | 'account evidence';
     headline: string;
     setup_decision_captured: boolean;
     outcome_closed: boolean;
@@ -1082,7 +1120,7 @@ export interface MarrowFirstValueResult {
         proof: string[];
         first_lesson: string | null;
         try_this_now: string;
-        expected_response: string;
+        expected_response?: string;
         quiet_mode?: string;
     };
     history_signal: {
@@ -1091,7 +1129,7 @@ export interface MarrowFirstValueResult {
         deployment_playbooks_found: number;
         summary: string;
     };
-    capture: {
+    capture?: {
         surfaces: string[];
         decisions: number;
         outcomes: number;
@@ -1117,7 +1155,7 @@ export interface MarrowFirstValueResult {
         endpoint: string;
         method: string;
         action: string;
-        reason: string;
+        reason?: string;
     };
     runtime: MarrowAgentRuntimeResult;
 }

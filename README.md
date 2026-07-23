@@ -18,16 +18,16 @@ For automatic environment detection and setup, use the universal installer:
 npx @getmarrow/install --yes
 ```
 
-## What's New in v3.7.43
+## What's New in v3.7.44
 
-v3.7.43 aligns the package entry point with Marrow's business product contract:
+v3.7.44 adds the durable always-on lifecycle beneath guarded workflows:
 
-- runtime control before consequential actions;
-- proof and outcome closure afterward;
-- tenant-scoped fleet improvement across interchangeable agents and harnesses;
-- context, lessons, and workflow examples presented as supporting controls rather than a separate memory product.
+- compact lifecycle receipts for prompts, goals, pre-action checks, tool/command results, evidence, workflows, handoffs, proof packs, and outcomes;
+- an owner-only local event spool with stable event IDs for transient delivery failures;
+- decision traces that connect an action to its prior failure, lesson, gate, proof, workflow, and outcome;
+- `runGuarded()` lifecycle capture before execution and after success or failure.
 
-This patch changes package documentation and positioning. Existing SDK behavior and method names remain compatible.
+The spool never needs raw prompts, completions, command output, tool output, or credentials. Authentication, policy, proof, and validation failures are not retried as transient delivery errors.
 
 ## Quick Start
 
@@ -70,6 +70,8 @@ marrow.createPassiveRuntime().install();
 
 Supported wrappers call the one-call runtime before meaningful work and close outcomes after success or failure. Policy, proof, validation, and authentication failures are surfaced explicitly rather than retried blindly.
 
+When a transient network or server error prevents delivery, the SDK can retain the compact event in an owner-only local spool and retry it with the same event ID. The default spool is bounded to 100 records, written atomically, and stored with owner-only permissions.
+
 ## Core Control Methods
 
 | Method | Purpose |
@@ -79,6 +81,8 @@ Supported wrappers call the one-call runtime before meaningful work and close ou
 | `think(input)` | Record intent and retrieve governance intelligence |
 | `commit(input)` | Close work with outcome, gate receipt, and proof |
 | `runGuarded(input)` | Execute a callback through the runtime gate and automatic closure |
+| `integrationEvent(input)` | Record a compact passive lifecycle receipt through the durable local spool |
+| `decisionTrace(decisionId)` | Inspect the tenant-scoped causal path behind a governed decision |
 | `workflowGate(input)` | Evaluate a workflow action against policy |
 | `completionContracts()` | List built-in completion/proof contracts |
 | `evaluateCompletionContract(input)` | Verify that required evidence is complete |
@@ -88,6 +92,33 @@ Supported wrappers call the one-call runtime before meaningful work and close ou
 | `governanceTimeline(options)` | Inspect decisions, gates, proof packs, and outcomes |
 | `fleetLessons(options)` | Retrieve proven lessons authorized for the current tenant/agent |
 | `modelUsage(input)` | Record compact token, cost, and latency counts exposed by the harness |
+
+## Lifecycle Receipts and Decision Traces
+
+Use lifecycle receipts when your harness exposes meaningful events outside `runGuarded()`:
+
+```ts
+await marrow.integrationEvent({
+  event_type: 'verification_evidence_added',
+  action: 'production smoke passed',
+  decision_id: decisionId,
+  workflow_id: workflowId,
+});
+
+await marrow.integrationEvent({
+  event_type: 'outcome_committed',
+  action: 'production deploy completed',
+  decision_id: decisionId,
+  workflow_id: workflowId,
+  success: true,
+  outcome_state: 'closed',
+});
+
+const { trace } = await marrow.decisionTrace(decisionId);
+console.log(trace.path);
+```
+
+Tool or workflow completion keeps an outcome pending until Marrow receives explicit success/failure closure. That distinction prevents a successful command exit from being mistaken for a successful business outcome.
 
 ## Adaptive Policy
 

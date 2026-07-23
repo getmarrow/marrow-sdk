@@ -82,7 +82,11 @@ import type {
   MarrowDecisionProvenanceInput,
   MarrowDecisionSourceClient,
   MarrowDecisionUserIntent,
+  MarrowLifecycleEventInput,
+  MarrowLifecycleEventResult,
+  MarrowDecisionTraceResult,
 } from './types';
+import { DurableEventSpool, type SpoolRecord } from './event-spool';
 
 const DEFAULT_HINT =
   'Tip: log plans, decisions, and outcomes to Marrow so your agent improves over time.';
@@ -671,6 +675,8 @@ export class MarrowClient {
   private baseUrl: string;
   private retryQueue: RetryQueueItem[] = [];
   private retryQueueDraining = false;
+  private eventSpool: DurableEventSpool | null;
+  private eventSpoolDraining = false;
 
   constructor(apiKey: string, options?: MarrowClientOptions | string) {
     this.apiKey = apiKey;
@@ -686,6 +692,13 @@ export class MarrowClient {
       this.sessionId = options?.sessionId ?? null;
       this.agentId = options?.agentId ?? null;
     }
+    this.eventSpool = typeof options === 'object' && options?.durableEventSpool === false
+      ? null
+      : new DurableEventSpool({
+          apiKey,
+          agentId: this.agentId,
+          path: typeof options === 'object' ? options?.eventSpoolPath : undefined,
+        });
 
     const initialMode: MarrowEnforcementMode =
       (typeof options === 'object' ? options?.mode : undefined) ?? 'warn';
@@ -965,6 +978,13 @@ export class MarrowClient {
           risk_tolerance: options.riskTolerance || riskToleranceForPolicy(riskPolicy),
           requires_approval: options.requiresApproval,
         });
+        this.captureLifecycleEvent({
+          event_type: 'pre_action_checked',
+          action: safeAction,
+          decision_id: this.decisionId || undefined,
+          risk_level: runtime.risk_gate?.risk_level,
+          outcome_state: 'pending',
+        });
         brief = runtime.decision_brief || brief;
         gate = runtime.risk_gate || gate;
         beforeActionDirective = runtime.intervention
@@ -1207,9 +1227,10 @@ export class MarrowClient {
       } catch (error) {
         const failureType = classifyMarrowFailure(error);
         const publicError = safePublicErrorMessage(error);
-        if (this.decisionId) {
+        if (decisionId) {
           try {
             commit = await this.commit({
+              decisionId,
               success: false,
               outcome: `Guarded run failed (${failureType}): ${publicError}`,
               gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
@@ -1220,6 +1241,14 @@ export class MarrowClient {
             process.stderr.write(`[marrow] Warning: guarded run failure commit failed: ${safePublicErrorMessage(commitError)}\n`);
           }
         }
+        this.captureLifecycleEvent({
+          event_type: commit ? 'outcome_committed' : 'workflow_completed',
+          action: safeAction,
+          decision_id: decisionId || undefined,
+          risk_level: runtime?.risk_gate?.risk_level,
+          outcome_state: commit ? 'closed' : 'pending',
+          success: false,
+        });
 
         return {
           ok: false,
@@ -1244,6 +1273,7 @@ export class MarrowClient {
       let commitErrorMessage: string | null = null;
       try {
         commit = await this.commit({
+          decisionId: decisionId || undefined,
           success: true,
           outcome: `Guarded run completed: ${safeAction}`,
           gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
@@ -1254,6 +1284,14 @@ export class MarrowClient {
         commitErrorMessage = safePublicErrorMessage(error);
         process.stderr.write(`[marrow] Warning: guarded run success commit failed: ${commitErrorMessage}\n`);
       }
+      this.captureLifecycleEvent({
+        event_type: commit ? 'outcome_committed' : 'workflow_completed',
+        action: safeAction,
+        decision_id: decisionId || undefined,
+        risk_level: runtime?.risk_gate?.risk_level,
+        outcome_state: commit ? 'closed' : 'pending',
+        success: true,
+      });
 
       if (options.includeValueReport) {
         try {
@@ -2823,6 +2861,49 @@ export class MarrowClient {
     return (res.data || res) as MarrowFirstValueResult;
   }
 
+  /** Record one compact harness lifecycle receipt through the durable local spool. */
+  async integrationEvent(input: MarrowLifecycleEventInput): Promise<MarrowLifecycleEventResult> {
+    const normalized: MarrowLifecycleEventInput = {
+      ...input,
+      harness: input.harness || defaultSourceClient(),
+      agent_id: input.agent_id || this.agentId || 'unknown',
+      session_id: input.session_id || this.sessionId || undefined,
+      action: truncate(redactSensitiveText(input.action), 240),
+    };
+    const record = this.eventSpool?.enqueue(normalized) || ({
+      ...normalized,
+      event_id: normalized.event_id || `sdk-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      attempts: 0,
+      occurred_at: normalized.occurred_at || nowIso(),
+    } as SpoolRecord);
+
+    if (!this.eventSpool) {
+      const res = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+      const data = (res.data || res) as Record<string, unknown>;
+      return {
+        accepted: data.accepted === true,
+        queued: false,
+        event_id: record.event_id,
+        pending_spool_events: 0,
+        normalized_event: data.normalized_event as Record<string, unknown> | undefined,
+      };
+    }
+
+    await this.drainEventSpool();
+    return {
+      accepted: this.eventSpool.size() === 0,
+      queued: this.eventSpool.size() > 0,
+      event_id: record.event_id,
+      pending_spool_events: this.eventSpool.size(),
+    };
+  }
+
+  async decisionTrace(decisionId: string): Promise<MarrowDecisionTraceResult> {
+    const safeId = validatePathParam(decisionId, 'decisionId');
+    const res = await this.request('GET', `/v1/agent/governance/trace/${safeId}`);
+    return (res.data || res) as MarrowDecisionTraceResult;
+  }
+
   async agentPerformance(period: string | number = '7d', agentId: string | null = this.agentId): Promise<MarrowAgentPerformanceResult> {
     const days = clampPeriodDays(period);
     const qs = new URLSearchParams({ period: String(days) });
@@ -3039,12 +3120,40 @@ export class MarrowClient {
 
   private shouldQueueRequest(method: string, path: string, error: unknown): boolean {
     if (method.toUpperCase() !== 'POST') return false;
-    if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end', '/v1/agent/model-usage'].includes(path)) return false;
+    if (!['/v1/agent/think', '/v1/agent/commit', '/v1/agent/session/end', '/v1/agent/model-usage', '/v1/agent/integrations/events'].includes(path)) return false;
     const message = safeErrorMessage(error).toLowerCase();
     if (/\b(401|403|unauthorized|forbidden|invalid api key|insufficient scope|proof pack|required proof|policy|blocked)\b/.test(message)) {
       return false;
     }
     return /\b(408|425|429|500|502|503|504|timeout|timed out|econnreset|enotfound|eai_again|network|fetch failed|temporar|rate limit)\b/.test(message);
+  }
+
+  private captureLifecycleEvent(input: MarrowLifecycleEventInput): void {
+    void this.integrationEvent(input).catch((error) => {
+      process.stderr.write(`[marrow] Warning: lifecycle receipt failed: ${safePublicErrorMessage(error)}\n`);
+    });
+  }
+
+  private async drainEventSpool(): Promise<void> {
+    if (!this.eventSpool || this.eventSpoolDraining || this.eventSpool.size() === 0) return;
+    this.eventSpoolDraining = true;
+    try {
+      for (const record of this.eventSpool.peek(10)) {
+        try {
+          await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+          this.eventSpool.acknowledge([record.event_id]);
+        } catch (error) {
+          if (this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error) && record.attempts < 3) {
+            this.eventSpool.retry(record.event_id);
+            break;
+          }
+          this.eventSpool.acknowledge([record.event_id]);
+          process.stderr.write(`[marrow] Warning: lifecycle receipt rejected and not retried: ${safePublicErrorMessage(error)}\n`);
+        }
+      }
+    } finally {
+      this.eventSpoolDraining = false;
+    }
   }
 
   private enqueueRetry(method: string, path: string, body: unknown, error: unknown): void {

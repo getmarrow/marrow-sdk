@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowModelUsageInput, MarrowModelUsageResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowModelUsageInput, MarrowModelUsageResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput, MarrowLifecycleEventInput, MarrowLifecycleEventResult, MarrowDecisionTraceResult } from './types';
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 interface MarrowFetchWrapOptions {
     captureModelUsage?: boolean;
@@ -23,6 +23,8 @@ export declare class MarrowClient {
     private baseUrl;
     private retryQueue;
     private retryQueueDraining;
+    private eventSpool;
+    private eventSpoolDraining;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
     enforce(options?: MarrowEnforceOptions): MarrowCheckResult;
     check(): MarrowCheckResult;
@@ -268,6 +270,9 @@ export declare class MarrowClient {
      * first useful lesson, and value-proof counters in one response.
      */
     firstValue(input?: MarrowFirstValueRequest): Promise<MarrowFirstValueResult>;
+    /** Record one compact harness lifecycle receipt through the durable local spool. */
+    integrationEvent(input: MarrowLifecycleEventInput): Promise<MarrowLifecycleEventResult>;
+    decisionTrace(decisionId: string): Promise<MarrowDecisionTraceResult>;
     agentPerformance(period?: string | number, agentId?: string | null): Promise<MarrowAgentPerformanceResult>;
     fleetLessons(options?: {
         query?: string;
@@ -331,6 +336,8 @@ export declare class MarrowClient {
     private requestOnce;
     private normalizeModelUsage;
     private shouldQueueRequest;
+    private captureLifecycleEvent;
+    private drainEventSpool;
     private enqueueRetry;
     private drainRetryQueue;
 }

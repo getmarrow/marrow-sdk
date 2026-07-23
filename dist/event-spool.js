@@ -72,6 +72,7 @@ function compact(value, max) {
 }
 function containsSensitiveIdentifier(value) {
     return /:\/\//.test(value)
+        || /(?:secret|token|password|credential|authorization|private[_-]?key|api[_-]?key|apikey)/i.test(value)
         || /\bmrw_(?:live|test)_[A-Za-z0-9_-]{8,}\b/i.test(value)
         || /\bmrw_[0-9a-f-]{36}_[A-Fa-f0-9]{16,}\b/i.test(value)
         || /\b(?:sk|pk|ghp|github_pat|npm|cfut)_[A-Za-z0-9_-]{12,}\b/.test(value);
@@ -90,7 +91,8 @@ function redactAction(value) {
     if (Buffer.byteLength(value, 'utf8') > 240)
         return '[REDACTED_OVERSIZE_ACTION]';
     const redacted = value
-        .replace(/https?:\/\/[^\s"'`]+/gi, '[REDACTED_URL]')
+        .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'`]+/gi, '[REDACTED_URL]')
+        .replace(/(["']?(?:secret|token|api[_-]?key|apikey|credential|password|authorization|private[_-]?key)["']?\s*:\s*)(?:"[^"]*"|'[^']*'|[^,\s}]+)/gi, '$1"[REDACTED]"')
         .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)=)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
         .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)\s+)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
         .replace(/(\B-(?:p|k)\s+)([^\s"'`]+|"[^"]*"|'[^']*')/g, '$1[REDACTED]')

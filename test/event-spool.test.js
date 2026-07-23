@@ -185,12 +185,24 @@ test('lifecycle spool validates runtime fields and enforces privacy and byte bou
       event_type: 'workflow_completed',
       action: `deploy ${marrowKey} https://private.example/path?token=secret-value`,
     });
+    const dsnMarker = 'dsn-private-marker-123456789';
+    const jsonMarker = 'json-private-marker-123456789';
+    const identifierMarker = 'decision-secret-private-marker-123456789';
+    spool.enqueue({
+      event_id: 'redacted-adversarial-fields',
+      event_type: 'workflow_completed',
+      action: `connect postgresql://agent:${dsnMarker}@private.example/workflow with {"apiKey":"${jsonMarker}"}`,
+      decision_id: identifierMarker,
+    });
     const storedText = readFileSync(spoolPath, 'utf8');
-    const [oversized, redacted] = JSON.parse(storedText);
-    assert.doesNotMatch(storedText, /mrw_live_|private\.example|secret-value|private-output-marker/);
+    const [oversized, redacted, adversarial] = JSON.parse(storedText);
+    assert.doesNotMatch(storedText, /mrw_live_|private\.example|secret-value|private-output-marker|dsn-private-marker|json-private-marker|decision-secret-private-marker/);
     assert.equal(oversized.action, '[REDACTED_OVERSIZE_ACTION]');
     assert.match(redacted.action, /\[REDACTED_MARROW_KEY\]/);
     assert.match(redacted.action, /\[REDACTED_URL\]/);
+    assert.match(adversarial.action, /\[REDACTED_URL\]/);
+    assert.match(adversarial.action, /\[REDACTED\]/);
+    assert.equal('decision_id' in adversarial, false);
     assert.equal(oversized.occurred_at, '2026-07-23T00:00:00.000Z');
     assert.equal('arbitrary_private_payload' in oversized, false);
     assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') <= 2 * 1024);

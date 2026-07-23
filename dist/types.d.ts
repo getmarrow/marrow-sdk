@@ -604,8 +604,12 @@ export interface MarrowLifecycleEventInput {
 export interface MarrowLifecycleEventResult {
     accepted: boolean;
     queued: boolean;
+    failed: boolean;
+    delivery_state: 'accepted' | 'pending' | 'failed';
     event_id: string;
     pending_spool_events: number;
+    failed_spool_events: number;
+    failure_code?: 'terminal_rejection' | 'retry_exhausted';
     normalized_event?: Record<string, unknown>;
 }
 export interface MarrowDecisionTraceResult {

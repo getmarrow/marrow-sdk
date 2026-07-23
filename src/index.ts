@@ -63,6 +63,10 @@ export type {
   MarrowGuardedRiskPolicy,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowLifecycleEventType,
+  MarrowLifecycleEventInput,
+  MarrowLifecycleEventResult,
+  MarrowDecisionTraceResult,
 
   // Result Types
   MarrowOrientResult,

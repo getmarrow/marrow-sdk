@@ -359,6 +359,70 @@ test('runGuarded emits explicit failed outcome lifecycle closure after a success
   assert.equal(lifecycle.at(-1).decision_id, 'decision_failed_123');
 });
 
+test('runGuarded lifecycle and failure closure never reuse a stale decision ID', async () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const lifecycle = [];
+  const commits = [];
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'safe' } },
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
+  marrow.integrationEvent = async (input) => {
+    lifecycle.push(input);
+    return {
+      accepted: true,
+      queued: false,
+      failed: false,
+      delivery_state: 'accepted',
+      event_id: 'event_123',
+      pending_spool_events: 0,
+      failed_spool_events: 0,
+    };
+  };
+  marrow.decisionId = 'stale-prior-decision';
+  marrow.think = async () => ({ decisionId: 'current-decision' });
+  marrow.commit = async (input) => {
+    commits.push(input);
+    return { committed: true };
+  };
+
+  const success = await marrow.runGuarded({
+    action: 'run current guarded action',
+    riskPolicy: 'warn',
+    execute: () => 'done',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(success.ok, true);
+  assert.equal(lifecycle[0].event_type, 'pre_action_checked');
+  assert.equal(lifecycle[0].decision_id, 'current-decision');
+  assert.equal(commits[0].decisionId, 'current-decision');
+  assert.doesNotMatch(JSON.stringify({ lifecycle, commits }), /stale-prior-decision/);
+
+  lifecycle.length = 0;
+  commits.length = 0;
+  marrow.decisionId = 'another-stale-decision';
+  marrow.think = async () => {
+    throw new Error('think failed before creating a decision');
+  };
+  let executed = false;
+  const failed = await marrow.runGuarded({
+    action: 'must not use stale decision',
+    riskPolicy: 'warn',
+    execute: () => {
+      executed = true;
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(failed.ok, false);
+  assert.equal(failed.decision_id, null);
+  assert.equal(executed, false);
+  assert.deepEqual(commits, []);
+  assert.deepEqual(lifecycle, []);
+});
+
 test('runGuarded redacts action and context across runtime, think, commit, and summaries', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);

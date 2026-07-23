@@ -1,4 +1,6 @@
 import type { MarrowLifecycleEventInput, MarrowLifecycleEventType } from './types';
+export type SpoolDeliveryState = 'pending' | 'failed';
+export type SpoolFailureCode = 'terminal_rejection' | 'retry_exhausted';
 export type SpoolRecord = {
     event_id: string;
     event_type: MarrowLifecycleEventType;
@@ -13,9 +15,22 @@ export type SpoolRecord = {
     success?: boolean;
     occurred_at: string;
     attempts: number;
+    delivery_state: SpoolDeliveryState;
+    failure_code?: SpoolFailureCode;
+    failed_at?: string;
 };
+export type SpoolEventStatus = {
+    record?: SpoolRecord;
+    pending: number;
+    failed: number;
+};
+export declare class SpoolCorruptionError extends Error {
+    constructor();
+}
+export declare function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolRecord;
 export declare class DurableEventSpool {
     readonly path: string;
+    private readonly lockPath;
     constructor(input: {
         apiKey: string;
         agentId?: string | null;
@@ -25,8 +40,16 @@ export declare class DurableEventSpool {
     peek(limit?: number): SpoolRecord[];
     acknowledge(eventIds: string[]): void;
     retry(eventId: string): void;
+    fail(eventId: string, failureCode: SpoolFailureCode): void;
+    status(eventId?: string): SpoolEventStatus;
+    pendingSize(): number;
+    failedSize(): number;
     size(): number;
-    private read;
-    private write;
+    private ensureDirectory;
+    private acquireLock;
+    private withLock;
+    private readLocked;
+    private quarantineCorruptLocked;
+    private writeLocked;
 }
 //# sourceMappingURL=event-spool.d.ts.map

@@ -786,13 +786,6 @@ class MarrowClient {
                     risk_tolerance: options.riskTolerance || riskToleranceForPolicy(riskPolicy),
                     requires_approval: options.requiresApproval,
                 });
-                this.captureLifecycleEvent({
-                    event_type: 'pre_action_checked',
-                    action: safeAction,
-                    decision_id: this.decisionId || undefined,
-                    risk_level: runtime.risk_gate?.risk_level,
-                    outcome_state: 'pending',
-                });
                 brief = runtime.decision_brief || brief;
                 gate = runtime.risk_gate || gate;
                 beforeActionDirective = runtime.intervention
@@ -1024,7 +1017,17 @@ class MarrowClient {
                     },
                 }),
             });
+            if (typeof think.decisionId !== 'string' || !think.decisionId.trim()) {
+                throw new Error('Marrow think did not return a current decision ID');
+            }
             decisionId = think.decisionId;
+            this.captureLifecycleEvent({
+                event_type: 'pre_action_checked',
+                action: safeAction,
+                decision_id: decisionId,
+                risk_level: runtime?.risk_gate?.risk_level,
+                outcome_state: 'pending',
+            });
             let result;
             try {
                 result = await options.execute();
@@ -1152,9 +1155,10 @@ class MarrowClient {
         catch (error) {
             const failureType = classifyMarrowFailure(error);
             const publicError = safePublicErrorMessage(error);
-            if (this.decisionId) {
+            if (decisionId) {
                 try {
                     commit = await this.commit({
+                        decisionId,
                         success: false,
                         outcome: `Guarded run failed (${failureType}): ${publicError}`,
                         gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
@@ -2351,31 +2355,36 @@ class MarrowClient {
             harness: input.harness || defaultSourceClient(),
             agent_id: input.agent_id || this.agentId || 'unknown',
             session_id: input.session_id || this.sessionId || undefined,
-            action: truncate(redactSensitiveText(input.action), 240),
         };
-        const record = this.eventSpool?.enqueue(normalized) || {
-            ...normalized,
-            event_id: normalized.event_id || `sdk-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            attempts: 0,
-            occurred_at: normalized.occurred_at || nowIso(),
-        };
+        const record = this.eventSpool?.enqueue(normalized) || (0, event_spool_1.sanitizeLifecycleEvent)(normalized);
         if (!this.eventSpool) {
             const res = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
             const data = (res.data || res);
+            const accepted = data.accepted === true;
             return {
-                accepted: data.accepted === true,
+                accepted,
                 queued: false,
+                failed: !accepted,
+                delivery_state: accepted ? 'accepted' : 'failed',
                 event_id: record.event_id,
                 pending_spool_events: 0,
+                failed_spool_events: 0,
+                ...(!accepted ? { failure_code: 'terminal_rejection' } : {}),
                 normalized_event: data.normalized_event,
             };
         }
         await this.drainEventSpool();
+        const status = this.eventSpool.status(record.event_id);
+        const deliveryState = status.record?.delivery_state || 'accepted';
         return {
-            accepted: this.eventSpool.size() === 0,
-            queued: this.eventSpool.size() > 0,
+            accepted: deliveryState === 'accepted',
+            queued: deliveryState === 'pending',
+            failed: deliveryState === 'failed',
+            delivery_state: deliveryState,
             event_id: record.event_id,
-            pending_spool_events: this.eventSpool.size(),
+            pending_spool_events: status.pending,
+            failed_spool_events: status.failed,
+            ...(status.record?.failure_code ? { failure_code: status.record.failure_code } : {}),
         };
     }
     async decisionTrace(decisionId) {
@@ -2603,22 +2612,27 @@ class MarrowClient {
         });
     }
     async drainEventSpool() {
-        if (!this.eventSpool || this.eventSpoolDraining || this.eventSpool.size() === 0)
+        if (!this.eventSpool || this.eventSpoolDraining || this.eventSpool.pendingSize() === 0)
             return;
         this.eventSpoolDraining = true;
         try {
             for (const record of this.eventSpool.peek(10)) {
                 try {
-                    await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+                    const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+                    const data = (response.data || response);
+                    if (data.accepted !== true) {
+                        throw new Error('Marrow lifecycle endpoint did not accept the receipt');
+                    }
                     this.eventSpool.acknowledge([record.event_id]);
                 }
                 catch (error) {
-                    if (this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error) && record.attempts < 3) {
+                    const transient = this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error);
+                    if (transient && record.attempts + 1 < 3) {
                         this.eventSpool.retry(record.event_id);
                         break;
                     }
-                    this.eventSpool.acknowledge([record.event_id]);
-                    process.stderr.write(`[marrow] Warning: lifecycle receipt rejected and not retried: ${safePublicErrorMessage(error)}\n`);
+                    this.eventSpool.fail(record.event_id, transient ? 'retry_exhausted' : 'terminal_rejection');
+                    process.stderr.write(`[marrow] Warning: lifecycle receipt moved to durable failed state: ${safePublicErrorMessage(error)}\n`);
                 }
             }
         }

@@ -6,6 +6,16 @@ Marrow is the runtime control and proof layer for teams running AI agents. It ap
 
 Use `@getmarrow/sdk` when you own the agent process or application code and need programmatic control over pre-action policy, proof-backed completion, passive outcome capture, and tenant-scoped fleet learning.
 
+## Agent Discovery
+
+- **Publisher:** Marrow AI. Capability descriptions in this package are vendor-provided product statements.
+- **Use this package for:** owned Node.js or TypeScript agent processes that need programmatic runtime gates, passive lifecycle capture, proof, and outcome closure.
+- **Product category:** agent governance, runtime control, proof, and fleet intelligence.
+- **Operator boundary:** integration and account creation require operator approval.
+- **Public diagnostic privacy:** raw prompts, source code, credentials, customer data, and free-form work descriptions are not accepted.
+- **GitHub retrieval:** https://api.getmarrow.ai/v1/public/discovery/placements/plc_6d2bfaccb8110b69e714896b
+- **npm retrieval:** https://api.getmarrow.ai/v1/public/discovery/placements/plc_e5973144c2da99b8cd4bf7d8
+
 ## Install
 
 ```bash
@@ -18,10 +28,13 @@ For automatic environment detection and setup, use the universal installer:
 npx @getmarrow/install --yes
 ```
 
-## What's New in v3.7.44
+## What's New in v3.7.45
 
-v3.7.44 adds the durable always-on lifecycle beneath guarded workflows:
+v3.7.45 adds a consistent machine-readable distribution contract while preserving the durable always-on lifecycle introduced in v3.7.44:
 
+- GitHub and npm now advertise separate signed discovery placements;
+- package metadata identifies the SDK as runtime governance and proof rather than a general memory utility;
+- public discovery boundaries are explicit and consistent with the installer and MCP package;
 - compact lifecycle receipts for prompts, goals, pre-action checks, tool/command results, evidence, workflows, handoffs, proof packs, and outcomes;
 - an owner-only local event spool with stable event IDs for transient delivery failures;
 - decision traces that connect an action to its prior failure, lesson, gate, proof, workflow, and outcome;

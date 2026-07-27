@@ -16,6 +16,8 @@ Use `@getmarrow/sdk` when you own the agent process or application code and need
 - **GitHub retrieval:** https://api.getmarrow.ai/v1/public/discovery/placements/plc_6d2bfaccb8110b69e714896b
 - **npm retrieval:** https://api.getmarrow.ai/v1/public/discovery/placements/plc_e5973144c2da99b8cd4bf7d8
 
+Use the public [Governance Readiness Assessment](https://getmarrow.ai/governance-readiness) to screen one declared workflow before integration. For concrete operating patterns, see [Marrow for Codex](https://getmarrow.ai/marrow-for-codex), [Claude Code](https://getmarrow.ai/marrow-for-claude-code), [Cursor](https://getmarrow.ai/marrow-for-cursor), [Hermes Agent](https://getmarrow.ai/marrow-for-hermes), and [OpenClaw](https://getmarrow.ai/marrow-for-openclaw). These pages describe control and proof boundaries; they do not claim independent verification or customer ROI.
+
 ## Install
 
 ```bash
@@ -28,9 +30,9 @@ For automatic environment detection and setup, use the universal installer:
 npx @getmarrow/install --yes
 ```
 
-## What's New in v3.7.45
+## What's New in v3.7.46
 
-v3.7.45 adds a consistent machine-readable distribution contract while preserving the durable always-on lifecycle introduced in v3.7.44:
+v3.7.46 adds the public Governance Readiness Assessment and five proof-oriented harness guides while preserving the durable always-on lifecycle introduced in v3.7.44:
 
 - GitHub and npm now advertise separate signed discovery placements;
 - package metadata identifies the SDK as runtime governance and proof rather than a general memory utility;

@@ -1,6 +1,6 @@
 {
   "name": "@getmarrow/sdk",
-  "version": "3.7.46",
+  "version": "3.7.47",
   "description": "Runtime control, proof, and fleet intelligence for Node.js AI agents.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -43,10 +43,14 @@
     "url": "https://github.com/getmarrow/marrow-sdk/issues"
   },
   "marrow": {
-    "category": "agent-governance",
+    "category": "agent_fleet_governance_and_control_layer",
+    "positioning": "agent_fleet_governance_and_control_layer",
     "role": "node-runtime-control-and-proof-sdk",
     "operatorApprovalRequired": true,
     "privacy": "No raw prompts, source code, credentials, or customer data are accepted by public discovery.",
+    "governanceFit": "https://getmarrow.ai/.well-known/marrow.json",
+    "evidence": "https://getmarrow.ai/.well-known/marrow-evidence.json",
+    "referenceGraph": "https://getmarrow.ai/.well-known/marrow-reference-graph.json",
     "discovery": {
       "github": "https://api.getmarrow.ai/v1/public/discovery/placements/plc_6d2bfaccb8110b69e714896b",
       "npm": "https://api.getmarrow.ai/v1/public/discovery/placements/plc_e5973144c2da99b8cd4bf7d8"

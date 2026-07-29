@@ -2534,6 +2534,68 @@ export class MarrowClient {
   async quickStatus(): Promise<MarrowQuickStatusResult> {
     const res = await this.request('GET', '/v1/agent/status');
     const data = res.data ?? res;
+    const rawActivationCoverage = data.activation_coverage && typeof data.activation_coverage === 'object'
+      ? data.activation_coverage
+      : null;
+    const rawDrift = rawActivationCoverage?.drift && typeof rawActivationCoverage.drift === 'object'
+      ? rawActivationCoverage.drift
+      : null;
+    const activationCoverage = rawActivationCoverage
+      ? {
+          ...rawActivationCoverage,
+          drift: {
+            available: rawDrift?.available === true,
+            detected: rawDrift?.available === true && rawDrift?.detected === true,
+            reasons: rawDrift?.available === true && Array.isArray(rawDrift.reasons) ? rawDrift.reasons : [],
+            repair_command: rawDrift?.available === true && typeof rawDrift.repair_command === 'string'
+              ? rawDrift.repair_command
+              : null,
+          },
+        }
+      : {
+          available: false,
+          status: 'insufficient_data',
+          activation: {
+            available: false,
+            active: false,
+            last_observed_at: null,
+            adapter_version: null,
+            capability_level: null,
+          },
+          capture_coverage: {
+            available: false,
+            status: 'insufficient_data',
+            expected_hooks: [],
+            observed_hooks: [],
+            expected_count: 0,
+            observed_count: 0,
+            rate: null,
+          },
+          outcome_closure: {
+            available: false,
+            status: 'insufficient_data',
+            correlations: 0,
+            complete: 0,
+            incomplete: 0,
+            rate: null,
+          },
+          intervention_effectiveness: {
+            available: false,
+            status: 'insufficient_data',
+            interventions: 0,
+            followed: 0,
+            ignored: 0,
+            overridden: 0,
+            action_changed: 0,
+            follow_through_rate: null,
+          },
+          drift: {
+            available: false,
+            detected: false,
+            reasons: [],
+            repair_command: null,
+          },
+        };
     return {
       ok: data.ok,
       enabled: Boolean(data.enabled ?? data.ok),
@@ -2559,49 +2621,7 @@ export class MarrowClient {
         deploys: 'unknown',
         publishes: 'unknown',
       },
-      activationCoverage: data.activation_coverage || {
-        available: false,
-        status: 'insufficient_data',
-        activation: {
-          available: false,
-          active: false,
-          last_observed_at: null,
-          adapter_version: null,
-          capability_level: null,
-        },
-        capture_coverage: {
-          available: false,
-          status: 'insufficient_data',
-          expected_hooks: [],
-          observed_hooks: [],
-          expected_count: 0,
-          observed_count: 0,
-          rate: null,
-        },
-        outcome_closure: {
-          available: false,
-          status: 'insufficient_data',
-          correlations: 0,
-          complete: 0,
-          incomplete: 0,
-          rate: null,
-        },
-        intervention_effectiveness: {
-          available: false,
-          status: 'insufficient_data',
-          interventions: 0,
-          followed: 0,
-          ignored: 0,
-          overridden: 0,
-          action_changed: 0,
-          follow_through_rate: null,
-        },
-        drift: {
-          detected: false,
-          reasons: [],
-          repair_command: null,
-        },
-      },
+      activationCoverage,
       missedHooks: Array.isArray(data.missed_hooks) ? data.missed_hooks : [],
       hookStatus: data.hook_status || {},
       recommendedFix: data.recommended_fix || null,

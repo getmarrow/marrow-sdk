@@ -25,6 +25,7 @@ const LIFECYCLE_EVENT_TYPES = new Set([
     'handoff_completed',
     'proof_pack_closed',
     'outcome_committed',
+    'activation_profile_registered',
 ]);
 const RISK_LEVELS = new Set(['low', 'medium', 'high']);
 const OUTCOME_STATES = new Set(['pending', 'closed', 'unknown', 'timed_out']);

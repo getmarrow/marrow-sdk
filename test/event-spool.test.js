@@ -295,6 +295,15 @@ test('lifecycle spool validates runtime fields and enforces privacy and byte bou
     assert.equal('arbitrary_private_payload' in oversized, false);
     assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') <= 4 * 1024);
 
+    spool.enqueue({
+      event_id: 'activation-profile-runtime-contract',
+      event_type: 'activation_profile_registered',
+      action: 'passive integration activation profile registered',
+    });
+    const activationProfile = JSON.parse(readFileSync(spoolPath, 'utf8'))
+      .find((event) => event.event_id === 'activation-profile-runtime-contract');
+    assert.equal(activationProfile.event_type, 'activation_profile_registered');
+
     let byteLimitReached = false;
     for (let index = 0; index < 100; index += 1) {
       try {

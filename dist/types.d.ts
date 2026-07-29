@@ -522,6 +522,7 @@ export interface MarrowActivationCoverage {
         follow_through_rate: number | null;
     };
     drift: {
+        available: boolean;
         detected: boolean;
         reasons: string[];
         repair_command: string | null;

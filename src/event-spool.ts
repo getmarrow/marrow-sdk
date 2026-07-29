@@ -76,6 +76,7 @@ const LIFECYCLE_EVENT_TYPES = new Set<MarrowLifecycleEventType>([
   'handoff_completed',
   'proof_pack_closed',
   'outcome_committed',
+  'activation_profile_registered',
 ]);
 const RISK_LEVELS = new Set<NonNullable<SpoolRecord['risk_level']>>(['low', 'medium', 'high']);
 const OUTCOME_STATES = new Set<NonNullable<SpoolRecord['outcome_state']>>(['pending', 'closed', 'unknown', 'timed_out']);

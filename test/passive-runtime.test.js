@@ -660,7 +660,7 @@ test('quickStatus maps passive install health fields', async () => {
           action_changed: 1,
           follow_through_rate: 1,
         },
-        drift: { detected: false, reasons: [], repair_command: null },
+        drift: { available: true, detected: false, reasons: [], repair_command: null },
       },
       proof: {
         raw_data_exposed: false,
@@ -695,7 +695,26 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.autoOutcomeClosure.outcome_eligible_decisions, 9);
   assert.equal(status.activationCoverage.capture_coverage.rate, 1);
   assert.equal(status.activationCoverage.intervention_effectiveness.follow_through_rate, 1);
+  assert.equal(status.activationCoverage.drift.available, true);
   assert.equal(status.activationCoverage.drift.detected, false);
+});
+
+test('quickStatus makes legacy drift availability explicitly unavailable', async () => {
+  const marrow = new MarrowClient('test-passive-runtime-key');
+  marrow.request = async () => ({
+    data: {
+      ok: true,
+      activation_coverage: {
+        available: true,
+        drift: { detected: false, reasons: [], repair_command: null },
+      },
+    },
+  });
+
+  const status = await marrow.quickStatus();
+  assert.equal(status.activationCoverage.drift.available, false);
+  assert.equal(status.activationCoverage.drift.detected, false);
+  assert.deepEqual(status.activationCoverage.drift.reasons, []);
 });
 
 test('commit queues transient network failures and drains on next request', async () => {

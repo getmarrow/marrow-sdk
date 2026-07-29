@@ -35,6 +35,7 @@ export type SpoolEventStatus = {
 export declare class SpoolCorruptionError extends Error {
     constructor();
 }
+export declare function isSafeLifecycleIdentifier(value: unknown): boolean;
 export declare function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolRecord;
 export declare class DurableEventSpool {
     readonly path: string;

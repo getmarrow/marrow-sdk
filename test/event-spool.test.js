@@ -41,7 +41,7 @@ test('lifecycle receipts retain bounded activation, correlation, and interventio
   }), /correlation_id/);
 });
 
-test('guarded run drains receipts queued during an active pass and preserves a safe caller correlation', async () => {
+test('guarded run drains receipts queued during an active pass and hashes a privacy-rejected caller correlation', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-active-drain-'));
   const spoolPath = join(directory, 'events.json');
   const originalFetch = globalThis.fetch;
@@ -72,7 +72,7 @@ test('guarded run drains receipts queued during an active pass and preserves a s
 
     const result = await marrow.runGuarded({
       action: 'complete one guarded task',
-      correlationId: 'order/123',
+      correlationId: 'token-reference',
       execute: () => 'done',
     });
     assert.equal(result.ok, true);
@@ -88,7 +88,7 @@ test('guarded run drains receipts queued during an active pass and preserves a s
     ]);
     assert.equal(new Set(delivered.map((event) => event.correlation_id)).size, 1);
     assert.match(delivered[0].correlation_id, /^corr-[a-f0-9]{32}$/);
-    assert.doesNotMatch(JSON.stringify(delivered), /order\/123/);
+    assert.doesNotMatch(JSON.stringify(delivered), /token-reference/);
     assert.deepEqual(JSON.parse(readFileSync(spoolPath, 'utf8')), []);
   } finally {
     globalThis.fetch = originalFetch;

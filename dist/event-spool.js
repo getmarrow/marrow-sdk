@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DurableEventSpool = exports.SpoolCorruptionError = void 0;
+exports.isSafeLifecycleIdentifier = isSafeLifecycleIdentifier;
 exports.sanitizeLifecycleEvent = sanitizeLifecycleEvent;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
@@ -95,6 +96,9 @@ function safeId(value) {
         && /^[A-Za-z0-9._:-]+$/.test(normalized)
         ? normalized
         : undefined;
+}
+function isSafeLifecycleIdentifier(value) {
+    return safeId(value) !== undefined;
 }
 function redactAction(value) {
     if (typeof value !== 'string')

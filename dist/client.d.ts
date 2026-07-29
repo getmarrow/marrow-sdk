@@ -24,7 +24,7 @@ export declare class MarrowClient {
     private retryQueue;
     private retryQueueDraining;
     private eventSpool;
-    private eventSpoolDraining;
+    private eventSpoolDrainPromise;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
     enforce(options?: MarrowEnforceOptions): MarrowCheckResult;
     check(): MarrowCheckResult;

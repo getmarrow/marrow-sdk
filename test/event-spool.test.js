@@ -34,6 +34,66 @@ test('lifecycle receipts retain bounded activation, correlation, and interventio
     action: 'invalid capability',
     capability_level: 'magic',
   }), /capability_level/);
+  assert.throws(() => sanitizeLifecycleEvent({
+    event_type: 'tool_completed',
+    action: 'invalid caller correlation',
+    correlation_id: 'order/123',
+  }), /correlation_id/);
+});
+
+test('guarded run drains receipts queued during an active pass and preserves a safe caller correlation', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-active-drain-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  const delivered = [];
+  let first = true;
+  globalThis.fetch = async (_url, init) => {
+    if (first) {
+      first = false;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+    }
+    delivered.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ data: { accepted: true } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const marrow = new MarrowClient('test-active-drain-key', { agentId: 'agent-one', eventSpoolPath: spoolPath });
+    marrow.agentRuntime = async () => ({
+      ok: true,
+      decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'safe' } },
+      risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+    });
+    marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
+    marrow.think = async () => ({ decisionId: 'decision-active-drain' });
+    marrow.commit = async () => ({ committed: true });
+
+    const result = await marrow.runGuarded({
+      action: 'complete one guarded task',
+      correlationId: 'order/123',
+      execute: () => 'done',
+    });
+    assert.equal(result.ok, true);
+
+    const deadline = Date.now() + 750;
+    while (delivered.length < 3 && Date.now() < deadline) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+    assert.deepEqual(delivered.map((event) => event.event_type), [
+      'pre_action_checked',
+      'tool_completed',
+      'outcome_committed',
+    ]);
+    assert.equal(new Set(delivered.map((event) => event.correlation_id)).size, 1);
+    assert.match(delivered[0].correlation_id, /^corr-[a-f0-9]{32}$/);
+    assert.doesNotMatch(JSON.stringify(delivered), /order\/123/);
+    assert.deepEqual(JSON.parse(readFileSync(spoolPath, 'utf8')), []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('lifecycle event spool survives restart, redacts action, and drains idempotently', async () => {

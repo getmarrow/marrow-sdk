@@ -229,6 +229,10 @@ export function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolR
     throw new TypeError('Invalid lifecycle action_changed');
   }
   const expectedHooks = safeHookList(input.expected_hooks);
+  const correlationId = safeId(input.correlation_id);
+  if (input.correlation_id !== undefined && !correlationId) {
+    throw new TypeError('Invalid lifecycle correlation_id');
+  }
   const record: SpoolRecord = {
     event_id: safeId(input.event_id) || randomUUID(),
     event_type: eventType,
@@ -238,7 +242,7 @@ export function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolR
     ...(safeId(input.workflow_id) ? { workflow_id: safeId(input.workflow_id) } : {}),
     ...(safeId(input.session_id) ? { session_id: safeId(input.session_id) } : {}),
     ...(safeId(input.decision_id) ? { decision_id: safeId(input.decision_id) } : {}),
-    ...(safeId(input.correlation_id) ? { correlation_id: safeId(input.correlation_id) } : {}),
+    ...(correlationId ? { correlation_id: correlationId } : {}),
     ...(safeId(input.adapter_version) ? { adapter_version: safeId(input.adapter_version) } : {}),
     ...(capabilityLevel ? { capability_level: capabilityLevel } : {}),
     ...(safeId(input.config_fingerprint) ? { config_fingerprint: safeId(input.config_fingerprint) } : {}),

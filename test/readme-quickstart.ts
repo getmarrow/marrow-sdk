@@ -1,6 +1,9 @@
 import {
   MarrowClient,
+  type MarrowActivationCoverage,
   type MarrowDecisionTraceResult,
+  type MarrowIntegrationCapabilityLevel,
+  type MarrowInterventionDisposition,
   type MarrowLifecycleEventInput,
   type MarrowLifecycleEventResult,
   type MarrowLifecycleEventType,
@@ -26,7 +29,10 @@ async function governedDeploy(marrow: MarrowClient) {
 }
 
 void governedDeploy;
+void (null as unknown as MarrowActivationCoverage);
 void (null as unknown as MarrowDecisionTraceResult);
+void (null as unknown as MarrowIntegrationCapabilityLevel);
+void (null as unknown as MarrowInterventionDisposition);
 void (null as unknown as MarrowLifecycleEventInput);
 void (null as unknown as MarrowLifecycleEventResult);
 void (null as unknown as MarrowLifecycleEventType);

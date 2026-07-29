@@ -62,7 +62,6 @@
     "README.md"
   ],
   "devDependencies": {
-    "@getmarrow/sdk": "^2.9.4",
     "@types/node": "^25.5.2",
     "typescript": "^5.3.3"
   }

@@ -725,6 +725,157 @@ test('agentRuntime redacts legacy Marrow keys from action context and proof', as
   assert.match(text, /\[REDACTED_MARROW_KEY\]/);
 });
 
+test('arbitrate uses the existing runtime endpoint and redacts proposal content', async () => {
+  const leaked = 'MARROW_API_KEY=arbitration-test-secret-value';
+  const marrow = new MarrowClient('test-passive-runtime-key');
+  let captured;
+
+  marrow.request = async (method, path, body) => {
+    captured = { method, path, body };
+    return { data: { ok: true, arbitration: { receipt_id: 'arb_1', resolution: 'review_required' } } };
+  };
+
+  const result = await marrow.arbitrate({
+    objective: 'Resolve production release disagreement',
+    owner_intent: `Require audit proof ${leaked}`,
+    proposals: [
+      {
+        proposal_id: 'deploy-now',
+        agent_id: 'jarvis',
+        action: `Deploy with ${leaked}`,
+        rationale: 'Tests passed',
+        evidence: [{ kind: 'test_result', reference: 'tests:1325' }],
+      },
+      {
+        proposal_id: 'audit-first',
+        agent_id: 'barvis',
+        action: 'Audit the exact SHA before deploy',
+      },
+    ],
+  });
+
+  assert.equal(captured.method, 'POST');
+  assert.equal(captured.path, '/v1/agent/runtime');
+  assert.equal(captured.body.type, 'coordination');
+  assert.equal(captured.body.coordination.proposals.length, 2);
+  assert.equal(captured.body.coordination.proposals[0].evidence[0].reference, 'tests:1325');
+  assert.equal(result.arbitration.resolution, 'review_required');
+  assert.doesNotMatch(JSON.stringify(captured), new RegExp(leaked));
+});
+
+test('arbitrate redacts generated and explicit actions and enforces public collection bounds', async () => {
+  const leaked = 'MARROW_API_KEY=arbitration-objective-secret-value';
+  const marrow = new MarrowClient('test-passive-runtime-key');
+  const captured = [];
+  marrow.request = async (method, path, body) => {
+    captured.push({ method, path, body });
+    return { data: { arbitration: { receipt_id: 'arb_safe', decision_id: 'decision_safe', resolution: 'selected' } } };
+  };
+
+  const proposals = Array.from({ length: 8 }, (_, index) => ({
+    proposal_id: `proposal-${index}`,
+    agent_id: `agent-${index}`,
+    action: `Verify option ${index}`,
+    evidence: Array.from({ length: 8 }, (__, evidenceIndex) => ({
+      kind: 'test_result',
+      reference: `evidence:${index}:${evidenceIndex}`,
+    })),
+  }));
+  await marrow.arbitrate({ objective: `Resolve ${leaked}`, proposals });
+  await marrow.arbitrate({ objective: 'Resolve safely', action: `Deploy ${leaked}`, proposals });
+
+  assert.equal(captured.length, 2);
+  assert.doesNotMatch(JSON.stringify(captured), new RegExp(leaked));
+  assert.equal(captured[0].body.coordination.proposals.length, 8);
+  assert.equal(captured[0].body.coordination.proposals[0].evidence.length, 8);
+
+  let committed;
+  marrow.request = async (method, path, body) => {
+    committed = { method, path, body };
+    return { data: { committed: true } };
+  };
+  await marrow.commit({ success: true, outcome: 'Governed proposal completed.' });
+  assert.equal(committed.body.decision_id, 'decision_safe');
+
+  await assert.rejects(
+    () => marrow.arbitrate({ objective: 'Too few', proposals: proposals.slice(0, 1) }),
+    /between 2 and 8 proposals/,
+  );
+  await assert.rejects(
+    () => marrow.arbitrate({ objective: 'Too many', proposals: [...proposals, proposals[0]] }),
+    /between 2 and 8 proposals/,
+  );
+  await assert.rejects(
+    () => marrow.arbitrate({
+      objective: 'Too much evidence',
+      proposals: [
+        { ...proposals[0], evidence: [...proposals[0].evidence, { kind: 'test_result', reference: 'evidence:extra' }] },
+        proposals[1],
+      ],
+    }),
+    /at most 8 evidence references/,
+  );
+});
+
+test('arbitrate preserves valid opaque identifiers while rejecting secret-shaped references', async () => {
+  const marrow = new MarrowClient('test-passive-runtime-key');
+  const captured = [];
+  marrow.request = async (_method, _path, body) => {
+    captured.push(body);
+    return { data: { arbitration: { receipt_id: 'arb_opaque', decision_id: 'decision_opaque', resolution: 'selected' } } };
+  };
+  const opaque = 'package_publish_candidate_20260729';
+  await marrow.arbitrate({
+    objective: 'Select the publication candidate',
+    proposals: [
+      {
+        proposal_id: opaque,
+        agent_id: 'release-agent',
+        action: 'Publish the candidate',
+        evidence: [{ kind: 'package_ref', reference: opaque }],
+      },
+      { proposal_id: 'hold-candidate', agent_id: 'review-agent', action: 'Hold the candidate' },
+    ],
+  });
+
+  assert.equal(captured[0].coordination.proposals[0].proposal_id, opaque);
+  assert.equal(captured[0].coordination.proposals[0].evidence[0].reference, opaque);
+
+  const secretShapes = ['sk', 'pk', 'ghp', 'github_pat', 'npm', 'cfut', 'mrw']
+    .map((prefix) => `${prefix}_${'a'.repeat(20)}`);
+  const baseProposal = {
+    proposal_id: 'proposal-one',
+    agent_id: 'release-agent',
+    action: 'Publish the candidate',
+    evidence: [{ kind: 'package_ref', reference: 'package:evidence' }],
+  };
+  const invalidProposals = [
+    ...secretShapes.flatMap((secretShape) => [
+      { ...baseProposal, proposal_id: secretShape },
+      { ...baseProposal, agent_id: secretShape },
+      { ...baseProposal, evidence: [{ kind: secretShape, reference: 'package:evidence' }] },
+      { ...baseProposal, evidence: [{ kind: 'package_ref', reference: secretShape }] },
+    ]),
+    { ...baseProposal, proposal_id: ' proposal-one' },
+    { ...baseProposal, agent_id: 'release-agent ' },
+    { ...baseProposal, evidence: [{ kind: ' package_ref', reference: 'package:evidence' }] },
+    { ...baseProposal, evidence: [{ kind: 'package_ref', reference: 'package:evidence ' }] },
+  ];
+  for (const invalid of invalidProposals) {
+    await assert.rejects(
+      () => marrow.arbitrate({
+        objective: 'Reject unsafe or aliased opaque values',
+        proposals: [
+          invalid,
+          { proposal_id: 'proposal-two', agent_id: 'review-agent', action: 'Hold the candidate' },
+        ],
+      }),
+      /safe opaque identifier/,
+    );
+  }
+  assert.equal(captured.length, 1, 'invalid opaque values must not reach transport');
+});
+
 
 test('commit redacts outcome causedBy and proof token shapes', async () => {
   const leaked = 'cfut_abcdefghijklmnopqrstuvwxyz1234567890';
@@ -749,12 +900,16 @@ test('commit redacts outcome causedBy and proof token shapes', async () => {
     success: true,
     outcome: `deploy ok with ${leaked} https://example.com?token=tokensecret123`,
     causedBy: `manual command ${leaked}`,
+    arbitrationReceiptId: 'arb_receipt_123',
+    ownerApprovalReceiptId: 'approval_receipt_123',
     proof: { summary: `proof ${leaked}`, url: 'https://example.com?client_secret=clientsecret123' },
   });
 
   const text = JSON.stringify(captured);
   assert.equal(captured.method, 'POST');
   assert.equal(captured.path, '/v1/agent/commit');
+  assert.equal(captured.body.arbitration_receipt_id, 'arb_receipt_123');
+  assert.equal(captured.body.owner_approval_receipt_id, 'approval_receipt_123');
   assert.doesNotMatch(text, new RegExp(leaked));
   assert.doesNotMatch(text, /tokensecret123|clientsecret123/);
   assert.match(text, /\[REDACTED_TOKEN\]|\[redacted\]/);

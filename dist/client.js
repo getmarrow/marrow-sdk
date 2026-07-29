@@ -89,6 +89,56 @@ function redactSensitiveValue(value, depth = 0) {
     }
     return String(value);
 }
+const SAFE_ARBITRATION_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
+const SAFE_ARBITRATION_EVIDENCE_KIND = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,39}$/;
+const SAFE_ARBITRATION_EVIDENCE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const SECRETISH_ARBITRATION_REFERENCE = /(?:^|[._:-])(?:secret|token|password|credential|api[_-]?key|authorization|bearer)(?:$|[._:-])|^(?:sk|pk|ghp|github_pat|npm|cfut|mrw)_[A-Za-z0-9_-]+$/i;
+function preserveOpaqueArbitrationValue(value, pattern, field, rejectSecretShape = false) {
+    if (value !== value.trim()
+        || !pattern.test(value)
+        || (rejectSecretShape && SECRETISH_ARBITRATION_REFERENCE.test(value))) {
+        throw new TypeError(`Agent arbitration ${field} must be a safe opaque identifier.`);
+    }
+    return value;
+}
+function sanitizeArbitrationRequest(input) {
+    if (!Array.isArray(input.proposals) || input.proposals.length < 2 || input.proposals.length > 8) {
+        throw new RangeError('Agent arbitration requires between 2 and 8 proposals.');
+    }
+    for (const proposal of input.proposals) {
+        if (Array.isArray(proposal.evidence) && proposal.evidence.length > 8) {
+            throw new RangeError('Agent arbitration accepts at most 8 evidence references per proposal.');
+        }
+    }
+    return {
+        objective: redactSensitiveText(input.objective),
+        ...(typeof input.owner_intent === 'string'
+            ? { owner_intent: redactSensitiveText(input.owner_intent) }
+            : {}),
+        ...(input.conflict_type ? { conflict_type: input.conflict_type } : {}),
+        proposals: input.proposals.map((proposal) => ({
+            proposal_id: preserveOpaqueArbitrationValue(proposal.proposal_id, SAFE_ARBITRATION_IDENTIFIER, 'proposal_id', true),
+            agent_id: preserveOpaqueArbitrationValue(proposal.agent_id, SAFE_ARBITRATION_IDENTIFIER, 'agent_id', true),
+            action: redactSensitiveText(proposal.action),
+            ...(typeof proposal.rationale === 'string'
+                ? { rationale: redactSensitiveText(proposal.rationale) }
+                : {}),
+            ...(typeof proposal.confidence === 'number' ? { confidence: proposal.confidence } : {}),
+            ...(proposal.risk_level ? { risk_level: proposal.risk_level } : {}),
+            ...(typeof proposal.requires_owner_approval === 'boolean'
+                ? { requires_owner_approval: proposal.requires_owner_approval }
+                : {}),
+            ...(Array.isArray(proposal.evidence)
+                ? {
+                    evidence: proposal.evidence.map((evidence) => ({
+                        kind: preserveOpaqueArbitrationValue(evidence.kind, SAFE_ARBITRATION_EVIDENCE_KIND, 'evidence kind', true),
+                        reference: preserveOpaqueArbitrationValue(evidence.reference, SAFE_ARBITRATION_EVIDENCE_REFERENCE, 'evidence reference', true),
+                    })),
+                }
+                : {}),
+        })),
+    };
+}
 function safePublicErrorMessage(error) {
     return truncate(redactSensitiveText(safeErrorMessage(error)), 500);
 }
@@ -1722,6 +1772,12 @@ class MarrowClient {
         const gateReceiptId = params.gateReceiptId || params.gate_receipt_id;
         if (gateReceiptId)
             body.gate_receipt_id = gateReceiptId;
+        const arbitrationReceiptId = params.arbitrationReceiptId || params.arbitration_receipt_id;
+        if (arbitrationReceiptId)
+            body.arbitration_receipt_id = arbitrationReceiptId;
+        const ownerApprovalReceiptId = params.ownerApprovalReceiptId || params.owner_approval_receipt_id;
+        if (ownerApprovalReceiptId)
+            body.owner_approval_receipt_id = ownerApprovalReceiptId;
         if (params.proof)
             body.proof = redactSensitiveValue(params.proof);
         const modelUsage = params.modelUsage || params.model_usage;
@@ -1755,6 +1811,7 @@ class MarrowClient {
             narrative: data.narrative ?? null,
             token_value_signal: data.token_value_signal ?? null,
             pre_action_gate: data.pre_action_gate ?? null,
+            arbitration: data.arbitration ?? null,
             acceptedAs: 'outcome',
             recommendedNext: loop.recommendedNext,
             loop,
@@ -2254,10 +2311,50 @@ class MarrowClient {
             action: redactSensitiveText(input.action),
             context: input.context ? redactSensitiveValue(input.context) : undefined,
             proof: input.proof ? redactSensitiveValue(input.proof) : undefined,
+            coordination: input.coordination
+                ? sanitizeArbitrationRequest(input.coordination)
+                : undefined,
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
         });
         return (res.data || res);
+    }
+    /**
+     * Resolve conflicting agent proposals through the one-call runtime control
+     * plane. The returned runtime includes the normal gate/proof contract and a
+     * durable arbitration receipt explaining what changed before execution.
+     */
+    async arbitrate(input) {
+        const { action, type, agent_id, session_id, surfaces, context, proof, ...coordination } = input;
+        const sanitizedCoordination = sanitizeArbitrationRequest(coordination);
+        const runtime = await this.agentRuntime({
+            action: redactSensitiveText(action || `Resolve conflicting agent proposals for ${sanitizedCoordination.objective}`),
+            type: type || 'coordination',
+            agent_id,
+            session_id,
+            surfaces,
+            context,
+            proof,
+            coordination: sanitizedCoordination,
+        });
+        const arbitrationDecisionId = runtime.arbitration?.decision_id || runtime.decision_id;
+        if (arbitrationDecisionId) {
+            this.decisionId = arbitrationDecisionId;
+            this.loopState.lastThinkAt = nowIso();
+            this.loopState.hasIntentLog = true;
+            this.loopState.hasOutcomeLog = false;
+            this.loopState.pendingDecisionId = arbitrationDecisionId;
+            this.loopState.lastDecisionId = arbitrationDecisionId;
+            this.loopState.pendingAction = sanitizedCoordination.objective;
+            this.loopState.recommendedNext = runtime.arbitration?.resolution === 'blocked'
+                || runtime.arbitration?.resolution === 'review_required'
+                ? 'think'
+                : 'act';
+            this.loopState.loopState = 'intent_logged';
+            this.loopState.message = runtime.arbitration?.exact_next_action || 'Follow the governed arbitration action, then log the outcome.';
+            this.loopState.hints = [this.loopState.message];
+        }
+        return runtime;
     }
     async governanceControlPlane() {
         const res = await this.request('GET', '/v1/agent/governance/control-plane');

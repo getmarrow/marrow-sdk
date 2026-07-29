@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowModelUsageInput, MarrowModelUsageResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput, MarrowLifecycleEventInput, MarrowLifecycleEventResult, MarrowDecisionTraceResult } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowModelUsageInput, MarrowModelUsageResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowArbitrationRequest, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput, MarrowLifecycleEventInput, MarrowLifecycleEventResult, MarrowDecisionTraceResult } from './types';
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 interface MarrowFetchWrapOptions {
     captureModelUsage?: boolean;
@@ -90,6 +90,10 @@ export declare class MarrowClient {
         decisionId?: string;
         gateReceiptId?: string;
         gate_receipt_id?: string;
+        arbitrationReceiptId?: string;
+        arbitration_receipt_id?: string;
+        ownerApprovalReceiptId?: string;
+        owner_approval_receipt_id?: string;
         proof?: Record<string, unknown>;
         modelUsage?: MarrowModelUsageInput;
         model_usage?: MarrowModelUsageInput;
@@ -247,6 +251,20 @@ export declare class MarrowClient {
      * template suggestion, proof-pack requirements, and exact next action.
      */
     agentRuntime(input: MarrowAgentRuntimeRequest): Promise<MarrowAgentRuntimeResult>;
+    /**
+     * Resolve conflicting agent proposals through the one-call runtime control
+     * plane. The returned runtime includes the normal gate/proof contract and a
+     * durable arbitration receipt explaining what changed before execution.
+     */
+    arbitrate(input: MarrowArbitrationRequest & {
+        action?: string;
+        type?: string;
+        agent_id?: string;
+        session_id?: string;
+        surfaces?: string[];
+        context?: Record<string, unknown>;
+        proof?: Record<string, unknown>;
+    }): Promise<MarrowAgentRuntimeResult>;
     governanceControlPlane(): Promise<Record<string, unknown>>;
     hermesIntegration(): Promise<Record<string, unknown>>;
     completionContracts(): Promise<Record<string, unknown>>;

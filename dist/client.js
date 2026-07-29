@@ -5,6 +5,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MarrowClient = exports.MarrowLoopRequiredError = void 0;
 exports.classifyMarrowFailure = classifyMarrowFailure;
+const node_crypto_1 = require("node:crypto");
 const event_spool_1 = require("./event-spool");
 const DEFAULT_HINT = 'Tip: log plans, decisions, and outcomes to Marrow so your agent improves over time.';
 const POST_ORIENT_NUDGE = 'You have not logged any decisions yet this session. Before acting, call marrow_think.';
@@ -12,6 +13,27 @@ const PRE_EXIT_REMINDER = 'Before ending the session, log the outcome to Marrow 
 const REQUIRE_EXTERNAL_ERROR = 'Marrow require mode: log intent with marrow.think() before external actions.';
 const REQUIRE_COMPLETION_ERROR = 'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
+const SDK_ADAPTER_VERSION = '3.7.49';
+const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
+const SDK_CONFIG_FINGERPRINT = (0, node_crypto_1.createHash)('sha256')
+    .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)
+    .digest('hex');
+function lifecycleObservedHook(eventType) {
+    if (eventType === 'pre_action_checked' || eventType === 'risk_gate_requested' || eventType === 'prompt_submitted')
+        return 'pre_action';
+    if (eventType === 'outcome_committed' || eventType === 'proof_pack_closed')
+        return 'outcome_closure';
+    if (eventType === 'session_completed')
+        return 'session_end';
+    return 'action_result';
+}
+function resultLifecycleEventType(options, success) {
+    const commandLike = /command|shell|bash|deploy|publish|merge/i.test(String(options.type || ''))
+        || (options.surfaces || []).some((surface) => /command|shell|deploy|publish|merge|github|cloudflare|npm/i.test(surface));
+    return commandLike
+        ? success ? 'command_completed' : 'command_failed'
+        : success ? 'tool_completed' : 'tool_failed';
+}
 function nowIso() {
     return new Date().toISOString();
 }
@@ -821,6 +843,14 @@ class MarrowClient {
         let commit = null;
         let valueReport = null;
         let beforeActionDirective = null;
+        const lifecycleCorrelation = options.correlationId || (0, node_crypto_1.randomUUID)();
+        const lifecycleBase = {
+            correlation_id: lifecycleCorrelation,
+            adapter_version: SDK_ADAPTER_VERSION,
+            capability_level: 'sdk_passive_runtime',
+            config_fingerprint: SDK_CONFIG_FINGERPRINT,
+            expected_hooks: SDK_EXPECTED_HOOKS,
+        };
         if (useAgentRuntime) {
             try {
                 runtime = await this.agentRuntime({
@@ -907,6 +937,17 @@ class MarrowClient {
                 }
             }
             if (runtime?.risk_gate && !runtime.risk_gate.allow && riskPolicy === 'block_high') {
+                this.captureLifecycleEvent({
+                    ...lifecycleBase,
+                    event_type: 'pre_action_checked',
+                    observed_hook: 'pre_action',
+                    action: safeAction,
+                    risk_level: runtime.risk_gate.risk_level,
+                    outcome_state: 'closed',
+                    success: false,
+                    intervention_disposition: 'followed',
+                    action_changed: true,
+                });
                 return {
                     ok: false,
                     blocked: true,
@@ -964,6 +1005,17 @@ class MarrowClient {
                 }
             }
             if (gate && !gate.allow && riskPolicy !== 'off') {
+                this.captureLifecycleEvent({
+                    ...lifecycleBase,
+                    event_type: 'pre_action_checked',
+                    observed_hook: 'pre_action',
+                    action: safeAction,
+                    risk_level: gate.risk_level,
+                    outcome_state: 'closed',
+                    success: false,
+                    intervention_disposition: 'followed',
+                    action_changed: true,
+                });
                 return {
                     ok: false,
                     blocked: true,
@@ -1018,6 +1070,17 @@ class MarrowClient {
             }
         }
         if (riskPolicy === 'block_high' && brief?.risk.level === 'high') {
+            this.captureLifecycleEvent({
+                ...lifecycleBase,
+                event_type: 'pre_action_checked',
+                observed_hook: 'pre_action',
+                action: safeAction,
+                risk_level: brief.risk.level,
+                outcome_state: 'closed',
+                success: false,
+                intervention_disposition: 'followed',
+                action_changed: true,
+            });
             return {
                 ok: false,
                 blocked: true,
@@ -1072,7 +1135,9 @@ class MarrowClient {
             }
             decisionId = think.decisionId;
             this.captureLifecycleEvent({
+                ...lifecycleBase,
                 event_type: 'pre_action_checked',
+                observed_hook: 'pre_action',
                 action: safeAction,
                 decision_id: decisionId,
                 risk_level: runtime?.risk_gate?.risk_level,
@@ -1085,6 +1150,16 @@ class MarrowClient {
             catch (error) {
                 const failureType = classifyMarrowFailure(error);
                 const publicError = safePublicErrorMessage(error);
+                this.captureLifecycleEvent({
+                    ...lifecycleBase,
+                    event_type: resultLifecycleEventType(options, false),
+                    observed_hook: 'action_result',
+                    action: safeAction,
+                    decision_id: decisionId || undefined,
+                    risk_level: runtime?.risk_gate?.risk_level,
+                    outcome_state: 'pending',
+                    success: false,
+                });
                 if (decisionId) {
                     try {
                         commit = await this.commit({
@@ -1101,12 +1176,18 @@ class MarrowClient {
                     }
                 }
                 this.captureLifecycleEvent({
+                    ...lifecycleBase,
                     event_type: commit ? 'outcome_committed' : 'workflow_completed',
+                    observed_hook: commit ? 'outcome_closure' : 'action_result',
                     action: safeAction,
                     decision_id: decisionId || undefined,
                     risk_level: runtime?.risk_gate?.risk_level,
                     outcome_state: commit ? 'closed' : 'pending',
                     success: false,
+                    ...(options.interventionDisposition ? {
+                        intervention_disposition: options.interventionDisposition,
+                        ...(typeof options.actionChanged === 'boolean' ? { action_changed: options.actionChanged } : {}),
+                    } : {}),
                 });
                 return {
                     ok: false,
@@ -1127,6 +1208,16 @@ class MarrowClient {
                     summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
                 };
             }
+            this.captureLifecycleEvent({
+                ...lifecycleBase,
+                event_type: resultLifecycleEventType(options, true),
+                observed_hook: 'action_result',
+                action: safeAction,
+                decision_id: decisionId || undefined,
+                risk_level: runtime?.risk_gate?.risk_level,
+                outcome_state: 'pending',
+                success: true,
+            });
             let commitErrorMessage = null;
             try {
                 commit = await this.commit({
@@ -1143,12 +1234,18 @@ class MarrowClient {
                 process.stderr.write(`[marrow] Warning: guarded run success commit failed: ${commitErrorMessage}\n`);
             }
             this.captureLifecycleEvent({
+                ...lifecycleBase,
                 event_type: commit ? 'outcome_committed' : 'workflow_completed',
+                observed_hook: commit ? 'outcome_closure' : 'action_result',
                 action: safeAction,
                 decision_id: decisionId || undefined,
                 risk_level: runtime?.risk_gate?.risk_level,
                 outcome_state: commit ? 'closed' : 'pending',
                 success: true,
+                ...(options.interventionDisposition ? {
+                    intervention_disposition: options.interventionDisposition,
+                    ...(typeof options.actionChanged === 'boolean' ? { action_changed: options.actionChanged } : {}),
+                } : {}),
             });
             if (options.includeValueReport) {
                 try {
@@ -1991,6 +2088,49 @@ class MarrowClient {
                 deploys: 'unknown',
                 publishes: 'unknown',
             },
+            activationCoverage: data.activation_coverage || {
+                available: false,
+                status: 'insufficient_data',
+                activation: {
+                    available: false,
+                    active: false,
+                    last_observed_at: null,
+                    adapter_version: null,
+                    capability_level: null,
+                },
+                capture_coverage: {
+                    available: false,
+                    status: 'insufficient_data',
+                    expected_hooks: [],
+                    observed_hooks: [],
+                    expected_count: 0,
+                    observed_count: 0,
+                    rate: null,
+                },
+                outcome_closure: {
+                    available: false,
+                    status: 'insufficient_data',
+                    correlations: 0,
+                    complete: 0,
+                    incomplete: 0,
+                    rate: null,
+                },
+                intervention_effectiveness: {
+                    available: false,
+                    status: 'insufficient_data',
+                    interventions: 0,
+                    followed: 0,
+                    ignored: 0,
+                    overridden: 0,
+                    action_changed: 0,
+                    follow_through_rate: null,
+                },
+                drift: {
+                    detected: false,
+                    reasons: [],
+                    repair_command: null,
+                },
+            },
             missedHooks: Array.isArray(data.missed_hooks) ? data.missed_hooks : [],
             hookStatus: data.hook_status || {},
             recommendedFix: data.recommended_fix || null,
@@ -2452,6 +2592,12 @@ class MarrowClient {
             harness: input.harness || defaultSourceClient(),
             agent_id: input.agent_id || this.agentId || 'unknown',
             session_id: input.session_id || this.sessionId || undefined,
+            correlation_id: input.correlation_id || input.decision_id || input.workflow_id || input.session_id || this.sessionId || undefined,
+            adapter_version: input.adapter_version || SDK_ADAPTER_VERSION,
+            capability_level: input.capability_level || 'sdk_passive_runtime',
+            config_fingerprint: input.config_fingerprint || SDK_CONFIG_FINGERPRINT,
+            expected_hooks: input.expected_hooks || SDK_EXPECTED_HOOKS,
+            observed_hook: input.observed_hook || lifecycleObservedHook(input.event_type),
         };
         const record = this.eventSpool?.enqueue(normalized) || (0, event_spool_1.sanitizeLifecycleEvent)(normalized);
         if (!this.eventSpool) {

@@ -185,6 +185,9 @@ export interface MarrowPassiveActionOptions {
     requireOutcomeClosure?: boolean;
     provenance?: MarrowDecisionProvenanceInput;
     modelUsage?: MarrowModelUsageInput;
+    correlationId?: string;
+    interventionDisposition?: MarrowInterventionDisposition;
+    actionChanged?: boolean;
 }
 export interface MarrowPassiveRuntime {
     readonly installed: boolean;
@@ -244,6 +247,9 @@ export interface MarrowGuardedRunOptions<T> {
     requireOutcomeClosure?: boolean;
     provenance?: MarrowDecisionProvenanceInput;
     modelUsage?: MarrowModelUsageInput;
+    correlationId?: string;
+    interventionDisposition?: MarrowInterventionDisposition;
+    actionChanged?: boolean;
 }
 export interface MarrowGuardedRunResult<T> {
     ok: boolean;
@@ -476,6 +482,52 @@ export interface MarrowAskResult {
     query_keywords?: string[];
     low_history?: boolean;
 }
+export interface MarrowActivationCoverage {
+    available: boolean;
+    status: 'active' | 'needs_repair' | 'insufficient_data' | 'schema_unavailable' | string;
+    agent_id?: string;
+    harness?: string;
+    activation: {
+        available: boolean;
+        active: boolean;
+        last_observed_at: string | null;
+        adapter_version: string | null;
+        capability_level: MarrowIntegrationCapabilityLevel | null;
+    };
+    capture_coverage: {
+        available: boolean;
+        status: 'complete' | 'incomplete' | 'insufficient_data' | string;
+        expected_hooks: string[];
+        observed_hooks: string[];
+        expected_count: number;
+        observed_count: number;
+        rate: number | null;
+    };
+    outcome_closure: {
+        available: boolean;
+        status: 'complete' | 'incomplete' | 'insufficient_data' | string;
+        correlations: number;
+        complete: number;
+        incomplete: number;
+        rate: number | null;
+    };
+    intervention_effectiveness: {
+        available: boolean;
+        status: 'measured' | 'insufficient_data' | string;
+        interventions: number;
+        followed: number;
+        ignored: number;
+        overridden: number;
+        action_changed: number;
+        follow_through_rate: number | null;
+    };
+    drift: {
+        detected: boolean;
+        reasons: string[];
+        repair_command: string | null;
+    };
+    updated_at?: string;
+}
 export interface MarrowQuickStatusResult {
     ok: boolean;
     enabled: boolean;
@@ -502,6 +554,7 @@ export interface MarrowQuickStatusResult {
         deploys: 'detected' | 'unknown';
         publishes: 'detected' | 'unknown';
     };
+    activationCoverage: MarrowActivationCoverage;
     missedHooks: string[];
     failureReasons: Array<{
         code: string;
@@ -588,6 +641,8 @@ export interface MarrowClientOptions {
     eventSpoolPath?: string;
 }
 export type MarrowLifecycleEventType = 'prompt_submitted' | 'goal_started' | 'pre_action_checked' | 'risk_gate_requested' | 'tool_completed' | 'tool_failed' | 'command_completed' | 'command_failed' | 'verification_evidence_added' | 'workflow_completed' | 'session_completed' | 'learned_workflow_created' | 'journey_update' | 'subagent_completed' | 'handoff_started' | 'handoff_completed' | 'proof_pack_closed' | 'outcome_committed';
+export type MarrowIntegrationCapabilityLevel = 'native_hooks' | 'mcp' | 'sdk_passive_runtime' | 'governed_wrapper' | 'event_contract';
+export type MarrowInterventionDisposition = 'followed' | 'ignored' | 'overridden';
 export interface MarrowLifecycleEventInput {
     event_id?: string;
     event_type: MarrowLifecycleEventType;
@@ -597,6 +652,14 @@ export interface MarrowLifecycleEventInput {
     workflow_id?: string;
     session_id?: string;
     decision_id?: string;
+    correlation_id?: string;
+    adapter_version?: string;
+    capability_level?: MarrowIntegrationCapabilityLevel;
+    config_fingerprint?: string;
+    expected_hooks?: string[];
+    observed_hook?: string;
+    intervention_disposition?: MarrowInterventionDisposition;
+    action_changed?: boolean;
     risk_level?: 'low' | 'medium' | 'high';
     outcome_state?: 'pending' | 'closed' | 'unknown' | 'timed_out';
     success?: boolean;

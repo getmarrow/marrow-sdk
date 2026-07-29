@@ -1,4 +1,4 @@
-import type { MarrowLifecycleEventInput, MarrowLifecycleEventType } from './types';
+import type { MarrowIntegrationCapabilityLevel, MarrowInterventionDisposition, MarrowLifecycleEventInput, MarrowLifecycleEventType } from './types';
 export type SpoolDeliveryState = 'pending' | 'failed';
 export type SpoolFailureCode = 'terminal_rejection' | 'retry_exhausted';
 export type SpoolRecord = {
@@ -10,6 +10,14 @@ export type SpoolRecord = {
     workflow_id?: string;
     session_id?: string;
     decision_id?: string;
+    correlation_id?: string;
+    adapter_version?: string;
+    capability_level?: MarrowIntegrationCapabilityLevel;
+    config_fingerprint?: string;
+    expected_hooks?: string[];
+    observed_hook?: string;
+    intervention_disposition?: MarrowInterventionDisposition;
+    action_changed?: boolean;
     risk_level?: 'low' | 'medium' | 'high';
     outcome_state?: 'pending' | 'closed' | 'unknown' | 'timed_out';
     success?: boolean;

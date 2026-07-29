@@ -640,7 +640,7 @@ export interface MarrowClientOptions {
     durableEventSpool?: boolean;
     eventSpoolPath?: string;
 }
-export type MarrowLifecycleEventType = 'prompt_submitted' | 'goal_started' | 'pre_action_checked' | 'risk_gate_requested' | 'tool_completed' | 'tool_failed' | 'command_completed' | 'command_failed' | 'verification_evidence_added' | 'workflow_completed' | 'session_completed' | 'learned_workflow_created' | 'journey_update' | 'subagent_completed' | 'handoff_started' | 'handoff_completed' | 'proof_pack_closed' | 'outcome_committed';
+export type MarrowLifecycleEventType = 'activation_profile_registered' | 'prompt_submitted' | 'goal_started' | 'pre_action_checked' | 'risk_gate_requested' | 'tool_completed' | 'tool_failed' | 'command_completed' | 'command_failed' | 'verification_evidence_added' | 'workflow_completed' | 'session_completed' | 'learned_workflow_created' | 'journey_update' | 'subagent_completed' | 'handoff_started' | 'handoff_completed' | 'proof_pack_closed' | 'outcome_committed';
 export type MarrowIntegrationCapabilityLevel = 'native_hooks' | 'mcp' | 'sdk_passive_runtime' | 'governed_wrapper' | 'event_contract';
 export type MarrowInterventionDisposition = 'followed' | 'ignored' | 'overridden';
 export interface MarrowLifecycleEventInput {

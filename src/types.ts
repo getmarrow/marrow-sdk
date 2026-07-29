@@ -731,6 +731,7 @@ export interface MarrowClientOptions {
 }
 
 export type MarrowLifecycleEventType =
+  | 'activation_profile_registered'
   | 'prompt_submitted'
   | 'goal_started'
   | 'pre_action_checked'

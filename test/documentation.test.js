@@ -42,3 +42,9 @@ test('npm entry point matches the product positioning contract', () => {
   assert.match(readme, /runGuarded\(\{[\s\S]*riskPolicy: 'block_high'[\s\S]*if \(result\.blocked\)/);
   assert.doesNotMatch(readme, /runtime\.decision_id/);
 });
+
+test('SDK package never installs another version of itself', () => {
+  for (const block of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    assert.equal(pkg[block]?.['@getmarrow/sdk'], undefined, `self dependency found in ${block}`);
+  }
+});

@@ -66,6 +66,9 @@ export type {
   MarrowLifecycleEventType,
   MarrowLifecycleEventInput,
   MarrowLifecycleEventResult,
+  MarrowActivationCoverage,
+  MarrowIntegrationCapabilityLevel,
+  MarrowInterventionDisposition,
   MarrowDecisionTraceResult,
 
   // Result Types

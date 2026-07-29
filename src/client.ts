@@ -177,6 +177,17 @@ function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function lifecycleCorrelationId(value: unknown): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (normalized && normalized.length <= 128 && /^[A-Za-z0-9._:-]+$/.test(normalized)) {
+    return normalized;
+  }
+  if (normalized) {
+    return `corr-${createHash('sha256').update(normalized).digest('hex').slice(0, 32)}`;
+  }
+  return randomUUID();
+}
+
 function redactSensitiveText(value: string): string {
   return value
     .replace(/(\B--(?:password|pass|secret|api-key|apikey|token|auth|access-token|client-secret|private-key|key)=)([^\s"'`]+|"[^"]*"|'[^']*')/gi, '$1[REDACTED]')
@@ -778,7 +789,7 @@ export class MarrowClient {
   private retryQueue: RetryQueueItem[] = [];
   private retryQueueDraining = false;
   private eventSpool: DurableEventSpool | null;
-  private eventSpoolDraining = false;
+  private eventSpoolDrainPromise: Promise<void> | null = null;
 
   constructor(apiKey: string, options?: MarrowClientOptions | string) {
     this.apiKey = apiKey;
@@ -1064,7 +1075,7 @@ export class MarrowClient {
     let commit: MarrowCommitResult | null = null;
     let valueReport: MarrowValueReportResult | null = null;
     let beforeActionDirective: MarrowGuardedRunResult<T>['before_action_directive'] = null;
-    const lifecycleCorrelation = options.correlationId || randomUUID();
+    const lifecycleCorrelation = lifecycleCorrelationId(options.correlationId);
     const lifecycleBase = {
       correlation_id: lifecycleCorrelation,
       adapter_version: SDK_ADAPTER_VERSION,
@@ -3431,29 +3442,42 @@ export class MarrowClient {
   }
 
   private async drainEventSpool(): Promise<void> {
-    if (!this.eventSpool || this.eventSpoolDraining || this.eventSpool.pendingSize() === 0) return;
-    this.eventSpoolDraining = true;
-    try {
-      for (const record of this.eventSpool.peek(10)) {
-        try {
-          const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
-          const data = (response.data || response) as Record<string, unknown>;
-          if (data.accepted !== true) {
-            throw new Error('Marrow lifecycle endpoint did not accept the receipt');
+    if (!this.eventSpool || this.eventSpool.pendingSize() === 0) return;
+    if (this.eventSpoolDrainPromise) return this.eventSpoolDrainPromise;
+    const spool = this.eventSpool;
+    this.eventSpoolDrainPromise = (async () => {
+      let batches = 0;
+      while (spool.pendingSize() > 0 && batches < 10) {
+        batches += 1;
+        let retryLater = false;
+        const records = spool.peek(10);
+        if (records.length === 0) break;
+        for (const record of records) {
+          try {
+            const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+            const data = (response.data || response) as Record<string, unknown>;
+            if (data.accepted !== true) {
+              throw new Error('Marrow lifecycle endpoint did not accept the receipt');
+            }
+            spool.acknowledge([record.event_id]);
+          } catch (error) {
+            const transient = this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error);
+            if (transient && record.attempts + 1 < 3) {
+              spool.retry(record.event_id);
+              retryLater = true;
+              break;
+            }
+            spool.fail(record.event_id, transient ? 'retry_exhausted' : 'terminal_rejection');
+            process.stderr.write(`[marrow] Warning: lifecycle receipt moved to durable failed state: ${safePublicErrorMessage(error)}\n`);
           }
-          this.eventSpool.acknowledge([record.event_id]);
-        } catch (error) {
-          const transient = this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error);
-          if (transient && record.attempts + 1 < 3) {
-            this.eventSpool.retry(record.event_id);
-            break;
-          }
-          this.eventSpool.fail(record.event_id, transient ? 'retry_exhausted' : 'terminal_rejection');
-          process.stderr.write(`[marrow] Warning: lifecycle receipt moved to durable failed state: ${safePublicErrorMessage(error)}\n`);
         }
+        if (retryLater) break;
       }
+    })();
+    try {
+      await this.eventSpoolDrainPromise;
     } finally {
-      this.eventSpoolDraining = false;
+      this.eventSpoolDrainPromise = null;
     }
   }
 

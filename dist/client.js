@@ -77,7 +77,7 @@ function safeErrorMessage(error) {
 }
 function lifecycleCorrelationId(value) {
     const normalized = typeof value === 'string' ? value.trim() : '';
-    if (normalized && normalized.length <= 128 && /^[A-Za-z0-9._:-]+$/.test(normalized)) {
+    if (normalized && (0, event_spool_1.isSafeLifecycleIdentifier)(normalized)) {
         return normalized;
     }
     if (normalized) {

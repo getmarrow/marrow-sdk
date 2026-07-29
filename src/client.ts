@@ -87,7 +87,7 @@ import type {
   MarrowLifecycleEventResult,
   MarrowDecisionTraceResult,
 } from './types';
-import { DurableEventSpool, sanitizeLifecycleEvent } from './event-spool';
+import { DurableEventSpool, isSafeLifecycleIdentifier, sanitizeLifecycleEvent } from './event-spool';
 
 const DEFAULT_HINT =
   'Tip: log plans, decisions, and outcomes to Marrow so your agent improves over time.';
@@ -177,7 +177,7 @@ function safeErrorMessage(error: unknown): string {
 
 function lifecycleCorrelationId(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
-  if (normalized && normalized.length <= 128 && /^[A-Za-z0-9._:-]+$/.test(normalized)) {
+  if (normalized && isSafeLifecycleIdentifier(normalized)) {
     return normalized;
   }
   if (normalized) {

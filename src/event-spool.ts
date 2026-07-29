@@ -149,6 +149,10 @@ function safeId(value: unknown): string | undefined {
     : undefined;
 }
 
+export function isSafeLifecycleIdentifier(value: unknown): boolean {
+  return safeId(value) !== undefined;
+}
+
 function redactAction(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   if (Buffer.byteLength(value, 'utf8') > 240) return '[REDACTED_OVERSIZE_ACTION]';

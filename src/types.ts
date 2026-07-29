@@ -480,6 +480,7 @@ export interface MarrowCommitResult {
   marrow_contributed?: CommitContribution;
   token_value_signal?: MarrowTokenValueSignal | null;
   pre_action_gate?: { receipt_id?: string | null; decision?: string | null; enforced: boolean } | null;
+  arbitration?: Pick<MarrowArbitrationReceipt, 'receipt_id' | 'status' | 'resolution' | 'final_success'> | null;
   acceptedAs: 'outcome';
   recommendedNext: MarrowLoopRecommendation;
   loop: MarrowCheckResult;
@@ -1043,6 +1044,73 @@ export interface MarrowDecisionBriefResult {
   next_actions: string[];
 }
 
+export type MarrowArbitrationRiskLevel = 'low' | 'medium' | 'high';
+export type MarrowArbitrationResolution = 'selected' | 'synthesized' | 'review_required' | 'blocked';
+
+export interface MarrowArbitrationEvidence {
+  kind: string;
+  /** Opaque evidence identifier. URLs, paths, credentials, and raw evidence are not accepted. */
+  reference: string;
+}
+
+export interface MarrowArbitrationProposal {
+  proposal_id: string;
+  agent_id: string;
+  action: string;
+  rationale?: string;
+  confidence?: number;
+  risk_level?: MarrowArbitrationRiskLevel;
+  requires_owner_approval?: boolean;
+  evidence?: MarrowArbitrationEvidence[];
+}
+
+export interface MarrowArbitrationRequest {
+  objective: string;
+  owner_intent?: string;
+  conflict_type?: 'action_conflict' | 'policy_conflict' | 'evidence_conflict' | 'authority_conflict' | 'risk_conflict';
+  proposals: MarrowArbitrationProposal[];
+}
+
+export interface MarrowArbitrationProposalScore {
+  proposal_id: string;
+  agent_id: string;
+  action_category: string;
+  action_summary: string;
+  risk_level: MarrowArbitrationRiskLevel;
+  requires_owner_approval: boolean;
+  evidence_count: number;
+  viable: boolean;
+  score: number;
+  rank: number;
+  components: Record<string, number>;
+}
+
+export interface MarrowArbitrationReceipt {
+  receipt_id: string;
+  decision_id: string;
+  status: 'open' | 'closed';
+  resolution: MarrowArbitrationResolution;
+  conflict_type: string;
+  workflow_session_id: string | null;
+  gate_receipt_id: string | null;
+  requesting_agent_id: string | null;
+  selected_proposal_id: string | null;
+  synthesized_action: string | null;
+  proposal_count: number;
+  dissent_count: number;
+  risk_level: MarrowArbitrationRiskLevel;
+  confidence: number;
+  owner_approval_required: boolean;
+  score_components: MarrowArbitrationProposalScore[];
+  policy_basis: Record<string, unknown>;
+  exact_next_action: string;
+  final_success?: boolean | null;
+  owner_override_used?: boolean;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string | null;
+}
+
 export interface MarrowAgentRuntimeRequest extends MarrowDecisionBriefRequest {
   risk_tolerance?: MarrowWorkflowGateRiskTolerance;
   requires_approval?: boolean;
@@ -1051,6 +1119,8 @@ export interface MarrowAgentRuntimeRequest extends MarrowDecisionBriefRequest {
   profile_name?: string;
   branch?: string;
   environment?: string;
+  /** Resolve conflicting agent proposals through the existing runtime control plane. */
+  coordination?: MarrowArbitrationRequest;
 }
 
 export type MarrowGovernanceMode = 'passive' | 'pilot' | 'enforce';
@@ -1280,6 +1350,8 @@ export interface MarrowBeforeActionIntervention {
 
 export interface MarrowAgentRuntimeResult {
   ok: boolean;
+  /** Server-created coordination decision to use for arbitration outcome closure. */
+  decision_id?: string;
   action: string;
   agent_id: string | null;
   session_id: string | null;
@@ -1309,6 +1381,8 @@ export interface MarrowAgentRuntimeResult {
     rule: string;
   };
   before_you_act: string | null;
+  /** Present when coordination proposals were supplied to agentRuntime(). */
+  arbitration?: MarrowArbitrationReceipt | null;
   intervention?: MarrowBeforeActionIntervention;
   runtime_contract?: {
     version: 'agent-runtime-contract.v3' | string;

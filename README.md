@@ -53,9 +53,9 @@ For automatic environment detection and setup, use the universal installer:
 npx @getmarrow/install --yes
 ```
 
-## What's New in v3.7.47
+## What's New in v3.7.48
 
-v3.7.47 adds one machine-readable governance-fit contract across discovery, evidence, and integration surfaces while preserving the durable always-on lifecycle introduced in v3.7.44:
+v3.7.48 adds typed agent-disagreement arbitration through the existing runtime control plane. `arbitrate()` accepts two to eight tenant-agent proposals and returns the normal runtime gate plus an explainable `selected`, `synthesized`, `review_required`, or `blocked` receipt. It preserves the machine-readable governance-fit contract introduced in v3.7.47 and the durable always-on lifecycle introduced in v3.7.44:
 
 - GitHub and npm now advertise separate signed discovery placements;
 - package metadata identifies the SDK as runtime governance and proof rather than a general memory utility;
@@ -117,6 +117,7 @@ When a transient network or server error prevents delivery, the SDK can retain t
 | Method | Purpose |
 | --- | --- |
 | `agentRuntime(input)` | One-call status, policy gate, relevant lessons, proof requirements, and exact next action |
+| `arbitrate(input)` | Resolve conflicting tenant-agent proposals through the same runtime gate and return an explainable arbitration receipt |
 | `decisionBrief(input)` | Compact pre-action operating brief |
 | `think(input)` | Record intent and retrieve governance intelligence |
 | `commit(input)` | Close work with outcome, gate receipt, and proof |
@@ -132,6 +133,60 @@ When a transient network or server error prevents delivery, the SDK can retain t
 | `governanceTimeline(options)` | Inspect decisions, gates, proof packs, and outcomes |
 | `fleetLessons(options)` | Retrieve proven lessons authorized for the current tenant/agent |
 | `modelUsage(input)` | Record compact token, cost, and latency counts exposed by the harness |
+
+## Agent Disagreement Arbitration
+
+When agents propose conflicting next steps, pass both proposals through the
+existing runtime control plane before either agent acts. Marrow resolves agent
+identity and role from the authenticated tenant, weighs policy, evidence, prior
+outcomes, risk, and owner intent, then returns `selected`, `synthesized`,
+`review_required`, or `blocked` with a durable receipt.
+
+```ts
+const runtime = await marrow.arbitrate({
+  objective: 'Release the audited backend change safely',
+  owner_intent: 'Production deploys require independent audit proof',
+  proposals: [
+    {
+      proposal_id: 'deploy-now',
+      agent_id: 'jarvis',
+      action: 'Deploy the tested commit now',
+      risk_level: 'high',
+      evidence: [{ kind: 'test_result', reference: 'tests:1325' }],
+    },
+    {
+      proposal_id: 'audit-first',
+      agent_id: 'barvis',
+      action: 'Audit the exact commit, then release only if it passes',
+      evidence: [{ kind: 'audit_request', reference: 'audit:release' }],
+    },
+  ],
+});
+
+if (!runtime.arbitration) throw new Error('Marrow did not return an arbitration receipt');
+
+if (runtime.arbitration.resolution === 'review_required') {
+  console.log(runtime.arbitration.exact_next_action);
+}
+
+await marrow.commit({
+  decisionId: runtime.arbitration.decision_id,
+  success: true,
+  outcome: 'The governed proposal completed with verified evidence.',
+  gateReceiptId: runtime.gate_receipt?.id,
+  arbitrationReceiptId: runtime.arbitration.receipt_id,
+});
+```
+
+This calls `POST /v1/agent/runtime`; it does not introduce another API route.
+Proposal roles are never trusted from client input, raw prompts and evidence are
+not stored, and account-scoped receipts close with the normal outcome commit.
+Use `runtime.arbitration.decision_id`, `runtime.gate_receipt.id`, and
+`runtime.arbitration.receipt_id` from that same response. For
+`review_required`, an authenticated owner must approve in the Marrow dashboard;
+pass the resulting short-lived, single-use approval receipt to
+`commit({ ownerApprovalReceiptId })`. Caller-written approval flags are not
+accepted as owner authorization.
 
 ## Lifecycle Receipts and Decision Traces
 

@@ -50,12 +50,21 @@ npm install @getmarrow/sdk
 For automatic environment detection and setup, use the universal installer:
 
 ```bash
-npx @getmarrow/install --yes
+npx @getmarrow/install activate
 ```
 
-## What's New in v3.7.48
+## What's New in v3.7.49
 
-v3.7.48 adds typed agent-disagreement arbitration through the existing runtime control plane. `arbitrate()` accepts two to eight tenant-agent proposals and returns the normal runtime gate plus an explainable `selected`, `synthesized`, `review_required`, or `blocked` receipt. It preserves the machine-readable governance-fit contract introduced in v3.7.47 and the durable always-on lifecycle introduced in v3.7.44:
+v3.7.49 makes passive governance coverage measurable instead of assuming an installed SDK is active. `runGuarded()` now carries one stable correlation through the pre-action check, action result, and outcome closure. Lifecycle receipts include bounded adapter capability and configuration evidence, while intervention follow-through remains `unknown` unless the integration can prove it:
+
+- stable action correlation links the before/action/result/outcome lifecycle without storing raw work content;
+- passive receipts identify the adapter version, capability level, expected hook surfaces, observed hook, and one-way configuration fingerprint;
+- guarded runs emit a separate compact action-result receipt before outcome closure;
+- callers can report `followed`, `ignored`, or `overridden` only when they have evidence, avoiding invented effectiveness metrics;
+- the durable spool retains this metadata through transient delivery failures and remains bounded, owner-only, and idempotent;
+- existing lifecycle event inputs remain compatible.
+
+It preserves typed agent-disagreement arbitration from v3.7.48 and the durable always-on lifecycle introduced in v3.7.44:
 
 - GitHub and npm now advertise separate signed discovery placements;
 - package metadata identifies the SDK as runtime governance and proof rather than a general memory utility;
@@ -111,6 +120,8 @@ marrow.createPassiveRuntime().install();
 Supported wrappers call the one-call runtime before meaningful work and close outcomes after success or failure. Policy, proof, validation, and authentication failures are surfaced explicitly rather than retried blindly.
 
 When a transient network or server error prevents delivery, the SDK can retain the compact event in an owner-only local spool and retry it with the same event ID. The default spool is bounded to 100 records, written atomically, and stored with owner-only permissions.
+
+Marrow reports passive coverage only from observed receipts. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect activation and `npx @getmarrow/install --repair` when configuration drift is reported.
 
 ## Core Control Methods
 

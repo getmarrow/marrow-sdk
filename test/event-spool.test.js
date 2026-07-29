@@ -6,7 +6,35 @@ const { join, resolve } = require('node:path');
 const test = require('node:test');
 
 const { MarrowClient } = require('../dist/index.js');
-const { DurableEventSpool } = require('../dist/event-spool.js');
+const { DurableEventSpool, sanitizeLifecycleEvent } = require('../dist/event-spool.js');
+
+test('lifecycle receipts retain bounded activation, correlation, and intervention metadata', () => {
+  const record = sanitizeLifecycleEvent({
+    event_id: 'event-coverage-one',
+    event_type: 'outcome_committed',
+    harness: 'codex',
+    agent_id: 'agent-one',
+    action: 'governed task completed',
+    correlation_id: 'correlation-one',
+    adapter_version: '3.7.49',
+    capability_level: 'sdk_passive_runtime',
+    config_fingerprint: 'a'.repeat(64),
+    expected_hooks: ['pre_action', 'action_result', 'outcome_closure'],
+    observed_hook: 'outcome_closure',
+    intervention_disposition: 'followed',
+    action_changed: true,
+  });
+  assert.equal(record.correlation_id, 'correlation-one');
+  assert.equal(record.capability_level, 'sdk_passive_runtime');
+  assert.deepEqual(record.expected_hooks, ['pre_action', 'action_result', 'outcome_closure']);
+  assert.equal(record.intervention_disposition, 'followed');
+  assert.equal(record.action_changed, true);
+  assert.throws(() => sanitizeLifecycleEvent({
+    event_type: 'tool_completed',
+    action: 'invalid capability',
+    capability_level: 'magic',
+  }), /capability_level/);
+});
 
 test('lifecycle event spool survives restart, redacts action, and drains idempotently', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-spool-'));
@@ -205,7 +233,7 @@ test('lifecycle spool validates runtime fields and enforces privacy and byte bou
     assert.equal('decision_id' in adversarial, false);
     assert.equal(oversized.occurred_at, '2026-07-23T00:00:00.000Z');
     assert.equal('arbitrary_private_payload' in oversized, false);
-    assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') <= 2 * 1024);
+    assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') <= 4 * 1024);
 
     let byteLimitReached = false;
     for (let index = 0; index < 100; index += 1) {

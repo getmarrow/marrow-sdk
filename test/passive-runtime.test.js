@@ -159,6 +159,7 @@ test('runGuarded blocks when workflow gate denies high-risk action', async () =>
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);
   let executed = false;
+  const lifecycle = [];
 
   marrow.agentRuntime = async () => ({
     ok: true,
@@ -175,6 +176,10 @@ test('runGuarded blocks when workflow gate denies high-risk action', async () =>
   marrow.decisionBrief = async () => {
     throw new Error('decision brief should not run after a blocking gate');
   };
+  marrow.integrationEvent = async (input) => {
+    lifecycle.push(input);
+    return { accepted: true, queued: false, event_id: 'event_blocked', pending_spool_events: 0 };
+  };
 
   const result = await marrow.runGuarded({
     action: 'deploy to production',
@@ -189,12 +194,16 @@ test('runGuarded blocks when workflow gate denies high-risk action', async () =>
   assert.equal(result.blocked, true);
   assert.equal(result.gate.gate_event_id, 'gate_123');
   assert.equal(executed, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lifecycle.at(-1).intervention_disposition, 'followed');
+  assert.equal(lifecycle.at(-1).action_changed, true);
 });
 
 test('runGuarded uses one-call agent runtime before executing passive work', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);
   const order = [];
+  const lifecycle = [];
 
   marrow.agentRuntime = async (input) => {
     order.push(['runtime', input.action]);
@@ -271,6 +280,10 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
     order.push(['commit']);
     return { committed: true };
   };
+  marrow.integrationEvent = async (input) => {
+    lifecycle.push(input);
+    return { accepted: true, queued: false, event_id: 'event_allowed', pending_spool_events: 0 };
+  };
 
   const result = await marrow.runGuarded({
     action: 'publish package to npm',
@@ -297,6 +310,10 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   assert.equal(result.outcome_closed, true);
   assert.match(result.summary, /before-action directive applied/i);
   assert.deepEqual(order.map(([name]) => name), ['runtime', 'gate', 'think', 'execute', 'commit']);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lifecycle.at(-1).event_type, 'outcome_committed');
+  assert.equal('intervention_disposition' in lifecycle.at(-1), false);
+  assert.equal('action_changed' in lifecycle.at(-1), false);
 });
 
 test('runGuarded fails closed when mandatory outcome closure cannot commit', async () => {
@@ -604,6 +621,47 @@ test('quickStatus maps passive install health fields', async () => {
         repair_command: 'npx @getmarrow/install --yes',
         expectation: 'Every captured tool, command, deploy, and publish action should auto-commit success or failure through MCP PostToolUse hooks or SDK passive runtime wrappers.',
       },
+      activation_coverage: {
+        available: true,
+        status: 'active',
+        agent_id: 'codex-bob',
+        harness: 'codex',
+        activation: {
+          available: true,
+          active: true,
+          last_observed_at: '2026-05-08T01:00:00.000Z',
+          adapter_version: '3.7.49',
+          capability_level: 'sdk_passive_runtime',
+        },
+        capture_coverage: {
+          available: true,
+          status: 'complete',
+          expected_hooks: ['pre_action', 'tool_result', 'outcome'],
+          observed_hooks: ['pre_action', 'tool_result', 'outcome'],
+          expected_count: 3,
+          observed_count: 3,
+          rate: 1,
+        },
+        outcome_closure: {
+          available: true,
+          status: 'complete',
+          correlations: 4,
+          complete: 4,
+          incomplete: 0,
+          rate: 1,
+        },
+        intervention_effectiveness: {
+          available: true,
+          status: 'measured',
+          interventions: 2,
+          followed: 2,
+          ignored: 0,
+          overridden: 0,
+          action_changed: 1,
+          follow_through_rate: 1,
+        },
+        drift: { detected: false, reasons: [], repair_command: null },
+      },
       proof: {
         raw_data_exposed: false,
         last_event_at: '2026-05-08T01:00:00.000Z',
@@ -635,6 +693,9 @@ test('quickStatus maps passive install health fields', async () => {
   assert.equal(status.autoOutcomeClosure.enabled, true);
   assert.equal(status.autoOutcomeClosure.recent_coverage_24h, 1);
   assert.equal(status.autoOutcomeClosure.outcome_eligible_decisions, 9);
+  assert.equal(status.activationCoverage.capture_coverage.rate, 1);
+  assert.equal(status.activationCoverage.intervention_effectiveness.follow_through_rate, 1);
+  assert.equal(status.activationCoverage.drift.detected, false);
 });
 
 test('commit queues transient network failures and drains on next request', async () => {

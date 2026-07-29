@@ -14,7 +14,12 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import type { MarrowLifecycleEventInput, MarrowLifecycleEventType } from './types';
+import type {
+  MarrowIntegrationCapabilityLevel,
+  MarrowInterventionDisposition,
+  MarrowLifecycleEventInput,
+  MarrowLifecycleEventType,
+} from './types';
 
 export type SpoolDeliveryState = 'pending' | 'failed';
 export type SpoolFailureCode = 'terminal_rejection' | 'retry_exhausted';
@@ -28,6 +33,14 @@ export type SpoolRecord = {
   workflow_id?: string;
   session_id?: string;
   decision_id?: string;
+  correlation_id?: string;
+  adapter_version?: string;
+  capability_level?: MarrowIntegrationCapabilityLevel;
+  config_fingerprint?: string;
+  expected_hooks?: string[];
+  observed_hook?: string;
+  intervention_disposition?: MarrowInterventionDisposition;
+  action_changed?: boolean;
   risk_level?: 'low' | 'medium' | 'high';
   outcome_state?: 'pending' | 'closed' | 'unknown' | 'timed_out';
   success?: boolean;
@@ -66,6 +79,8 @@ const LIFECYCLE_EVENT_TYPES = new Set<MarrowLifecycleEventType>([
 ]);
 const RISK_LEVELS = new Set<NonNullable<SpoolRecord['risk_level']>>(['low', 'medium', 'high']);
 const OUTCOME_STATES = new Set<NonNullable<SpoolRecord['outcome_state']>>(['pending', 'closed', 'unknown', 'timed_out']);
+const CAPABILITY_LEVELS = new Set<MarrowIntegrationCapabilityLevel>(['native_hooks', 'mcp', 'sdk_passive_runtime', 'governed_wrapper', 'event_contract']);
+const INTERVENTION_DISPOSITIONS = new Set<MarrowInterventionDisposition>(['followed', 'ignored', 'overridden']);
 const DELIVERY_STATES = new Set<SpoolDeliveryState>(['pending', 'failed']);
 const FAILURE_CODES = new Set<SpoolFailureCode>(['terminal_rejection', 'retry_exhausted']);
 const RECORD_KEYS = new Set([
@@ -77,6 +92,14 @@ const RECORD_KEYS = new Set([
   'workflow_id',
   'session_id',
   'decision_id',
+  'correlation_id',
+  'adapter_version',
+  'capability_level',
+  'config_fingerprint',
+  'expected_hooks',
+  'observed_hook',
+  'intervention_disposition',
+  'action_changed',
   'risk_level',
   'outcome_state',
   'success',
@@ -87,7 +110,7 @@ const RECORD_KEYS = new Set([
   'failed_at',
 ]);
 const MAX_RECORDS = 100;
-const MAX_RECORD_BYTES = 2 * 1024;
+const MAX_RECORD_BYTES = 4 * 1024;
 const MAX_SPOOL_BYTES = 64 * 1024;
 const MAX_DELIVERY_ATTEMPTS = 3;
 const LOCK_WAIT_MS = 2_000;
@@ -142,6 +165,14 @@ function redactAction(value: unknown): string | undefined {
   return compact(redacted, 240);
 }
 
+function safeHookList(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 12) throw new TypeError('Invalid lifecycle expected_hooks');
+  const hooks = value.map((hook) => safeId(hook)).filter((hook): hook is string => Boolean(hook));
+  if (hooks.length !== value.length) throw new TypeError('Invalid lifecycle expected_hooks');
+  return [...new Set(hooks)];
+}
+
 function enumValue<T extends string>(
   value: unknown,
   allowed: Set<T>,
@@ -189,9 +220,15 @@ export function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolR
   const eventType = enumValue(input.event_type, LIFECYCLE_EVENT_TYPES, 'event_type')!;
   const riskLevel = enumValue(input.risk_level, RISK_LEVELS, 'risk_level', true);
   const outcomeState = enumValue(input.outcome_state, OUTCOME_STATES, 'outcome_state', true);
+  const capabilityLevel = enumValue(input.capability_level, CAPABILITY_LEVELS, 'capability_level', true);
+  const interventionDisposition = enumValue(input.intervention_disposition, INTERVENTION_DISPOSITIONS, 'intervention_disposition', true);
   if (input.success !== undefined && typeof input.success !== 'boolean') {
     throw new TypeError('Invalid lifecycle success');
   }
+  if (input.action_changed !== undefined && typeof input.action_changed !== 'boolean') {
+    throw new TypeError('Invalid lifecycle action_changed');
+  }
+  const expectedHooks = safeHookList(input.expected_hooks);
   const record: SpoolRecord = {
     event_id: safeId(input.event_id) || randomUUID(),
     event_type: eventType,
@@ -201,6 +238,14 @@ export function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolR
     ...(safeId(input.workflow_id) ? { workflow_id: safeId(input.workflow_id) } : {}),
     ...(safeId(input.session_id) ? { session_id: safeId(input.session_id) } : {}),
     ...(safeId(input.decision_id) ? { decision_id: safeId(input.decision_id) } : {}),
+    ...(safeId(input.correlation_id) ? { correlation_id: safeId(input.correlation_id) } : {}),
+    ...(safeId(input.adapter_version) ? { adapter_version: safeId(input.adapter_version) } : {}),
+    ...(capabilityLevel ? { capability_level: capabilityLevel } : {}),
+    ...(safeId(input.config_fingerprint) ? { config_fingerprint: safeId(input.config_fingerprint) } : {}),
+    ...(expectedHooks ? { expected_hooks: expectedHooks } : {}),
+    ...(safeId(input.observed_hook) ? { observed_hook: safeId(input.observed_hook) } : {}),
+    ...(interventionDisposition ? { intervention_disposition: interventionDisposition } : {}),
+    ...(typeof input.action_changed === 'boolean' ? { action_changed: input.action_changed } : {}),
     ...(riskLevel ? { risk_level: riskLevel } : {}),
     ...(outcomeState ? { outcome_state: outcomeState } : {}),
     ...(typeof input.success === 'boolean' ? { success: input.success } : {}),
@@ -223,6 +268,8 @@ function validateStoredRecord(value: unknown): SpoolRecord {
   const eventType = enumValue(raw.event_type, LIFECYCLE_EVENT_TYPES, 'event_type')!;
   const riskLevel = enumValue(raw.risk_level, RISK_LEVELS, 'risk_level', true);
   const outcomeState = enumValue(raw.outcome_state, OUTCOME_STATES, 'outcome_state', true);
+  const capabilityLevel = enumValue(raw.capability_level, CAPABILITY_LEVELS, 'capability_level', true);
+  const interventionDisposition = enumValue(raw.intervention_disposition, INTERVENTION_DISPOSITIONS, 'intervention_disposition', true);
   const deliveryState = enumValue(raw.delivery_state ?? 'pending', DELIVERY_STATES, 'delivery_state')!;
   const failureCode = enumValue(raw.failure_code, FAILURE_CODES, 'failure_code', true);
   const requiredId = (field: string): string => {
@@ -244,6 +291,10 @@ function validateStoredRecord(value: unknown): SpoolRecord {
   if (raw.success !== undefined && typeof raw.success !== 'boolean') {
     throw new TypeError('Invalid lifecycle success');
   }
+  if (raw.action_changed !== undefined && typeof raw.action_changed !== 'boolean') {
+    throw new TypeError('Invalid lifecycle action_changed');
+  }
+  const expectedHooks = safeHookList(raw.expected_hooks);
   const occurredAt = timestamp(raw.occurred_at, 'occurred_at')!;
   if (occurredAt !== raw.occurred_at) throw new TypeError('Invalid lifecycle occurred_at');
   const failedAt = timestamp(raw.failed_at, 'failed_at', true);
@@ -260,6 +311,14 @@ function validateStoredRecord(value: unknown): SpoolRecord {
     ...(optionalId('workflow_id') ? { workflow_id: optionalId('workflow_id') } : {}),
     ...(optionalId('session_id') ? { session_id: optionalId('session_id') } : {}),
     ...(optionalId('decision_id') ? { decision_id: optionalId('decision_id') } : {}),
+    ...(optionalId('correlation_id') ? { correlation_id: optionalId('correlation_id') } : {}),
+    ...(optionalId('adapter_version') ? { adapter_version: optionalId('adapter_version') } : {}),
+    ...(capabilityLevel ? { capability_level: capabilityLevel } : {}),
+    ...(optionalId('config_fingerprint') ? { config_fingerprint: optionalId('config_fingerprint') } : {}),
+    ...(expectedHooks ? { expected_hooks: expectedHooks } : {}),
+    ...(optionalId('observed_hook') ? { observed_hook: optionalId('observed_hook') } : {}),
+    ...(interventionDisposition ? { intervention_disposition: interventionDisposition } : {}),
+    ...(typeof raw.action_changed === 'boolean' ? { action_changed: raw.action_changed } : {}),
     ...(riskLevel ? { risk_level: riskLevel } : {}),
     ...(outcomeState ? { outcome_state: outcomeState } : {}),
     ...(typeof raw.success === 'boolean' ? { success: raw.success } : {}),

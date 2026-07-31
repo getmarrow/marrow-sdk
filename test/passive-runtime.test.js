@@ -344,6 +344,35 @@ test('runGuarded fails closed when mandatory outcome closure cannot commit', asy
   assert.match(result.summary, /outcome closure failed/i);
 });
 
+test('runGuarded never executes a protected action without a verified action-bound permit', async () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  let executed = false;
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'high' }, workflow: { recommended: 'owner-reviewed deploy' } },
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'high', reasons: [] },
+    proof_pack: { required: true, fields: ['deployment_and_smoke'] },
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'high', reasons: [] });
+  marrow.decisionBrief = async () => ({ risk: { level: 'high' }, workflow: { recommended: 'owner-reviewed deploy' } });
+  marrow.think = async () => ({ decisionId: 'decision-protected' });
+  marrow.commit = async () => ({ committed: true });
+  marrow.issueActionPermit = async () => { throw new Error('permit service unavailable'); };
+
+  const result = await marrow.runGuarded({
+    action: 'deploy production worker',
+    type: 'deploy',
+    riskPolicy: 'warn',
+    execute: () => { executed = true; return 'should not run'; },
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.permit_verified, false);
+  assert.equal(executed, false);
+  assert.match(result.summary, /required Marrow action permit was not verified/i);
+});
+
 test('runGuarded emits explicit failed outcome lifecycle closure after a successful commit', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);

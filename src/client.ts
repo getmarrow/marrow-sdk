@@ -86,6 +86,15 @@ import type {
   MarrowLifecycleEventInput,
   MarrowLifecycleEventResult,
   MarrowDecisionTraceResult,
+  MarrowActionPermitIssueInput,
+  MarrowActionPermitIssueResult,
+  MarrowActionPermitPublic,
+  MarrowActionPermitVerifyInput,
+  MarrowActionPermitVerifyResult,
+  MarrowActionPermitCloseInput,
+  MarrowActionPermitCloseResult,
+  MarrowEnforcementHeartbeatInput,
+  MarrowEnforcementCoverageResult,
 } from './types';
 import { DurableEventSpool, isSafeLifecycleIdentifier, sanitizeLifecycleEvent } from './event-spool';
 
@@ -636,6 +645,19 @@ function runtimeGateReceiptId(runtime: MarrowAgentRuntimeResult | null): string 
   return runtime.gate_receipt?.id || runtime.gate_receipt_id || null;
 }
 
+function publicActionPermit(permit: MarrowActionPermitIssueResult | null): MarrowActionPermitPublic | null {
+  if (!permit) return null;
+  return {
+    permit_id: permit.permit_id,
+    decision: permit.decision,
+    expires_at: permit.expires_at,
+    action_hash: permit.action_hash,
+    target_hash: permit.target_hash,
+    required_proof: permit.required_proof || [],
+    break_glass: Boolean(permit.break_glass),
+  };
+}
+
 function buildOutcomeProof(input: {
   action: string;
   success: boolean;
@@ -1072,6 +1094,9 @@ export class MarrowClient {
     let decisionId: string | null = null;
     let commit: MarrowCommitResult | null = null;
     let valueReport: MarrowValueReportResult | null = null;
+    let actionPermit: MarrowActionPermitIssueResult | null = null;
+    let permitVerified = false;
+    let permitClosed = false;
     let beforeActionDirective: MarrowGuardedRunResult<T>['before_action_directive'] = null;
     const lifecycleCorrelation = lifecycleCorrelationId(options.correlationId);
     const lifecycleBase = {
@@ -1378,6 +1403,77 @@ export class MarrowClient {
         outcome_state: 'pending',
       });
 
+      const permitRequired = options.requireActionPermit
+        ?? (riskPolicy === 'block_high'
+        || runtime?.risk_gate?.risk_level === 'high'
+        || runtime?.risk_gate?.decision === 'review_required'
+        || runtime?.proof_pack?.required === true
+        || brief?.risk.level === 'high');
+      if (riskPolicy !== 'off' || permitRequired) {
+        try {
+          actionPermit = await this.issueActionPermit({
+            action: safeAction,
+            action_type: options.type || 'general',
+            target: options.actionTarget || safeAction,
+            surfaces: options.surfaces || [],
+            decision_id: decisionId,
+            gate_receipt_id: runtimeGateReceiptId(runtime),
+            owner_approval_receipt_id: options.ownerApprovalReceiptId || null,
+            proof_requirements: runtime?.proof_pack?.fields || [],
+            policy_mode: riskPolicy === 'block_high' ? 'enforce' : 'warn',
+          });
+          const verified = await this.verifyActionPermit({
+            permit: actionPermit.permit,
+            action: safeAction,
+            action_type: options.type || 'general',
+            target: options.actionTarget || safeAction,
+          });
+          permitVerified = verified.verified === true;
+          if (!permitVerified) throw new Error('Marrow action permit verification failed');
+        } catch (error) {
+          if (permitRequired) {
+            const publicError = safePublicErrorMessage(error);
+            try {
+              commit = await this.commit({
+                decisionId,
+                success: false,
+                outcome: `Protected action did not execute because its Marrow permit was unavailable: ${publicError}`,
+                gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
+                proof: buildOutcomeProof({
+                  action: safeAction,
+                  success: false,
+                  outcome: 'Action blocked before execution because permit verification did not complete.',
+                  runtime,
+                  gate,
+                }),
+              });
+            } catch {}
+            return {
+              ok: false,
+              blocked: true,
+              error: publicError,
+              failure_type: 'policy_block',
+              decision_id: decisionId,
+              brief,
+              runtime,
+              gate,
+              commit,
+              value_report: null,
+              outcome_closure_required: requireOutcomeClosure,
+              outcome_closed: Boolean(commit),
+              outcome_commit_error: commit ? null : 'permit failure outcome did not close',
+              before_action_enforced: true,
+              before_action_directive: beforeActionDirective,
+              action_permit: publicActionPermit(actionPermit),
+              permit_verified: false,
+              permit_closed: false,
+              summary: `Blocked before execution because the required Marrow action permit was not verified: ${publicError}`,
+            };
+          }
+          process.stderr.write(`[marrow] Warning: advisory action permit unavailable: ${safePublicErrorMessage(error)}\n`);
+        }
+      }
+
       let result: T;
       try {
         result = await options.execute();
@@ -1407,6 +1503,18 @@ export class MarrowClient {
           } catch (commitError) {
             process.stderr.write(`[marrow] Warning: guarded run failure commit failed: ${safePublicErrorMessage(commitError)}\n`);
           }
+        }
+        if (actionPermit?.permit) {
+          try {
+            const closure = await this.closeActionPermit({
+              permit: actionPermit.permit,
+              permit_id: actionPermit.permit_id,
+              decision_id: decisionId,
+              success: false,
+              evidence: buildOutcomeProof({ action: safeAction, success: false, outcome: publicError, runtime, gate }),
+            });
+            permitClosed = closure.closed === true;
+          } catch {}
         }
         this.captureLifecycleEvent({
           ...lifecycleBase,
@@ -1439,6 +1547,9 @@ export class MarrowClient {
           outcome_commit_error: commit ? null : 'failure outcome commit did not complete',
           before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
           before_action_directive: beforeActionDirective,
+          action_permit: publicActionPermit(actionPermit),
+          permit_verified: permitVerified,
+          permit_closed: permitClosed,
           summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
         };
       }
@@ -1468,6 +1579,22 @@ export class MarrowClient {
         commitErrorMessage = safePublicErrorMessage(error);
         process.stderr.write(`[marrow] Warning: guarded run success commit failed: ${commitErrorMessage}\n`);
       }
+      if (actionPermit?.permit) {
+        try {
+          const closure = await this.closeActionPermit({
+            permit: actionPermit.permit,
+            permit_id: actionPermit.permit_id,
+            decision_id: decisionId,
+            success: true,
+            evidence: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
+          });
+          permitClosed = closure.closed === true;
+        } catch (error) {
+          if (permitRequired) {
+            commitErrorMessage = commitErrorMessage || `Action permit closure failed: ${safePublicErrorMessage(error)}`;
+          }
+        }
+      }
       this.captureLifecycleEvent({
         ...lifecycleBase,
         event_type: commit ? 'outcome_committed' : 'workflow_completed',
@@ -1491,12 +1618,12 @@ export class MarrowClient {
         }
       }
 
-      if (requireOutcomeClosure && !commit) {
+      if (requireOutcomeClosure && (!commit || (permitRequired && actionPermit && !permitClosed))) {
         return {
           ok: false,
           blocked: false,
           result,
-          error: commitErrorMessage || 'Marrow outcome commit did not complete',
+          error: commitErrorMessage || (commit ? 'Marrow action permit did not close' : 'Marrow outcome commit did not complete'),
           failure_type: 'outcome_commit_failed',
           decision_id: decisionId,
           brief,
@@ -1505,11 +1632,14 @@ export class MarrowClient {
           commit,
           value_report: valueReport,
           outcome_closure_required: true,
-          outcome_closed: false,
-          outcome_commit_error: commitErrorMessage || 'unknown outcome commit error',
+          outcome_closed: Boolean(commit && (!actionPermit || permitClosed)),
+          outcome_commit_error: commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error'),
           before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
           before_action_directive: beforeActionDirective,
-          summary: `Action completed, but Marrow outcome closure failed: ${commitErrorMessage || 'unknown outcome commit error'}. Do not mark complete until outcome closure is repaired.`,
+          action_permit: publicActionPermit(actionPermit),
+          permit_verified: permitVerified,
+          permit_closed: permitClosed,
+          summary: `Action completed, but Marrow outcome closure failed: ${commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error')}. Do not mark complete until closure is repaired.`,
         };
       }
 
@@ -1529,6 +1659,9 @@ export class MarrowClient {
         outcome_commit_error: commitErrorMessage,
         before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
         before_action_directive: beforeActionDirective,
+        action_permit: publicActionPermit(actionPermit),
+        permit_verified: permitVerified,
+        permit_closed: permitClosed,
         summary: commitErrorMessage
           ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
           : beforeActionDirective?.message
@@ -2330,6 +2463,62 @@ export class MarrowClient {
   async modelUsage(params: MarrowModelUsageInput): Promise<MarrowModelUsageResult> {
     const res = await this.request('POST', '/v1/agent/model-usage', this.normalizeModelUsage(params));
     return (res.data ?? res) as MarrowModelUsageResult;
+  }
+
+  async issueActionPermit(params: MarrowActionPermitIssueInput): Promise<MarrowActionPermitIssueResult> {
+    const res = await this.request('POST', '/v1/agent/enforcement', {
+      operation: 'issue',
+      ...redactSensitiveValue(params) as Record<string, unknown>,
+      agent_id: this.agentId,
+      session_id: this.sessionId,
+      harness: defaultSourceClient(),
+    });
+    return (res.data ?? res) as MarrowActionPermitIssueResult;
+  }
+
+  async verifyActionPermit(params: MarrowActionPermitVerifyInput): Promise<MarrowActionPermitVerifyResult> {
+    const res = await this.request('POST', '/v1/agent/enforcement', {
+      operation: 'verify',
+      permit: params.permit,
+      action: redactSensitiveText(params.action),
+      action_type: params.action_type,
+      target: params.target ? redactSensitiveText(params.target) : undefined,
+      agent_id: this.agentId,
+      session_id: this.sessionId,
+      harness: defaultSourceClient(),
+    });
+    return (res.data ?? res) as MarrowActionPermitVerifyResult;
+  }
+
+  async closeActionPermit(params: MarrowActionPermitCloseInput): Promise<MarrowActionPermitCloseResult> {
+    const res = await this.request('POST', '/v1/agent/enforcement', {
+      operation: 'close',
+      permit: params.permit,
+      permit_id: params.permit_id,
+      decision_id: params.decision_id,
+      success: params.success,
+      evidence: redactSensitiveValue(params.evidence),
+      agent_id: this.agentId,
+      session_id: this.sessionId,
+    });
+    return (res.data ?? res) as MarrowActionPermitCloseResult;
+  }
+
+  async enforcementHeartbeat(params: MarrowEnforcementHeartbeatInput = {}): Promise<Record<string, unknown>> {
+    const res = await this.request('POST', '/v1/agent/enforcement', {
+      operation: 'heartbeat',
+      ...params,
+      agent_id: this.agentId,
+      session_id: this.sessionId,
+      harness: params.harness || defaultSourceClient(),
+    });
+    return (res.data ?? res) as Record<string, unknown>;
+  }
+
+  async enforcementCoverage(): Promise<MarrowEnforcementCoverageResult> {
+    const query = this.agentId ? `?agent_id=${encodeURIComponent(this.agentId)}` : '';
+    const res = await this.request('GET', `/v1/agent/enforcement${query}`);
+    return (res.data ?? res) as MarrowEnforcementCoverageResult;
   }
 
   async orient(params?: { taskType?: string; autoWarn?: boolean }): Promise<MarrowOrientResult> {

@@ -250,6 +250,12 @@ export interface MarrowGuardedRunOptions<T> {
     correlationId?: string;
     interventionDisposition?: MarrowInterventionDisposition;
     actionChanged?: boolean;
+    /** Require a server-issued, action-bound permit before execute() is called. */
+    requireActionPermit?: boolean;
+    /** Optional protected resource binding, for example repository:environment. */
+    actionTarget?: string;
+    /** Server-issued owner approval receipt for review-required actions. */
+    ownerApprovalReceiptId?: string;
 }
 export interface MarrowGuardedRunResult<T> {
     ok: boolean;
@@ -267,6 +273,9 @@ export interface MarrowGuardedRunResult<T> {
     outcome_closed?: boolean;
     outcome_commit_error?: string | null;
     before_action_enforced?: boolean;
+    action_permit?: MarrowActionPermitPublic | null;
+    permit_verified?: boolean;
+    permit_closed?: boolean;
     before_action_directive?: {
         required: boolean;
         must_use_before_action: boolean;
@@ -286,6 +295,74 @@ export interface MarrowGuardedRunResult<T> {
         untrusted_memory_excerpt?: string | null;
     } | null;
     summary: string;
+}
+export type MarrowEnforcementOperation = 'issue' | 'verify' | 'close' | 'heartbeat';
+export interface MarrowActionPermitIssueInput {
+    action: string;
+    action_type?: string;
+    target?: string;
+    surfaces?: string[];
+    decision_id?: string | null;
+    gate_receipt_id?: string | null;
+    owner_approval_receipt_id?: string | null;
+    proof_requirements?: string[];
+    policy_mode?: 'enforce' | 'warn' | 'audit';
+}
+export interface MarrowActionPermitPublic {
+    permit_id: string;
+    decision: 'allow' | 'warn' | 'review_required' | 'block' | 'break_glass';
+    expires_at: string;
+    action_hash: string;
+    target_hash: string;
+    required_proof: string[];
+    break_glass: boolean;
+}
+export interface MarrowActionPermitIssueResult extends MarrowActionPermitPublic {
+    permit: string;
+}
+export interface MarrowActionPermitVerifyInput {
+    permit: string;
+    action: string;
+    action_type?: string;
+    target?: string;
+}
+export interface MarrowActionPermitVerifyResult {
+    verified: boolean;
+    permit: MarrowActionPermitPublic;
+    credential_capability: {
+        eligible: boolean;
+        scope: string[];
+        rule: string;
+    };
+}
+export interface MarrowActionPermitCloseInput {
+    permit: string;
+    permit_id?: string;
+    decision_id?: string | null;
+    success: boolean;
+    evidence: Record<string, unknown>;
+}
+export interface MarrowActionPermitCloseResult {
+    closed: boolean;
+    permit_id: string;
+    proof_complete: boolean;
+    missing_proof: string[];
+}
+export interface MarrowEnforcementHeartbeatInput {
+    harness?: string;
+    sidecar_instance_id?: string | null;
+    config_fingerprint?: string | null;
+    expected_hooks?: string[];
+    observed_hooks?: string[];
+}
+export interface MarrowEnforcementCoverageResult {
+    generated_at: string;
+    status: 'pass' | 'warn' | 'block' | 'unavailable';
+    enforcement: Record<string, unknown>;
+    hook_health: Record<string, unknown>;
+    outcome_closure: Record<string, unknown>;
+    bypasses: Record<string, unknown>;
+    exact_fix: string | null;
 }
 export interface MarrowOrientResult {
     warnings: Array<{

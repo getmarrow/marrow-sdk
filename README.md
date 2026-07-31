@@ -65,9 +65,9 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.50
+## What's New in v3.7.51
 
-v3.7.50 lets the hosted Marrow service recognize the installed SDK version during authenticated activity and return a typed, request-specific `client_update` advisory. This makes new features, compatibility improvements, and published security guidance visible inside an agent's normal workflow without silently changing local packages or configuration:
+v3.7.51 combines operator-controlled client update advisories with an action-permit boundary for protected work. The hosted service can identify an installed SDK version and return a typed, request-specific `client_update` advisory without silently changing local packages or configuration:
 
 - authenticated SDK requests identify the official package and installed version with bounded headers;
 - typed status and passive-runtime responses expose the server's update advisory;
@@ -75,7 +75,17 @@ v3.7.50 lets the hosted Marrow service recognize the installed SDK version durin
 - detection and notification are automatic, while package or configuration changes remain explicit and policy-controlled;
 - older servers and clients remain compatible when no advisory is returned.
 
-It preserves the measurable passive governance coverage introduced in v3.7.49. `runGuarded()` carries one stable correlation through the pre-action check, action result, and outcome closure. Lifecycle receipts include bounded adapter capability and configuration evidence, while intervention follow-through remains `unknown` unless the integration can prove it:
+Before `execute()` runs, `runGuarded()` binds the runtime gate to the governed decision, obtains a short-lived signed permit for the exact account, key, agent, session, action, target, and canonical action surfaces, and verifies it once. After execution it closes the permit with exact evidence and the real outcome:
+
+- high-risk, review-required, proof-required, and `block_high` work fails closed if permit verification fails;
+- permits cannot be replayed across agents, sessions, actions, targets, surfaces, decisions, or runtime gates;
+- failures before execution are recorded as non-executed outcomes rather than silently bypassed;
+- action result and outcome receipts can auto-close matching permits;
+- `enforcementHeartbeat()` reports hook/configuration integrity without uploading raw configuration;
+- `enforcementCoverage()` reports permit completion, bypasses, sidecar freshness, and exact repair steps;
+- lower-risk advisory mode remains available, while callers can set `requireActionPermit: true` for any action.
+
+It preserves the measurable passive-governance coverage introduced in v3.7.49:
 
 - stable action correlation links the before/action/result/outcome lifecycle without storing raw work content;
 - passive receipts identify the adapter version, capability level, expected hook surfaces, observed hook, and one-way configuration fingerprint;
@@ -121,7 +131,7 @@ if (result.blocked) {
 }
 ```
 
-`runGuarded()` obtains the runtime and workflow gates, records intent, prevents execution when strict policy blocks it, and commits the success or failure outcome with a standard proof pack. Use the lower-level `agentRuntime()`, `think()`, and `commit()` methods only when your integration implements the same gate and closure discipline explicitly.
+`runGuarded()` obtains the runtime and workflow gates, records intent, issues and verifies an action-bound permit when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome with a standard proof pack. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration implements the same gate, binding, and closure discipline explicitly.
 
 ## Passive Runtime
 
@@ -153,6 +163,11 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | `think(input)` | Record intent and retrieve governance intelligence |
 | `commit(input)` | Close work with outcome, gate receipt, and proof |
 | `runGuarded(input)` | Execute a callback through the runtime gate and automatic closure |
+| `issueActionPermit(input)` | Issue a short-lived permit bound to an existing runtime gate and decision |
+| `verifyActionPermit(input)` | Verify and consume the same permit immediately before execution |
+| `closeActionPermit(input)` | Close a consumed permit with evidence and the real outcome |
+| `enforcementHeartbeat(input)` | Report expected/observed hook and configuration integrity |
+| `enforcementCoverage()` | Inspect permit closure, bypass, sidecar, and hook coverage |
 | `integrationEvent(input)` | Record a compact passive lifecycle receipt through the durable local spool |
 | `decisionTrace(decisionId)` | Inspect the tenant-scoped causal path behind a governed decision |
 | `workflowGate(input)` | Evaluate a workflow action against policy |

@@ -69,6 +69,12 @@ test('guarded run drains receipts queued during an active pass and hashes a priv
     marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
     marrow.think = async () => ({ decisionId: 'decision-active-drain' });
     marrow.commit = async () => ({ committed: true });
+    marrow.issueActionPermit = async () => ({
+      permit: 'opaque-permit', permit_id: 'permit-1', decision: 'allow', expires_at: new Date(Date.now() + 60_000).toISOString(),
+      action_hash: 'a'.repeat(64), target_hash: 'b'.repeat(64), required_proof: [], break_glass: false,
+    });
+    marrow.verifyActionPermit = async () => ({ verified: true, permit: {}, credential_capability: {} });
+    marrow.closeActionPermit = async () => ({ closed: true, permit_id: 'permit-1', proof_complete: true, missing_proof: [] });
 
     const result = await marrow.runGuarded({
       action: 'complete one guarded task',

@@ -717,6 +717,45 @@ test('quickStatus makes legacy drift availability explicitly unavailable', async
   assert.deepEqual(status.activationCoverage.drift.reasons, []);
 });
 
+test('SDK identifies its package version and exposes the server update advisory', async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedHeaders;
+  globalThis.fetch = async (_url, options) => {
+    capturedHeaders = options.headers;
+    return new Response(JSON.stringify({
+      data: {
+        ok: true,
+        client_update: {
+          package: '@getmarrow/sdk',
+          installed_version: '3.7.49',
+          latest_version: '3.7.50',
+          version_status: 'behind',
+          update_available: true,
+          notification_state: 'recommended',
+          metadata_status: 'accepted',
+          automatic_detection: true,
+          automatic_local_mutation: false,
+          operator_approval_expected: true,
+          update_command: 'npm install @getmarrow/sdk@latest',
+          verification_command: 'npx @getmarrow/install@latest doctor',
+          security_policy: { source: 'none', minimum_secure_version: null },
+        },
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key');
+    const status = await marrow.quickStatus();
+    assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
+    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.49');
+    assert.equal(status.clientUpdate.update_available, true);
+    assert.equal(status.clientUpdate.update_command, 'npm install @getmarrow/sdk@latest');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('commit queues transient network failures and drains on next request', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const originalFetch = globalThis.fetch;

@@ -617,6 +617,26 @@ export interface MarrowActivationCoverage {
   updated_at?: string;
 }
 
+export interface MarrowClientUpdateAdvisory {
+  package: '@getmarrow/install' | '@getmarrow/sdk' | '@getmarrow/mcp' | null;
+  installed_version: string | null;
+  latest_version: string | null;
+  version_status: 'unknown' | 'behind' | 'current' | 'ahead';
+  update_available: boolean | null;
+  notification_state: 'unknown' | 'none' | 'recommended' | 'security_required';
+  metadata_status: 'accepted' | 'missing' | 'invalid_version' | 'untrusted_package';
+  automatic_detection: true;
+  automatic_local_mutation: false;
+  operator_approval_expected: true;
+  update_command: string | null;
+  verification_command: string;
+  security_policy: {
+    source: 'none' | 'server_policy';
+    minimum_secure_version: string | null;
+  };
+  [key: string]: unknown;
+}
+
 export interface MarrowQuickStatusResult {
   ok: boolean;
   enabled: boolean;
@@ -714,6 +734,7 @@ export interface MarrowQuickStatusResult {
     exact_next_action?: string;
     [key: string]: unknown;
   } | null;
+  clientUpdate?: MarrowClientUpdateAdvisory | null;
   proof: {
     raw_data_exposed: false;
     last_event_at: string | null;
@@ -1516,6 +1537,7 @@ export interface MarrowAgentRuntimeResult {
   };
   exact_next_action: string | null;
   auto_outcome_closure: Record<string, unknown> | null;
+  client_update?: MarrowClientUpdateAdvisory | null;
 }
 
 export type MarrowFleetLessonType = 'success' | 'failure' | 'deploy' | 'incident' | 'handoff' | 'general';

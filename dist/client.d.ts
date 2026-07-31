@@ -75,6 +75,8 @@ export declare class MarrowClient {
     wrapHandoff<T>(action: string, fn: () => Promise<T> | T, meta?: Omit<MarrowActionMeta, 'action' | 'chokePoint' | 'actionClass' | 'external' | 'meaningful'>): Promise<T>;
     think(params: {
         action: string;
+        target?: string;
+        surfaces?: string[];
         type?: string;
         context?: Record<string, unknown>;
         previousSuccess?: boolean;

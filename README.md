@@ -53,6 +53,18 @@ For automatic environment detection and setup, use the universal installer:
 npx @getmarrow/install activate
 ```
 
+## Keeping the SDK Current
+
+Marrow's hosted API, website, and dashboard update automatically; your project's SDK dependency and generated passive runtime do not silently rewrite themselves. Keeping them current delivers new client-side features, compatibility improvements, and any published security fixes. Supported clients report their package version during authenticated status/runtime activity, and Marrow returns a `client_update` notice with the exact action when the version is behind or unknown.
+
+```bash
+npm install @getmarrow/sdk@latest
+npx -y @getmarrow/install@latest activate
+npx -y @getmarrow/install@latest doctor
+```
+
+Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
+
 ## What's New in v3.7.49
 
 v3.7.49 makes passive governance coverage measurable instead of assuming an installed SDK is active. `runGuarded()` now carries one stable correlation through the pre-action check, action result, and outcome closure. Lifecycle receipts include bounded adapter capability and configuration evidence, while intervention follow-through remains `unknown` unless the integration can prove it:

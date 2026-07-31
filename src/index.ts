@@ -79,6 +79,7 @@ export type {
   MarrowModelUsageResult,
   MarrowTokenValueSignal,
   MarrowAskResult,
+  MarrowClientUpdateAdvisory,
   MarrowQuickStatusResult,
   ActionableInsight,
   MarrowDashboardResult,

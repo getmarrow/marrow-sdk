@@ -2168,6 +2168,7 @@ class MarrowClient {
             nextAction: data.next_action || null,
             autoOutcomeClosure: data.auto_outcome_closure || null,
             tokenCapture: data.token_capture || null,
+            clientUpdate: data.client_update || null,
             proof: data.proof || null,
             failureReasons: Array.isArray(data.failure_reasons) ? data.failure_reasons : [],
             agentWarnings: Array.isArray(data.agent_warnings) ? data.agent_warnings : [],
@@ -2811,6 +2812,8 @@ class MarrowClient {
             headers['X-Marrow-Agent-Id'] = this.agentId;
         }
         headers['X-Marrow-Client'] = defaultSourceClient();
+        headers['X-Marrow-Package'] = '@getmarrow/sdk';
+        headers['X-Marrow-Package-Version'] = SDK_ADAPTER_VERSION;
         const res = await fetch(url, {
             method,
             headers,

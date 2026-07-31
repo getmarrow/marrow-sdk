@@ -1069,6 +1069,7 @@ export type MarrowDecisionBriefRole = 'deploy' | 'audit' | 'patch' | 'review' | 
 export type MarrowDecisionBriefRiskLevel = 'low' | 'medium' | 'high';
 export interface MarrowDecisionBriefRequest {
     action: string;
+    target?: string;
     type?: string;
     agent_id?: string;
     session_id?: string;

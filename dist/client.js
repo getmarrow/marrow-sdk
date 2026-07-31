@@ -868,6 +868,7 @@ class MarrowClient {
         let actionPermit = null;
         let permitVerified = false;
         let permitClosed = false;
+        let permitCloseErrorMessage = null;
         let beforeActionDirective = null;
         const lifecycleCorrelation = lifecycleCorrelationId(options.correlationId);
         const lifecycleBase = {
@@ -881,6 +882,7 @@ class MarrowClient {
             try {
                 runtime = await this.agentRuntime({
                     action: safeAction,
+                    target: options.actionTarget || safeAction,
                     type: options.type,
                     role: options.role,
                     surfaces: options.surfaces,
@@ -1128,6 +1130,8 @@ class MarrowClient {
         try {
             const think = await this.think({
                 action: safeAction,
+                target: options.actionTarget || safeAction,
+                surfaces: options.surfaces || [],
                 type: options.type || 'general',
                 context: {
                     ...safeContext,
@@ -1170,11 +1174,12 @@ class MarrowClient {
                 outcome_state: 'pending',
             });
             const permitRequired = options.requireActionPermit
-                ?? (riskPolicy === 'block_high'
-                    || runtime?.risk_gate?.risk_level === 'high'
+                ?? (runtime?.risk_gate?.risk_level === 'high'
                     || runtime?.risk_gate?.decision === 'review_required'
+                    || runtime?.risk_gate?.decision === 'block'
                     || runtime?.proof_pack?.required === true
-                    || brief?.risk.level === 'high');
+                    || brief?.risk.level === 'high'
+                    || isHighRiskPassiveAction(safeAction, options.surfaces));
             if (riskPolicy !== 'off' || permitRequired) {
                 try {
                     actionPermit = await this.issueActionPermit({
@@ -1284,17 +1289,23 @@ class MarrowClient {
                             evidence: buildOutcomeProof({ action: safeAction, success: false, outcome: publicError, runtime, gate }),
                         });
                         permitClosed = closure.closed === true;
+                        if (!permitClosed)
+                            permitCloseErrorMessage = 'Marrow action permit close was not acknowledged';
                     }
-                    catch { }
+                    catch (closeError) {
+                        permitCloseErrorMessage = safePublicErrorMessage(closeError);
+                        process.stderr.write(`[marrow] Warning: guarded run failure permit close failed: ${permitCloseErrorMessage}\n`);
+                    }
                 }
+                const failureOutcomeClosed = Boolean(commit && (!actionPermit?.permit || permitClosed));
                 this.captureLifecycleEvent({
                     ...lifecycleBase,
-                    event_type: commit ? 'outcome_committed' : 'workflow_completed',
-                    observed_hook: commit ? 'outcome_closure' : 'action_result',
+                    event_type: failureOutcomeClosed ? 'outcome_committed' : 'workflow_completed',
+                    observed_hook: failureOutcomeClosed ? 'outcome_closure' : 'action_result',
                     action: safeAction,
                     decision_id: decisionId || undefined,
                     risk_level: runtime?.risk_gate?.risk_level,
-                    outcome_state: commit ? 'closed' : 'pending',
+                    outcome_state: failureOutcomeClosed ? 'closed' : 'pending',
                     success: false,
                     ...(options.interventionDisposition ? {
                         intervention_disposition: options.interventionDisposition,
@@ -1313,14 +1324,22 @@ class MarrowClient {
                     commit,
                     value_report: null,
                     outcome_closure_required: requireOutcomeClosure,
-                    outcome_closed: Boolean(commit),
-                    outcome_commit_error: commit ? null : 'failure outcome commit did not complete',
+                    outcome_closed: failureOutcomeClosed,
+                    outcome_commit_error: !commit
+                        ? 'failure outcome commit did not complete'
+                        : permitCloseErrorMessage
+                            ? `action permit closure failed: ${permitCloseErrorMessage}`
+                            : actionPermit?.permit && !permitClosed
+                                ? 'action permit closure incomplete'
+                                : null,
                     before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
                     before_action_directive: beforeActionDirective,
                     action_permit: publicActionPermit(actionPermit),
                     permit_verified: permitVerified,
                     permit_closed: permitClosed,
-                    summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
+                    summary: failureOutcomeClosed
+                        ? `Marrow guarded run failed and classified the failure as ${failureType}; its outcome and permit are closed.`
+                        : `Marrow guarded run failed and classified the failure as ${failureType}; closure remains incomplete and must be repaired.`,
                 };
             }
             this.captureLifecycleEvent({
@@ -1358,21 +1377,23 @@ class MarrowClient {
                         evidence: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
                     });
                     permitClosed = closure.closed === true;
+                    if (!permitClosed)
+                        permitCloseErrorMessage = 'Marrow action permit close was not acknowledged';
                 }
                 catch (error) {
-                    if (permitRequired) {
-                        commitErrorMessage = commitErrorMessage || `Action permit closure failed: ${safePublicErrorMessage(error)}`;
-                    }
+                    permitCloseErrorMessage = safePublicErrorMessage(error);
+                    commitErrorMessage = commitErrorMessage || `Action permit closure failed: ${permitCloseErrorMessage}`;
                 }
             }
+            const successOutcomeClosed = Boolean(commit && (!actionPermit?.permit || permitClosed));
             this.captureLifecycleEvent({
                 ...lifecycleBase,
-                event_type: commit ? 'outcome_committed' : 'workflow_completed',
-                observed_hook: commit ? 'outcome_closure' : 'action_result',
+                event_type: successOutcomeClosed ? 'outcome_committed' : 'workflow_completed',
+                observed_hook: successOutcomeClosed ? 'outcome_closure' : 'action_result',
                 action: safeAction,
                 decision_id: decisionId || undefined,
                 risk_level: runtime?.risk_gate?.risk_level,
-                outcome_state: commit ? 'closed' : 'pending',
+                outcome_state: successOutcomeClosed ? 'closed' : 'pending',
                 success: true,
                 ...(options.interventionDisposition ? {
                     intervention_disposition: options.interventionDisposition,
@@ -1387,7 +1408,7 @@ class MarrowClient {
                     process.stderr.write(`[marrow] Warning: guarded run value report failed: ${safePublicErrorMessage(reportError)}\n`);
                 }
             }
-            if (requireOutcomeClosure && (!commit || (permitRequired && actionPermit && !permitClosed))) {
+            if (requireOutcomeClosure && !successOutcomeClosed) {
                 return {
                     ok: false,
                     blocked: false,
@@ -1401,7 +1422,7 @@ class MarrowClient {
                     commit,
                     value_report: valueReport,
                     outcome_closure_required: true,
-                    outcome_closed: Boolean(commit && (!actionPermit || permitClosed)),
+                    outcome_closed: successOutcomeClosed,
                     outcome_commit_error: commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error'),
                     before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
                     before_action_directive: beforeActionDirective,
@@ -1423,7 +1444,7 @@ class MarrowClient {
                 commit,
                 value_report: valueReport,
                 outcome_closure_required: requireOutcomeClosure,
-                outcome_closed: Boolean(commit),
+                outcome_closed: successOutcomeClosed,
                 outcome_commit_error: commitErrorMessage,
                 before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
                 before_action_directive: beforeActionDirective,
@@ -1455,6 +1476,24 @@ class MarrowClient {
                     process.stderr.write(`[marrow] Warning: guarded run commit failed: ${safePublicErrorMessage(commitError)}\n`);
                 }
             }
+            if (actionPermit?.permit && !permitClosed) {
+                try {
+                    const closure = await this.closeActionPermit({
+                        permit: actionPermit.permit,
+                        permit_id: actionPermit.permit_id,
+                        decision_id: decisionId,
+                        success: false,
+                        evidence: buildOutcomeProof({ action: safeAction, success: false, outcome: publicError, runtime, gate }),
+                    });
+                    permitClosed = closure.closed === true;
+                    if (!permitClosed)
+                        permitCloseErrorMessage = 'Marrow action permit close was not acknowledged';
+                }
+                catch (closeError) {
+                    permitCloseErrorMessage = safePublicErrorMessage(closeError);
+                }
+            }
+            const outerFailureClosed = Boolean(commit && (!actionPermit?.permit || permitClosed));
             return {
                 ok: false,
                 blocked: false,
@@ -1467,11 +1506,22 @@ class MarrowClient {
                 commit,
                 value_report: null,
                 outcome_closure_required: requireOutcomeClosure,
-                outcome_closed: Boolean(commit),
-                outcome_commit_error: commit ? null : 'failure outcome commit did not complete',
+                outcome_closed: outerFailureClosed,
+                outcome_commit_error: !commit
+                    ? 'failure outcome commit did not complete'
+                    : permitCloseErrorMessage
+                        ? `action permit closure failed: ${permitCloseErrorMessage}`
+                        : actionPermit?.permit && !permitClosed
+                            ? 'action permit closure incomplete'
+                            : null,
                 before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
                 before_action_directive: beforeActionDirective,
-                summary: `Marrow guarded run failed and classified the failure as ${failureType}.`,
+                action_permit: publicActionPermit(actionPermit),
+                permit_verified: permitVerified,
+                permit_closed: permitClosed,
+                summary: outerFailureClosed
+                    ? `Marrow guarded run failed and classified the failure as ${failureType}; its outcome and permit are closed.`
+                    : `Marrow guarded run failed and classified the failure as ${failureType}; closure remains incomplete and must be repaired.`,
             };
         }
     }
@@ -1886,6 +1936,8 @@ class MarrowClient {
         }));
         const body = {
             action: redactSensitiveText(params.action),
+            target: params.target ? redactSensitiveText(params.target) : undefined,
+            surfaces: params.surfaces,
             type: params.type || 'general',
             context: params.context ? redactSensitiveValue(params.context) : undefined,
             ...provenance,

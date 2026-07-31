@@ -204,8 +204,11 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);
   const order = [];
   const lifecycle = [];
+  let runtimeInput;
+  let thinkInput;
 
   marrow.agentRuntime = async (input) => {
+    runtimeInput = input;
     order.push(['runtime', input.action]);
     return {
       ok: true,
@@ -272,13 +275,26 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   marrow.decisionBrief = async () => {
     throw new Error('decision brief should be covered by agent runtime');
   };
-  marrow.think = async () => {
+  marrow.think = async (input) => {
+    thinkInput = input;
     order.push(['think']);
     return { decisionId: 'decision_123' };
   };
   marrow.commit = async () => {
     order.push(['commit']);
     return { committed: true };
+  };
+  marrow.issueActionPermit = async () => {
+    order.push(['issue']);
+    return { permit_id: 'permit_123', permit: 'signed-permit' };
+  };
+  marrow.verifyActionPermit = async () => {
+    order.push(['verify']);
+    return { permit_id: 'permit_123', verified: true };
+  };
+  marrow.closeActionPermit = async () => {
+    order.push(['close']);
+    return { permit_id: 'permit_123', closed: true };
   };
   marrow.integrationEvent = async (input) => {
     lifecycle.push(input);
@@ -287,6 +303,8 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
 
   const result = await marrow.runGuarded({
     action: 'publish package to npm',
+    actionTarget: 'npm:@getmarrow/sdk',
+    surfaces: ['publish', 'package'],
     type: 'publish',
     riskPolicy: 'warn',
     execute: () => {
@@ -297,6 +315,9 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
 
   assert.equal(result.ok, true);
   assert.equal(result.result, 'published');
+  assert.equal(runtimeInput.target, 'npm:@getmarrow/sdk');
+  assert.equal(thinkInput.target, runtimeInput.target);
+  assert.deepEqual(thinkInput.surfaces, runtimeInput.surfaces);
   assert.equal(result.runtime.before_you_act, 'Use the prior deploy lesson before continuing.');
   assert.equal(result.before_action_directive.must_use_before_action, true);
   assert.equal(result.before_action_directive.contract, 'marrow.before-action-intervention.v1');
@@ -309,7 +330,7 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
   assert.equal(result.outcome_closure_required, true);
   assert.equal(result.outcome_closed, true);
   assert.match(result.summary, /before-action directive applied/i);
-  assert.deepEqual(order.map(([name]) => name), ['runtime', 'gate', 'think', 'execute', 'commit']);
+  assert.deepEqual(order.map(([name]) => name), ['runtime', 'gate', 'think', 'issue', 'verify', 'execute', 'commit', 'close']);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(lifecycle.at(-1).event_type, 'outcome_committed');
   assert.equal('intervention_disposition' in lifecycle.at(-1), false);
@@ -329,6 +350,9 @@ test('runGuarded fails closed when mandatory outcome closure cannot commit', asy
   marrow.commit = async () => {
     throw new Error('network timeout while committing outcome');
   };
+  marrow.issueActionPermit = async () => ({ permit_id: 'permit_123', permit: 'signed-permit' });
+  marrow.verifyActionPermit = async () => ({ permit_id: 'permit_123', verified: true });
+  marrow.closeActionPermit = async () => ({ permit_id: 'permit_123', closed: true });
 
   const result = await marrow.runGuarded({
     action: 'run deploy smoke test',
@@ -373,6 +397,116 @@ test('runGuarded never executes a protected action without a verified action-bou
   assert.match(result.summary, /required Marrow action permit was not verified/i);
 });
 
+test('runGuarded treats a runtime block as permit-required in advisory mode', async () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  let executed = false;
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'stop' } },
+    risk_gate: { allow: false, decision: 'block', risk_level: 'medium', reasons: [] },
+    gate_receipt_id: 'gate-runtime-block',
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
+  marrow.think = async () => ({ decisionId: 'decision-runtime-block' });
+  marrow.commit = async () => ({ committed: true });
+  marrow.issueActionPermit = async () => { throw new Error('permit service unavailable'); };
+
+  const result = await marrow.runGuarded({
+    action: 'send customer update',
+    type: 'communication',
+    riskPolicy: 'warn',
+    execute: () => { executed = true; return 'sent'; },
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.permit_verified, false);
+  assert.equal(executed, false);
+});
+
+test('runGuarded preserves exact action binding through permit closure', async () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const order = [];
+  const observed = {};
+  marrow.agentRuntime = async (input) => {
+    order.push('runtime');
+    observed.runtime = input;
+    return {
+      ok: true,
+      decision_brief: { risk: { level: 'high' }, workflow: { recommended: 'verified publish' } },
+      risk_gate: { allow: true, decision: 'allow', risk_level: 'high', reasons: [] },
+      gate_receipt_id: 'gate-publish',
+      proof_pack: { required: true, fields: ['command', 'exit_code'] },
+    };
+  };
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'high', reasons: [] });
+  marrow.think = async (input) => { order.push('think'); observed.think = input; return { decisionId: 'decision-publish' }; };
+  marrow.issueActionPermit = async (input) => { order.push('issue'); observed.issue = input; return { permit_id: 'permit-publish', permit: 'signed-permit' }; };
+  marrow.verifyActionPermit = async (input) => { order.push('verify'); observed.verify = input; return { permit_id: 'permit-publish', verified: true }; };
+  marrow.commit = async () => { order.push('commit'); return { committed: true }; };
+  marrow.closeActionPermit = async (input) => { order.push('close'); observed.close = input; return { permit_id: 'permit-publish', closed: true }; };
+
+  const result = await marrow.runGuarded({
+    action: 'publish package',
+    actionTarget: 'npm:@getmarrow/sdk',
+    surfaces: ['npm', 'publish'],
+    type: 'publish',
+    riskPolicy: 'warn',
+    execute: () => { order.push('execute'); return 'published'; },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.outcome_closed, true);
+  assert.equal(result.permit_closed, true);
+  assert.deepEqual(order, ['runtime', 'think', 'issue', 'verify', 'execute', 'commit', 'close']);
+  assert.equal(observed.runtime.target, 'npm:@getmarrow/sdk');
+  assert.equal(observed.think.target, observed.runtime.target);
+  assert.equal(observed.issue.target, observed.runtime.target);
+  assert.equal(observed.verify.target, observed.runtime.target);
+  assert.deepEqual(observed.runtime.surfaces, observed.think.surfaces);
+  assert.deepEqual(observed.think.surfaces, observed.issue.surfaces);
+  assert.equal(observed.close.decision_id, 'decision-publish');
+});
+
+test('runGuarded keeps a failed protected action incomplete when permit close fails', async () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const lifecycle = [];
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'high' }, workflow: { recommended: 'verified deploy' } },
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'high', reasons: [] },
+    gate_receipt_id: 'gate-failed-deploy',
+    proof_pack: { required: true, fields: ['command', 'exit_code'] },
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'high', reasons: [] });
+  marrow.think = async () => ({ decisionId: 'decision-failed-deploy' });
+  marrow.issueActionPermit = async () => ({ permit_id: 'permit-failed-deploy', permit: 'signed-permit' });
+  marrow.verifyActionPermit = async () => ({ permit_id: 'permit-failed-deploy', verified: true });
+  marrow.commit = async () => ({ committed: true });
+  marrow.closeActionPermit = async () => { throw new Error('permit close unavailable'); };
+  marrow.integrationEvent = async (input) => {
+    lifecycle.push(input);
+    return { accepted: true, queued: false, event_id: 'event-failed-deploy', pending_spool_events: 0 };
+  };
+
+  const result = await marrow.runGuarded({
+    action: 'deploy production worker',
+    type: 'deploy',
+    riskPolicy: 'warn',
+    execute: () => { throw new Error('deployment failed'); },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.outcome_closed, false);
+  assert.equal(result.permit_closed, false);
+  assert.match(result.outcome_commit_error, /permit closure failed/i);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lifecycle.at(-1).outcome_state, 'pending');
+  assert.equal(lifecycle.at(-1).event_type, 'workflow_completed');
+});
+
 test('runGuarded emits explicit failed outcome lifecycle closure after a successful commit', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY);
@@ -385,6 +519,9 @@ test('runGuarded emits explicit failed outcome lifecycle closure after a success
   marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
   marrow.think = async () => ({ decisionId: 'decision_failed_123' });
   marrow.commit = async () => ({ committed: true });
+  marrow.issueActionPermit = async () => ({ permit_id: 'permit_failed_123', permit: 'signed-permit' });
+  marrow.verifyActionPermit = async () => ({ permit_id: 'permit_failed_123', verified: true });
+  marrow.closeActionPermit = async () => ({ permit_id: 'permit_failed_123', closed: true });
   marrow.integrationEvent = async (input) => {
     lifecycle.push(input);
     return { accepted: true, queued: false, event_id: 'event_123', pending_spool_events: 0 };
@@ -499,6 +636,18 @@ test('runGuarded redacts action and context across runtime, think, commit, and s
   marrow.commit = async (input) => {
     captured.commit = input;
     return { committed: true };
+  };
+  marrow.issueActionPermit = async (input) => {
+    captured.issue = input;
+    return { permit_id: 'permit_redaction', permit: 'signed-permit' };
+  };
+  marrow.verifyActionPermit = async (input) => {
+    captured.verify = input;
+    return { permit_id: 'permit_redaction', verified: true };
+  };
+  marrow.closeActionPermit = async (input) => {
+    captured.close = input;
+    return { permit_id: 'permit_redaction', closed: true };
   };
 
   const result = await marrow.runGuarded({

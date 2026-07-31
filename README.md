@@ -65,9 +65,17 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.49
+## What's New in v3.7.50
 
-v3.7.49 makes passive governance coverage measurable instead of assuming an installed SDK is active. `runGuarded()` now carries one stable correlation through the pre-action check, action result, and outcome closure. Lifecycle receipts include bounded adapter capability and configuration evidence, while intervention follow-through remains `unknown` unless the integration can prove it:
+v3.7.50 lets the hosted Marrow service recognize the installed SDK version during authenticated activity and return a typed, request-specific `client_update` advisory. This makes new features, compatibility improvements, and published security guidance visible inside an agent's normal workflow without silently changing local packages or configuration:
+
+- authenticated SDK requests identify the official package and installed version with bounded headers;
+- typed status and passive-runtime responses expose the server's update advisory;
+- behind and unrecognized clients receive an exact update and verification path;
+- detection and notification are automatic, while package or configuration changes remain explicit and policy-controlled;
+- older servers and clients remain compatible when no advisory is returned.
+
+It preserves the measurable passive governance coverage introduced in v3.7.49. `runGuarded()` carries one stable correlation through the pre-action check, action result, and outcome closure. Lifecycle receipts include bounded adapter capability and configuration evidence, while intervention follow-through remains `unknown` unless the integration can prove it:
 
 - stable action correlation links the before/action/result/outcome lifecycle without storing raw work content;
 - passive receipts identify the adapter version, capability level, expected hook surfaces, observed hook, and one-way configuration fingerprint;

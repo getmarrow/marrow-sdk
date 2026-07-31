@@ -314,6 +314,7 @@ export interface MarrowActionPermitPublic {
     expires_at: string;
     action_hash: string;
     target_hash: string;
+    surfaces_hash: string;
     required_proof: string[];
     break_glass: boolean;
 }
@@ -325,6 +326,7 @@ export interface MarrowActionPermitVerifyInput {
     action: string;
     action_type?: string;
     target?: string;
+    surfaces?: string[];
 }
 export interface MarrowActionPermitVerifyResult {
     verified: boolean;

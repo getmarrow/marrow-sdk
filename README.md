@@ -131,7 +131,7 @@ if (result.blocked) {
 }
 ```
 
-`runGuarded()` obtains the runtime and workflow gates, records intent, issues and verifies an action-bound permit when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome with a standard proof pack. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration implements the same gate, binding, and closure discipline explicitly.
+`runGuarded()` obtains the runtime and workflow gates, records intent, issues and verifies a permit bound to the authenticated account, key, agent, session, exact action, target, and canonical action surfaces when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome only after every exact server-required proof field is present. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration preserves the same surfaces through issue and verify and implements the same closure discipline explicitly.
 
 ## Passive Runtime
 

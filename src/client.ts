@@ -653,6 +653,7 @@ function publicActionPermit(permit: MarrowActionPermitIssueResult | null): Marro
     expires_at: permit.expires_at,
     action_hash: permit.action_hash,
     target_hash: permit.target_hash,
+    surfaces_hash: permit.surfaces_hash,
     required_proof: permit.required_proof || [],
     break_glass: Boolean(permit.break_glass),
   };
@@ -1432,6 +1433,7 @@ export class MarrowClient {
             action: safeAction,
             action_type: options.type || 'general',
             target: options.actionTarget || safeAction,
+            surfaces: options.surfaces || [],
           });
           permitVerified = verified.verified === true;
           if (!permitVerified) throw new Error('Marrow action permit verification failed');
@@ -2533,6 +2535,7 @@ export class MarrowClient {
       action: redactSensitiveText(params.action),
       action_type: params.action_type,
       target: params.target ? redactSensitiveText(params.target) : undefined,
+      surfaces: params.surfaces || [],
       agent_id: this.agentId,
       session_id: this.sessionId,
       harness: defaultSourceClient(),

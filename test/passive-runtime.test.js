@@ -808,7 +808,7 @@ test('quickStatus maps passive install health fields', async () => {
           available: true,
           active: true,
           last_observed_at: '2026-05-08T01:00:00.000Z',
-          adapter_version: '3.7.50',
+          adapter_version: '3.7.51',
           capability_level: 'sdk_passive_runtime',
         },
         capture_coverage: {
@@ -905,7 +905,7 @@ test('SDK identifies its package version and exposes the server update advisory'
         ok: true,
         client_update: {
           package: '@getmarrow/sdk',
-          installed_version: '3.7.50',
+          installed_version: '3.7.51',
           latest_version: '3.7.51',
           version_status: 'behind',
           update_available: true,
@@ -926,7 +926,7 @@ test('SDK identifies its package version and exposes the server update advisory'
     const marrow = new MarrowClient('test-passive-runtime-key');
     const status = await marrow.quickStatus();
     assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
-    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.50');
+    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.51');
     assert.equal(status.clientUpdate.update_available, true);
     assert.equal(status.clientUpdate.update_command, 'npm install @getmarrow/sdk@latest');
   } finally {

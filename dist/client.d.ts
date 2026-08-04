@@ -1,7 +1,7 @@
 /**
  * @getmarrow/sdk — MarrowClient Implementation
  */
-import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowModelUsageInput, MarrowModelUsageResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowArbitrationRequest, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntime, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput, MarrowLifecycleEventInput, MarrowLifecycleEventResult, MarrowDecisionTraceResult, MarrowActionPermitIssueInput, MarrowActionPermitIssueResult, MarrowActionPermitVerifyInput, MarrowActionPermitVerifyResult, MarrowActionPermitCloseInput, MarrowActionPermitCloseResult, MarrowEnforcementHeartbeatInput, MarrowEnforcementCoverageResult } from './types';
+import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, MarrowAutoWrapOptions, MarrowCheckResult, MarrowLoopState, MarrowOrientResult, MarrowThinkResult, MarrowCommitResult, MarrowModelUsageInput, MarrowModelUsageResult, MarrowAskResult, MarrowQuickStatusResult, MarrowMemory, MarrowMemoryRetrievalResult, MemoryStatus, MemoryShareOptions, MemoryExportOptions, MemoryImportOptions, CreateApiKeyParams, MarrowApiKey, CreateApiKeyResult, ListApiKeysResult, RevokeApiKeyResult, RotateApiKeyResult, GetKeyAuditParams, GetKeyAuditResult, MarrowDashboardResult, MarrowDigestResult, MarrowAgentStatusResult, MarrowValueReportResult, MarrowDecisionBriefRequest, MarrowDecisionBriefResult, MarrowAgentRuntimeRequest, MarrowAgentRuntimeResult, MarrowArbitrationRequest, MarrowFirstValueRequest, MarrowFirstValueResult, MarrowWorkflowGateRequest, MarrowWorkflowGateResult, MarrowModeRecommendationRequest, MarrowModeRecommendationResult, MarrowPolicyProfilesResult, MarrowCreatePolicyProfileRequest, MarrowPolicyProfileResult, MarrowAssignProjectPolicyProfileRequest, MarrowProjectPolicyProfileAssignmentResult, MarrowPolicyResolveRequest, MarrowPolicyResolveResult, MarrowAgentPerformanceResult, MarrowRecordFleetLessonInput, MarrowFleetLessonsResult, MarrowDeploymentMemoryInput, MarrowDeploymentMemory, MarrowCreateHandoffInput, MarrowUpdateHandoffInput, MarrowAgentHandoff, MarrowSetMemoryPermissionInput, MarrowMemoryPermissionRecord, MarrowFailureType, MarrowGuardedRunOptions, MarrowGuardedRunResult, MarrowPassiveRuntimeWithLifecycle, MarrowPassiveRuntimeOptions, MarrowSessionEndResult, MarrowTemplateSummary, MarrowTemplateDetail, MarrowDecisionProvenanceInput, MarrowLifecycleEventInput, MarrowLifecycleEventResult, MarrowLifecycleBacklog, MarrowDecisionTraceResult, MarrowActionPermitIssueInput, MarrowActionPermitIssueResult, MarrowActionPermitVerifyInput, MarrowActionPermitVerifyResult, MarrowActionPermitCloseInput, MarrowActionPermitCloseResult, MarrowEnforcementHeartbeatInput, MarrowEnforcementCoverageResult } from './types';
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 interface MarrowFetchWrapOptions {
     captureModelUsage?: boolean;
@@ -25,6 +25,7 @@ export declare class MarrowClient {
     private retryQueueDraining;
     private eventSpool;
     private eventSpoolDrainPromise;
+    private eventSpoolHealthError;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
     enforce(options?: MarrowEnforceOptions): MarrowCheckResult;
     check(): MarrowCheckResult;
@@ -40,7 +41,7 @@ export declare class MarrowClient {
      * SDK users can call this once and wrap common surfaces without manually
      * stitching together decision briefs, think, commit, and value reporting.
      */
-    createPassiveRuntime(options?: MarrowPassiveRuntimeOptions): MarrowPassiveRuntime;
+    createPassiveRuntime(options?: MarrowPassiveRuntimeOptions): MarrowPassiveRuntimeWithLifecycle;
     beforeAction(meta: MarrowActionMeta): Promise<MarrowCheckResult>;
     afterAction(meta: MarrowActionMeta): Promise<MarrowCheckResult>;
     wrap<T>(meta: MarrowActionMeta, fn: () => Promise<T> | T): Promise<T>;
@@ -297,6 +298,11 @@ export declare class MarrowClient {
     firstValue(input?: MarrowFirstValueRequest): Promise<MarrowFirstValueResult>;
     /** Record one compact harness lifecycle receipt through the durable local spool. */
     integrationEvent(input: MarrowLifecycleEventInput): Promise<MarrowLifecycleEventResult>;
+    /** Return evidence-backed local lifecycle backlog health without reading event payloads. */
+    lifecycleBacklog(): MarrowLifecycleBacklog;
+    /** Drain durable lifecycle receipts and return aggregate backlog health. */
+    flushLifecycleEvents(): Promise<MarrowLifecycleBacklog>;
+    private flushLifecycleEventsInBackground;
     decisionTrace(decisionId: string): Promise<MarrowDecisionTraceResult>;
     agentPerformance(period?: string | number, agentId?: string | null): Promise<MarrowAgentPerformanceResult>;
     fleetLessons(options?: {

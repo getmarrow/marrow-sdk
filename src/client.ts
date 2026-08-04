@@ -75,7 +75,7 @@ import type {
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
   MarrowPassiveActionOptions,
-  MarrowPassiveRuntime,
+  MarrowPassiveRuntimeWithLifecycle,
   MarrowPassiveRuntimeOptions,
   MarrowSessionEndResult,
   MarrowTemplateSummary,
@@ -85,6 +85,7 @@ import type {
   MarrowDecisionUserIntent,
   MarrowLifecycleEventInput,
   MarrowLifecycleEventResult,
+  MarrowLifecycleBacklog,
   MarrowDecisionTraceResult,
   MarrowActionPermitIssueInput,
   MarrowActionPermitIssueResult,
@@ -109,7 +110,7 @@ const REQUIRE_EXTERNAL_ERROR =
 const REQUIRE_COMPLETION_ERROR =
   'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set<MarrowDecisionSourceClient>(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
-const SDK_ADAPTER_VERSION = '3.7.51';
+const SDK_ADAPTER_VERSION = '3.7.52';
 const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
 const SDK_CONFIG_FINGERPRINT = createHash('sha256')
   .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)
@@ -811,6 +812,7 @@ export class MarrowClient {
   private retryQueueDraining = false;
   private eventSpool: DurableEventSpool | null;
   private eventSpoolDrainPromise: Promise<void> | null = null;
+  private eventSpoolHealthError: string | null = null;
 
   constructor(apiKey: string, options?: MarrowClientOptions | string) {
     this.apiKey = apiKey;
@@ -1762,7 +1764,7 @@ export class MarrowClient {
    * SDK users can call this once and wrap common surfaces without manually
    * stitching together decision briefs, think, commit, and value reporting.
    */
-  createPassiveRuntime(options: MarrowPassiveRuntimeOptions = {}): MarrowPassiveRuntime {
+  createPassiveRuntime(options: MarrowPassiveRuntimeOptions = {}): MarrowPassiveRuntimeWithLifecycle {
     const client = this;
     client.enforce({ mode: options.mode || 'auto' });
 
@@ -1776,6 +1778,7 @@ export class MarrowClient {
       ? undefined
       : options.fetch || activeFetchPatch?.originalFetch || (typeof globalThis !== 'undefined' ? globalThis.fetch : undefined);
     let installed = false;
+    let lifecycleTimer: ReturnType<typeof setInterval> | null = null;
     const ownerToken = Symbol('marrowPassiveRuntimeFetchOwner');
 
     const buildGuardOptions = <T>(
@@ -1825,7 +1828,14 @@ export class MarrowClient {
           throw new Error('No fetch implementation available for Marrow passive runtime');
         }) as typeof fetch;
 
-    const runtime: MarrowPassiveRuntime = {
+    const drainLifecycleSafely = (): void => {
+      void client.flushLifecycleEventsInBackground().catch((error) => {
+        client.eventSpoolHealthError = safePublicErrorMessage(error);
+        process.stderr.write(`[marrow] Warning: lifecycle backlog drain needs attention: ${client.eventSpoolHealthError}\n`);
+      });
+    };
+
+    const runtime: MarrowPassiveRuntimeWithLifecycle = {
       get installed() {
         return installed;
       },
@@ -1833,6 +1843,17 @@ export class MarrowClient {
       fetch: passiveFetch,
 
       install(): { fetchPatched: boolean } {
+        if (!lifecycleTimer && client.eventSpool) {
+          const configuredInterval = Number(options.lifecycleFlushIntervalMs ?? 5_000);
+          const intervalMs = Number.isFinite(configuredInterval)
+            ? Math.max(1_000, Math.min(60_000, Math.floor(configuredInterval)))
+            : 5_000;
+          drainLifecycleSafely();
+          lifecycleTimer = setInterval(() => {
+            drainLifecycleSafely();
+          }, intervalMs);
+          lifecycleTimer.unref?.();
+        }
         if (
           options.patchGlobalFetch !== false &&
           fetchFn &&
@@ -1863,6 +1884,10 @@ export class MarrowClient {
       },
 
       restore(): void {
+        if (lifecycleTimer) {
+          clearInterval(lifecycleTimer);
+          lifecycleTimer = null;
+        }
         if (typeof globalThis !== 'undefined') {
           const registry = (globalThis as typeof globalThis & {
             [GLOBAL_FETCH_PATCH_KEY]?: GlobalFetchPatchState;
@@ -1878,6 +1903,14 @@ export class MarrowClient {
           }
         }
         installed = false;
+      },
+
+      lifecycleBacklog(): MarrowLifecycleBacklog {
+        return client.lifecycleBacklog();
+      },
+
+      flushLifecycleEvents(): Promise<MarrowLifecycleBacklog> {
+        return client.flushLifecycleEvents();
       },
 
       tool<T>(
@@ -3466,6 +3499,101 @@ export class MarrowClient {
     };
   }
 
+  /** Return evidence-backed local lifecycle backlog health without reading event payloads. */
+  lifecycleBacklog(): MarrowLifecycleBacklog {
+    if (!this.eventSpool) {
+      return {
+        enabled: false,
+        state: 'disabled',
+        pending: 0,
+        failed: 0,
+        oldest_pending_at: null,
+        oldest_failed_at: null,
+        capacity: null,
+        available: null,
+        record_capacity: null,
+        record_slots_available: null,
+        byte_capacity: null,
+        bytes_used: null,
+        bytes_available: null,
+        measurement_available: false,
+        exact: false,
+        exact_fix: 'Enable the durable event spool or use an owner-managed delivery adapter before relying on passive capture.',
+      };
+    }
+    if (this.eventSpoolHealthError) {
+      return {
+        enabled: true,
+        state: 'attention_required',
+        pending: 0,
+        failed: 0,
+        oldest_pending_at: null,
+        oldest_failed_at: null,
+        capacity: null,
+        available: null,
+        record_capacity: null,
+        record_slots_available: null,
+        byte_capacity: null,
+        bytes_used: null,
+        bytes_available: null,
+        measurement_available: false,
+        exact: false,
+        exact_fix: 'Inspect the owner-only lifecycle spool, repair its permissions or remove the quarantined corrupt file, then flush lifecycle events again.',
+      };
+    }
+    let status;
+    try {
+      status = this.eventSpool.status();
+    } catch (error) {
+      this.eventSpoolHealthError = safePublicErrorMessage(error);
+      return this.lifecycleBacklog();
+    }
+    return {
+      enabled: true,
+      state: status.failed > 0 ? 'attention_required' : status.pending > 0 ? 'pending' : 'clear',
+      pending: status.pending,
+      failed: status.failed,
+      oldest_pending_at: status.oldest_pending_at,
+      oldest_failed_at: status.oldest_failed_at,
+      capacity: null,
+      available: null,
+      record_capacity: status.record_capacity,
+      record_slots_available: status.record_slots_available,
+      byte_capacity: status.byte_capacity,
+      bytes_used: status.bytes_used,
+      bytes_available: status.bytes_available,
+      measurement_available: true,
+      exact: true,
+      exact_fix: status.failed > 0
+        ? 'Inspect the failed lifecycle receipts and restore authentication or endpoint compatibility before retrying them.'
+        : status.pending > 0
+          ? 'Keep the passive runtime active so its background drain can deliver the durable receipts.'
+          : null,
+    };
+  }
+
+  /** Drain durable lifecycle receipts and return aggregate backlog health. */
+  async flushLifecycleEvents(): Promise<MarrowLifecycleBacklog> {
+    try {
+      await this.drainEventSpool();
+      this.eventSpoolHealthError = null;
+    } catch (error) {
+      this.eventSpoolHealthError = safePublicErrorMessage(error);
+      throw error;
+    }
+    return this.lifecycleBacklog();
+  }
+
+  private async flushLifecycleEventsInBackground(): Promise<void> {
+    try {
+      await this.drainEventSpool(true);
+      this.eventSpoolHealthError = null;
+    } catch (error) {
+      this.eventSpoolHealthError = safePublicErrorMessage(error);
+      throw error;
+    }
+  }
+
   async decisionTrace(decisionId: string): Promise<MarrowDecisionTraceResult> {
     const safeId = validatePathParam(decisionId, 'decisionId');
     const res = await this.request('GET', `/v1/agent/governance/trace/${safeId}`);
@@ -3614,7 +3742,9 @@ export class MarrowClient {
   private async requestOnce(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    timeoutMs = 0,
+    unrefTimeout = false
   ): Promise<any> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -3632,11 +3762,28 @@ export class MarrowClient {
     headers['X-Marrow-Package'] = '@getmarrow/sdk';
     headers['X-Marrow-Package-Version'] = SDK_ADAPTER_VERSION;
 
-    const res = await fetch(url, {
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const requestPromise = fetch(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      ...(controller ? { signal: controller.signal } : {}),
     });
+    const res = timeoutMs > 0
+      ? await Promise.race([
+          requestPromise,
+          new Promise<Response>((_, reject) => {
+            timeout = setTimeout(() => {
+              controller?.abort();
+              reject(new Error('Marrow lifecycle delivery timed out'));
+            }, timeoutMs);
+            if (unrefTimeout) timeout.unref?.();
+          }),
+        ]).finally(() => {
+          if (timeout) clearTimeout(timeout);
+        })
+      : await requestPromise;
 
     if (!res.ok) {
       let errorDetail = 'Unknown error';
@@ -3704,7 +3851,7 @@ export class MarrowClient {
     });
   }
 
-  private async drainEventSpool(): Promise<void> {
+  private async drainEventSpool(unrefTimeout = false): Promise<void> {
     if (!this.eventSpool || this.eventSpool.pendingSize() === 0) return;
     if (this.eventSpoolDrainPromise) return this.eventSpoolDrainPromise;
     const spool = this.eventSpool;
@@ -3717,7 +3864,7 @@ export class MarrowClient {
         if (records.length === 0) break;
         for (const record of records) {
           try {
-            const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+            const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record, 1_000, unrefTimeout);
             const data = (response.data || response) as Record<string, unknown>;
             if (data.accepted !== true) {
               throw new Error('Marrow lifecycle endpoint did not accept the receipt');

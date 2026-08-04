@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
-const { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } = require('node:fs');
+const { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const test = require('node:test');
@@ -16,7 +16,7 @@ test('lifecycle receipts retain bounded activation, correlation, and interventio
     agent_id: 'agent-one',
     action: 'governed task completed',
     correlation_id: 'correlation-one',
-    adapter_version: '3.7.51',
+    adapter_version: '3.7.52',
     capability_level: 'sdk_passive_runtime',
     config_fingerprint: 'a'.repeat(64),
     expected_hooks: ['pre_action', 'action_result', 'outcome_closure'],
@@ -196,6 +196,53 @@ test('terminal lifecycle rejection remains durably failed and is reported truthf
   }
 });
 
+test('lifecycle backlog health is aggregate-only, exact, and drainable', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-backlog-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  let available = false;
+  globalThis.fetch = async () => new Response(JSON.stringify(available
+    ? { data: { accepted: true } }
+    : { error: 'temporarily unavailable' }), {
+    status: available ? 200 : 503,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  try {
+    const marrow = new MarrowClient('test-backlog-key', { eventSpoolPath: spoolPath });
+    await marrow.integrationEvent({
+      event_id: 'backlog-event-one',
+      event_type: 'workflow_completed',
+      action: 'complete measured task',
+      outcome_state: 'pending',
+    });
+    const pending = marrow.lifecycleBacklog();
+    assert.equal(pending.state, 'pending');
+    assert.equal(pending.pending, 1);
+    assert.equal(pending.failed, 0);
+    assert.equal(pending.capacity, null);
+    assert.equal(pending.available, null);
+    assert.equal(pending.record_slots_available, pending.record_capacity - 1);
+    assert.ok(pending.bytes_used > 0);
+    assert.equal(pending.bytes_available, pending.byte_capacity - pending.bytes_used);
+    assert.equal(pending.measurement_available, true);
+    assert.equal(pending.exact, true);
+    assert.match(pending.oldest_pending_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal('records' in pending, false);
+    assert.equal('events' in pending, false);
+
+    available = true;
+    const clear = await marrow.flushLifecycleEvents();
+    assert.equal(clear.state, 'clear');
+    assert.equal(clear.pending, 0);
+    assert.equal(clear.record_slots_available, clear.record_capacity);
+    assert.equal(clear.bytes_used, 2);
+    assert.equal(clear.bytes_available, clear.byte_capacity - 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('transient lifecycle retry exhaustion becomes a durable failed state', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-exhausted-'));
   const spoolPath = join(directory, 'events.json');
@@ -330,6 +377,10 @@ test('lifecycle spool validates runtime fields and enforces privacy and byte bou
       }
     }
     assert.equal(byteLimitReached, true);
+    const capacity = spool.status();
+    assert.ok(capacity.record_slots_available > 0);
+    assert.ok(capacity.bytes_available < capacity.byte_capacity);
+    assert.equal(capacity.bytes_available, capacity.byte_capacity - capacity.bytes_used);
     assert.ok(statSync(spoolPath).size <= 64 * 1024);
     assert.doesNotThrow(() => JSON.parse(readFileSync(spoolPath, 'utf8')));
   } finally {
@@ -419,6 +470,52 @@ test('custom spool path does not change existing parent permissions', () => {
     assert.equal(statSync(directory).mode & 0o777, 0o755);
     assert.equal(statSync(spoolPath).mode & 0o777, 0o600);
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('custom spool rejects a non-sticky world-writable ancestor', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-unsafe-ancestor-'));
+  const unsafeParent = join(directory, 'unsafe');
+  mkdirSync(unsafeParent, { mode: 0o777 });
+  chmodSync(unsafeParent, 0o777);
+  const spool = new DurableEventSpool({
+    apiKey: 'test-unsafe-ancestor-key',
+    path: join(unsafeParent, 'state', 'events.json'),
+  });
+
+  try {
+    assert.throws(() => spool.enqueue({
+      event_id: 'unsafe-ancestor-event',
+      event_type: 'tool_completed',
+      action: 'must reject unsafe state ancestry',
+    }), /non-sticky writable ancestor/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('default spool rejects symlinked path components without changing the target', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-default-symlink-'));
+  const home = join(directory, 'home');
+  const target = join(directory, 'outside');
+  const originalHome = process.env.HOME;
+  mkdirSync(join(home, '.marrow'), { recursive: true, mode: 0o700 });
+  mkdirSync(target, { mode: 0o755 });
+  symlinkSync(target, join(home, '.marrow', 'spool'), 'dir');
+  process.env.HOME = home;
+  try {
+    const spool = new DurableEventSpool({ apiKey: 'test-default-symlink-key' });
+    assert.throws(() => spool.enqueue({
+      event_type: 'tool_completed',
+      action: 'must not follow default spool symlink',
+    }), /cannot contain symlinked components/);
+    assert.equal(lstatSync(join(home, '.marrow', 'spool')).isSymbolicLink(), true);
+    assert.equal(statSync(target).mode & 0o777, 0o755);
+    assert.deepEqual(readdirSync(target), []);
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     rmSync(directory, { recursive: true, force: true });
   }
 });

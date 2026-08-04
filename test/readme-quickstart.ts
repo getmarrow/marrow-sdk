@@ -7,6 +7,8 @@ import {
   type MarrowLifecycleEventInput,
   type MarrowLifecycleEventResult,
   type MarrowLifecycleEventType,
+  type MarrowPassiveRuntime,
+  type MarrowPassiveRuntimeWithLifecycle,
 } from '../src';
 
 declare function deploy(): Promise<{ releaseId: string }>;
@@ -29,6 +31,15 @@ async function governedDeploy(marrow: MarrowClient) {
 }
 
 void governedDeploy;
+type LegacyRuntimeHasNoRequiredLifecycleMethods = Extract<
+  keyof MarrowPassiveRuntime,
+  'lifecycleBacklog' | 'flushLifecycleEvents'
+> extends never ? true : never;
+const legacyRuntimeCompatibility: LegacyRuntimeHasNoRequiredLifecycleMethods = true;
+declare const lifecycleRuntime: MarrowPassiveRuntimeWithLifecycle;
+void lifecycleRuntime.lifecycleBacklog;
+void lifecycleRuntime.flushLifecycleEvents;
+void legacyRuntimeCompatibility;
 void (null as unknown as MarrowActivationCoverage);
 void (null as unknown as MarrowDecisionTraceResult);
 void (null as unknown as MarrowIntegrationCapabilityLevel);

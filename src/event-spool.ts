@@ -4,16 +4,18 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, parse, resolve, sep } from 'node:path';
 import type {
   MarrowIntegrationCapabilityLevel,
   MarrowInterventionDisposition,
@@ -55,6 +57,13 @@ export type SpoolEventStatus = {
   record?: SpoolRecord;
   pending: number;
   failed: number;
+  oldest_pending_at: string | null;
+  oldest_failed_at: string | null;
+  record_capacity: number;
+  record_slots_available: number;
+  byte_capacity: number;
+  bytes_used: number;
+  bytes_available: number;
 };
 
 const LIFECYCLE_EVENT_TYPES = new Set<MarrowLifecycleEventType>([
@@ -344,12 +353,14 @@ function validateStoredRecord(value: unknown): SpoolRecord {
 export class DurableEventSpool {
   readonly path: string;
   private readonly lockPath: string;
+  private readonly ownsParent: boolean;
 
   constructor(input: { apiKey: string; agentId?: string | null; path?: string }) {
     const namespace = createHash('sha256')
       .update(`${input.apiKey}:${input.agentId || 'account'}`)
       .digest('hex')
       .slice(0, 20);
+    this.ownsParent = !input.path;
     this.path = input.path ? resolve(input.path) : join(homedir(), '.marrow', 'spool', `sdk-${namespace}.json`);
     this.lockPath = `${this.path}.lock`;
   }
@@ -420,10 +431,20 @@ export class DurableEventSpool {
   status(eventId?: string): SpoolEventStatus {
     return this.withLock(() => {
       const records = this.readLocked();
+      const pending = records.filter((record) => record.delivery_state === 'pending');
+      const failed = records.filter((record) => record.delivery_state === 'failed');
+      const bytesUsed = Buffer.byteLength(JSON.stringify(records), 'utf8');
       return {
         ...(eventId ? { record: records.find((record) => record.event_id === eventId) } : {}),
-        pending: records.filter((record) => record.delivery_state === 'pending').length,
-        failed: records.filter((record) => record.delivery_state === 'failed').length,
+        pending: pending.length,
+        failed: failed.length,
+        oldest_pending_at: pending.map((record) => record.occurred_at).sort()[0] || null,
+        oldest_failed_at: failed.map((record) => record.failed_at || record.occurred_at).sort()[0] || null,
+        record_capacity: MAX_RECORDS,
+        record_slots_available: Math.max(0, MAX_RECORDS - records.length),
+        byte_capacity: MAX_SPOOL_BYTES,
+        bytes_used: bytesUsed,
+        bytes_available: Math.max(0, MAX_SPOOL_BYTES - bytesUsed),
       };
     });
   }
@@ -442,14 +463,46 @@ export class DurableEventSpool {
   }
 
   private ensureDirectory(): void {
-    const directory = dirname(this.path);
-    if (existsSync(directory)) {
-      if (!statSync(directory).isDirectory()) {
-        throw new Error('Lifecycle spool parent path is not a directory');
+    const directory = resolve(dirname(this.path));
+    const parsed = parse(directory);
+    let current = parsed.root;
+    for (const component of directory.slice(parsed.root.length).split(sep).filter(Boolean)) {
+      current = join(current, component);
+      try {
+        mkdirSync(current, { mode: 0o700 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       }
-      return;
+      const status = lstatSync(current);
+      if (status.isSymbolicLink() || !status.isDirectory() || realpathSync(current) !== current) {
+        throw new Error('Lifecycle spool path cannot contain symlinked components');
+      }
+      if ((status.mode & 0o022) !== 0 && (status.mode & 0o1000) === 0) {
+        throw new Error('Lifecycle spool path cannot be nested under a non-sticky writable ancestor');
+      }
     }
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const status = lstatSync(directory);
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+    if (this.ownsParent) {
+      if (uid !== null && status.uid !== uid) throw new Error('Lifecycle spool directory must be owned by the current user');
+      chmodSync(directory, 0o700);
+    } else if ((status.mode & 0o022) !== 0) {
+      throw new Error('Custom lifecycle spool directory cannot be group or world writable');
+    }
+  }
+
+  private assertSafeFile(path: string, label: string): void {
+    let status: ReturnType<typeof lstatSync>;
+    try {
+      status = lstatSync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+    if (status.isSymbolicLink() || !status.isFile()) throw new Error(`Lifecycle ${label} must be a regular file`);
+    if (uid !== null && status.uid !== uid) throw new Error(`Lifecycle ${label} must be owned by the current user`);
+    if ((status.mode & 0o077) !== 0) throw new Error(`Lifecycle ${label} permissions must be 0600 or stricter`);
   }
 
   private acquireLock(): () => void {
@@ -470,6 +523,7 @@ export class DurableEventSpool {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== 'EEXIST') throw error;
         try {
+          this.assertSafeFile(this.lockPath, 'spool lock');
           if (Date.now() - statSync(this.lockPath).mtimeMs > LOCK_STALE_MS) {
             unlinkSync(this.lockPath);
             continue;
@@ -497,6 +551,7 @@ export class DurableEventSpool {
 
   private readLocked(): SpoolRecord[] {
     if (!existsSync(this.path)) return [];
+    this.assertSafeFile(this.path, 'spool file');
     const serialized = readFileSync(this.path, 'utf8');
     try {
       if (Buffer.byteLength(serialized, 'utf8') > MAX_SPOOL_BYTES) {
@@ -532,11 +587,13 @@ export class DurableEventSpool {
     const temporary = `${this.path}.tmp-${process.pid}-${randomUUID()}`;
     let fd: number | null = null;
     try {
+      this.assertSafeFile(this.path, 'spool file');
       fd = openSync(temporary, 'wx', 0o600);
       writeFileSync(fd, serialized, { encoding: 'utf8' });
       fsyncSync(fd);
       closeSync(fd);
       fd = null;
+      this.assertSafeFile(this.path, 'spool file');
       renameSync(temporary, this.path);
       chmodSync(this.path, 0o600);
       const directoryFd = openSync(dirname(this.path), 'r');

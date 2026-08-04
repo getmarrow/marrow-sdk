@@ -171,9 +171,11 @@ runtime.install();
 
 console.log(runtime.lifecycleBacklog());
 await runtime.flushLifecycleEvents();
+await runtime.recoverLifecycleEvents(['failed-event-id']);
 ```
 
 `state` is `clear`, `pending`, `attention_required`, or `disabled`, with exact pending/failed counts, oldest receipt timestamps, separate record and byte limits, and an exact fix. The legacy ambiguous `capacity` and `available` fields remain `null`; use `record_slots_available` and `bytes_available`. Authentication, policy, proof, and validation failures become explicit durable failures instead of infinite retries.
+After correcting authentication or endpoint compatibility, call `recoverLifecycleEvents()` to requeue all failed receipts, or pass exact event IDs for a bounded retry. Recovery never happens silently.
 
 Marrow reports passive coverage only from observed receipts. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect activation and `npx @getmarrow/install --repair` when configuration drift is reported.
 
@@ -195,6 +197,7 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | `integrationEvent(input)` | Record a compact passive lifecycle receipt through the durable local spool |
 | `lifecycleBacklog()` | Read aggregate local backlog health without event payloads |
 | `flushLifecycleEvents()` | Retry queued lifecycle receipts and return aggregate health |
+| `recoverLifecycleEvents(eventIds?)` | Explicitly requeue durable failed receipts and retry delivery |
 | `decisionTrace(decisionId)` | Inspect the tenant-scoped causal path behind a governed decision |
 | `workflowGate(input)` | Evaluate a workflow action against policy |
 | `completionContracts()` | List built-in completion/proof contracts |

@@ -13,7 +13,7 @@ test('createPassiveRuntime patches and restores global fetch', () => {
 
   globalThis.fetch = fakeFetch;
   try {
-    const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+    const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
     const runtime = marrow.createPassiveRuntime();
 
     assert.equal(runtime.installed, false);
@@ -92,8 +92,8 @@ test('createPassiveRuntime restores original fetch across multiple runtimes', ()
 
   globalThis.fetch = fakeFetch;
   try {
-    const marrowA = new MarrowClient(process.env.MARROW_API_KEY);
-    const marrowB = new MarrowClient(process.env.MARROW_API_KEY);
+    const marrowA = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
+    const marrowB = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
     const runtimeA = marrowA.createPassiveRuntime();
     const runtimeB = marrowB.createPassiveRuntime();
 
@@ -123,7 +123,7 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
 
   globalThis.fetch = fakeFetch;
   try {
-    const marrowA = new MarrowClient(process.env.MARROW_API_KEY);
+    const marrowA = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
     const callsA = { before: 0, after: 0 };
     marrowA.beforeAction = async () => {
       callsA.before += 1;
@@ -137,7 +137,7 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
     const runtimeA = marrowA.createPassiveRuntime();
     runtimeA.install();
 
-    const marrowB = new MarrowClient(process.env.MARROW_API_KEY);
+    const marrowB = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
     const callsB = { before: 0, after: 0 };
     marrowB.beforeAction = async () => {
       callsB.before += 1;

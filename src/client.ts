@@ -1913,6 +1913,10 @@ export class MarrowClient {
         return client.flushLifecycleEvents();
       },
 
+      recoverLifecycleEvents(eventIds?: string[]): Promise<MarrowLifecycleBacklog> {
+        return client.recoverLifecycleEvents(eventIds);
+      },
+
       tool<T>(
         name: string,
         execute: () => Promise<T> | T,
@@ -3582,6 +3586,14 @@ export class MarrowClient {
       throw error;
     }
     return this.lifecycleBacklog();
+  }
+
+  /** Explicitly requeue durable failed receipts, then retry delivery once. */
+  async recoverLifecycleEvents(eventIds?: string[]): Promise<MarrowLifecycleBacklog> {
+    if (!this.eventSpool) return this.lifecycleBacklog();
+    this.eventSpool.requeueFailed(eventIds);
+    this.eventSpoolHealthError = null;
+    return this.flushLifecycleEvents();
   }
 
   private async flushLifecycleEventsInBackground(): Promise<void> {

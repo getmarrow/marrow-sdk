@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
@@ -248,8 +248,15 @@ test('transient lifecycle retry exhaustion becomes a durable failed state', asyn
   const spoolPath = join(directory, 'events.json');
   const originalFetch = globalThis.fetch;
   let calls = 0;
+  let available = false;
   globalThis.fetch = async () => {
     calls += 1;
+    if (available) {
+      return new Response(JSON.stringify({ data: { accepted: true } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     return new Response(JSON.stringify({ error: 'temporarily unavailable' }), {
       status: 503,
       statusText: 'Service Unavailable',
@@ -280,6 +287,14 @@ test('transient lifecycle retry exhaustion becomes a durable failed state', asyn
     const stored = JSON.parse(readFileSync(spoolPath, 'utf8'));
     assert.equal(stored[0].attempts, 3);
     assert.equal(stored[0].delivery_state, 'failed');
+
+    available = true;
+    const recovered = await marrow.recoverLifecycleEvents(['retry-event']);
+    assert.equal(recovered.state, 'clear');
+    assert.equal(recovered.failed, 0);
+    assert.equal(recovered.pending, 0);
+    assert.equal(calls, 4);
+    await assert.rejects(marrow.recoverLifecycleEvents(['invalid/event']), /Invalid lifecycle recovery event IDs/);
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(directory, { recursive: true, force: true });
@@ -502,6 +517,7 @@ test('default spool rejects symlinked path components without changing the targe
   const originalHome = process.env.HOME;
   mkdirSync(join(home, '.marrow'), { recursive: true, mode: 0o700 });
   mkdirSync(target, { mode: 0o755 });
+  chmodSync(target, 0o755);
   symlinkSync(target, join(home, '.marrow', 'spool'), 'dir');
   process.env.HOME = home;
   try {
@@ -516,6 +532,36 @@ test('default spool rejects symlinked path components without changing the targe
   } finally {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('default spool rejects an unsafe final directory without changing its mode', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-default-mode-'));
+  const home = join(directory, 'home');
+  const spoolDirectory = join(home, '.marrow', 'spool');
+  const modulePath = resolve(__dirname, '../dist/event-spool.js');
+  mkdirSync(spoolDirectory, { recursive: true, mode: 0o700 });
+  chmodSync(spoolDirectory, 0o1777);
+  const probe = `
+    const { DurableEventSpool } = require(process.argv[1]);
+    const spool = new DurableEventSpool({ apiKey: 'default-mode-key' });
+    try {
+      spool.enqueue({ event_type: 'tool_completed', action: 'must reject broad permissions' });
+      process.exit(2);
+    } catch (error) {
+      if (!/permissions must be 0700/.test(String(error))) process.exit(3);
+    }
+  `;
+  try {
+    const result = spawnSync(process.execPath, ['-e', probe, modulePath], {
+      env: { ...process.env, HOME: home },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(statSync(spoolDirectory).mode & 0o7777, 0o1777);
+    assert.deepEqual(readdirSync(spoolDirectory), []);
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });

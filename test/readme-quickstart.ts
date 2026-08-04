@@ -39,6 +39,7 @@ const legacyRuntimeCompatibility: LegacyRuntimeHasNoRequiredLifecycleMethods = t
 declare const lifecycleRuntime: MarrowPassiveRuntimeWithLifecycle;
 void lifecycleRuntime.lifecycleBacklog;
 void lifecycleRuntime.flushLifecycleEvents;
+void lifecycleRuntime.recoverLifecycleEvents;
 void legacyRuntimeCompatibility;
 void (null as unknown as MarrowActivationCoverage);
 void (null as unknown as MarrowDecisionTraceResult);

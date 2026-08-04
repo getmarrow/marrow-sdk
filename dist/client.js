@@ -1659,6 +1659,9 @@ class MarrowClient {
             flushLifecycleEvents() {
                 return client.flushLifecycleEvents();
             },
+            recoverLifecycleEvents(eventIds) {
+                return client.recoverLifecycleEvents(eventIds);
+            },
             tool(name, execute, actionOptions = {}) {
                 const action = actionOptions.action || `run tool: ${truncate(redactSensitiveText(name), 180)}`;
                 return client.runGuarded(buildGuardOptions(action, execute, {
@@ -3008,6 +3011,14 @@ class MarrowClient {
             throw error;
         }
         return this.lifecycleBacklog();
+    }
+    /** Explicitly requeue durable failed receipts, then retry delivery once. */
+    async recoverLifecycleEvents(eventIds) {
+        if (!this.eventSpool)
+            return this.lifecycleBacklog();
+        this.eventSpool.requeueFailed(eventIds);
+        this.eventSpoolHealthError = null;
+        return this.flushLifecycleEvents();
     }
     async flushLifecycleEventsInBackground() {
         try {

@@ -65,7 +65,19 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.51
+## What's New in v3.7.52
+
+v3.7.52 makes low-risk passive capture resilient without placing network delivery on the agent's critical path:
+
+- owned Node runtimes drain the bounded, owner-only lifecycle spool on a short background interval;
+- backlog health reports exact pending, failed, record-slot, byte-usage, and oldest-receipt evidence;
+- operators can request an explicit bounded drain without creating a synthetic event;
+- stable event IDs preserve idempotency across retries and process restarts;
+- policy, authentication, proof, and validation failures remain visible instead of being mislabeled as transient delivery failures.
+
+It preserves the signed permit and update controls introduced in v3.7.51.
+
+## Previous: v3.7.51
 
 v3.7.51 combines operator-controlled client update advisories with an action-permit boundary for protected work. The hosted service can identify an installed SDK version and return a typed, request-specific `client_update` advisory without silently changing local packages or configuration:
 
@@ -151,6 +163,18 @@ Supported wrappers call the one-call runtime before meaningful work and close ou
 
 When a transient network or server error prevents delivery, the SDK can retain the compact event in an owner-only local spool and retry it with the same event ID. The default spool is bounded to 100 records, written atomically, and stored with owner-only permissions.
 
+Installing the passive runtime starts an unreferenced background drain for that spool. Low-risk capture can return immediately after the durable local receipt is written; delivery retries continue without keeping the Node process alive. Backlog health is aggregate-only and never returns event payloads:
+
+```ts
+const runtime = marrow.createPassiveRuntime({ lifecycleFlushIntervalMs: 5_000 });
+runtime.install();
+
+console.log(runtime.lifecycleBacklog());
+await runtime.flushLifecycleEvents();
+```
+
+`state` is `clear`, `pending`, `attention_required`, or `disabled`, with exact pending/failed counts, oldest receipt timestamps, separate record and byte limits, and an exact fix. The legacy ambiguous `capacity` and `available` fields remain `null`; use `record_slots_available` and `bytes_available`. Authentication, policy, proof, and validation failures become explicit durable failures instead of infinite retries.
+
 Marrow reports passive coverage only from observed receipts. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect activation and `npx @getmarrow/install --repair` when configuration drift is reported.
 
 ## Core Control Methods
@@ -169,6 +193,8 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | `enforcementHeartbeat(input)` | Report expected/observed hook and configuration integrity |
 | `enforcementCoverage()` | Inspect permit closure, bypass, sidecar, and hook coverage |
 | `integrationEvent(input)` | Record a compact passive lifecycle receipt through the durable local spool |
+| `lifecycleBacklog()` | Read aggregate local backlog health without event payloads |
+| `flushLifecycleEvents()` | Retry queued lifecycle receipts and return aggregate health |
 | `decisionTrace(decisionId)` | Inspect the tenant-scoped causal path behind a governed decision |
 | `workflowGate(input)` | Evaluate a workflow action against policy |
 | `completionContracts()` | List built-in completion/proof contracts |

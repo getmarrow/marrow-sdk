@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 const test = require('node:test');
 
 const { MarrowClient } = require('../dist/index.js');
@@ -23,6 +26,62 @@ test('createPassiveRuntime patches and restores global fetch', () => {
     assert.equal(globalThis.fetch, fakeFetch);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('passive install contains corrupt-spool drain failures and reports unavailable health', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-passive-corrupt-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  writeFileSync(spoolPath, '{corrupt', { mode: 0o600 });
+  globalThis.fetch = async () => Response.json({ data: { accepted: true } });
+  const runtime = new MarrowClient('test-passive-runtime-key', { eventSpoolPath: spoolPath })
+    .createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+  try {
+    runtime.install();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const health = runtime.lifecycleBacklog();
+    assert.equal(health.state, 'attention_required');
+    assert.equal(health.measurement_available, false);
+    assert.equal(health.exact, false);
+    assert.equal(health.capacity, null);
+    assert.equal(health.available, null);
+  } finally {
+    runtime.restore();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('explicit lifecycle drain is wall-clock bounded when delivery ignores abort', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-passive-timeout-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  let stall = false;
+  globalThis.fetch = async () => stall
+    ? new Promise(() => {})
+    : new Response(JSON.stringify({ error: 'temporarily unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { eventSpoolPath: spoolPath });
+    const queued = await marrow.integrationEvent({
+      event_id: 'bounded-stalled-delivery',
+      event_type: 'tool_completed',
+      action: 'capture a bounded lifecycle receipt',
+    });
+    assert.equal(queued.queued, true);
+    stall = true;
+    const started = Date.now();
+    const health = await marrow.flushLifecycleEvents();
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed >= 900 && elapsed < 2_000, `drain took ${elapsed}ms`);
+    assert.equal(health.state, 'pending');
+    assert.equal(health.pending, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
@@ -808,7 +867,7 @@ test('quickStatus maps passive install health fields', async () => {
           available: true,
           active: true,
           last_observed_at: '2026-05-08T01:00:00.000Z',
-          adapter_version: '3.7.51',
+          adapter_version: '3.7.52',
           capability_level: 'sdk_passive_runtime',
         },
         capture_coverage: {
@@ -905,8 +964,8 @@ test('SDK identifies its package version and exposes the server update advisory'
         ok: true,
         client_update: {
           package: '@getmarrow/sdk',
-          installed_version: '3.7.51',
-          latest_version: '3.7.51',
+          installed_version: '3.7.52',
+          latest_version: '3.7.52',
           version_status: 'behind',
           update_available: true,
           notification_state: 'recommended',
@@ -926,7 +985,7 @@ test('SDK identifies its package version and exposes the server update advisory'
     const marrow = new MarrowClient('test-passive-runtime-key');
     const status = await marrow.quickStatus();
     assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
-    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.51');
+    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.52');
     assert.equal(status.clientUpdate.update_available, true);
     assert.equal(status.clientUpdate.update_command, 'npm install @getmarrow/sdk@latest');
   } finally {

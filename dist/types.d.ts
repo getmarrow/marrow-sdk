@@ -168,6 +168,7 @@ export interface MarrowPassiveRuntimeOptions {
     captureModelUsage?: boolean;
     fetch?: typeof fetch | false;
     patchGlobalFetch?: boolean;
+    lifecycleFlushIntervalMs?: number;
 }
 export interface MarrowPassiveActionOptions {
     action?: string;
@@ -200,6 +201,11 @@ export interface MarrowPassiveRuntime {
     command<T>(command: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
     deploy<T>(action: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
     publish<T>(action: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
+}
+/** Additive lifecycle controls returned by createPassiveRuntime(). */
+export interface MarrowPassiveRuntimeWithLifecycle extends MarrowPassiveRuntime {
+    lifecycleBacklog(): MarrowLifecycleBacklog;
+    flushLifecycleEvents(): Promise<MarrowLifecycleBacklog>;
 }
 export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'outcome_commit_failed' | 'unknown';
 export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
@@ -775,6 +781,24 @@ export interface MarrowLifecycleEventResult {
     failed_spool_events: number;
     failure_code?: 'terminal_rejection' | 'retry_exhausted';
     normalized_event?: Record<string, unknown>;
+}
+export interface MarrowLifecycleBacklog {
+    enabled: boolean;
+    state: 'disabled' | 'clear' | 'pending' | 'attention_required';
+    pending: number;
+    failed: number;
+    oldest_pending_at: string | null;
+    oldest_failed_at: string | null;
+    capacity: number | null;
+    available: number | null;
+    record_capacity: number | null;
+    record_slots_available: number | null;
+    byte_capacity: number | null;
+    bytes_used: number | null;
+    bytes_available: number | null;
+    measurement_available: boolean;
+    exact: boolean;
+    exact_fix: string | null;
 }
 export interface MarrowDecisionTraceResult {
     trace: {

@@ -293,11 +293,13 @@ function validateStoredRecord(value) {
 class DurableEventSpool {
     path;
     lockPath;
+    ownsParent;
     constructor(input) {
         const namespace = (0, node_crypto_1.createHash)('sha256')
             .update(`${input.apiKey}:${input.agentId || 'account'}`)
             .digest('hex')
             .slice(0, 20);
+        this.ownsParent = !input.path;
         this.path = input.path ? (0, node_path_1.resolve)(input.path) : (0, node_path_1.join)((0, node_os_1.homedir)(), '.marrow', 'spool', `sdk-${namespace}.json`);
         this.lockPath = `${this.path}.lock`;
     }
@@ -369,10 +371,20 @@ class DurableEventSpool {
     status(eventId) {
         return this.withLock(() => {
             const records = this.readLocked();
+            const pending = records.filter((record) => record.delivery_state === 'pending');
+            const failed = records.filter((record) => record.delivery_state === 'failed');
+            const bytesUsed = Buffer.byteLength(JSON.stringify(records), 'utf8');
             return {
                 ...(eventId ? { record: records.find((record) => record.event_id === eventId) } : {}),
-                pending: records.filter((record) => record.delivery_state === 'pending').length,
-                failed: records.filter((record) => record.delivery_state === 'failed').length,
+                pending: pending.length,
+                failed: failed.length,
+                oldest_pending_at: pending.map((record) => record.occurred_at).sort()[0] || null,
+                oldest_failed_at: failed.map((record) => record.failed_at || record.occurred_at).sort()[0] || null,
+                record_capacity: MAX_RECORDS,
+                record_slots_available: Math.max(0, MAX_RECORDS - records.length),
+                byte_capacity: MAX_SPOOL_BYTES,
+                bytes_used: bytesUsed,
+                bytes_available: Math.max(0, MAX_SPOOL_BYTES - bytesUsed),
             };
         });
     }
@@ -387,14 +399,54 @@ class DurableEventSpool {
         return status.pending + status.failed;
     }
     ensureDirectory() {
-        const directory = (0, node_path_1.dirname)(this.path);
-        if ((0, node_fs_1.existsSync)(directory)) {
-            if (!(0, node_fs_1.statSync)(directory).isDirectory()) {
-                throw new Error('Lifecycle spool parent path is not a directory');
+        const directory = (0, node_path_1.resolve)((0, node_path_1.dirname)(this.path));
+        const parsed = (0, node_path_1.parse)(directory);
+        let current = parsed.root;
+        for (const component of directory.slice(parsed.root.length).split(node_path_1.sep).filter(Boolean)) {
+            current = (0, node_path_1.join)(current, component);
+            try {
+                (0, node_fs_1.mkdirSync)(current, { mode: 0o700 });
             }
-            return;
+            catch (error) {
+                if (error.code !== 'EEXIST')
+                    throw error;
+            }
+            const status = (0, node_fs_1.lstatSync)(current);
+            if (status.isSymbolicLink() || !status.isDirectory() || (0, node_fs_1.realpathSync)(current) !== current) {
+                throw new Error('Lifecycle spool path cannot contain symlinked components');
+            }
+            if ((status.mode & 0o022) !== 0 && (status.mode & 0o1000) === 0) {
+                throw new Error('Lifecycle spool path cannot be nested under a non-sticky writable ancestor');
+            }
         }
-        (0, node_fs_1.mkdirSync)(directory, { recursive: true, mode: 0o700 });
+        const status = (0, node_fs_1.lstatSync)(directory);
+        const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+        if (this.ownsParent) {
+            if (uid !== null && status.uid !== uid)
+                throw new Error('Lifecycle spool directory must be owned by the current user');
+            (0, node_fs_1.chmodSync)(directory, 0o700);
+        }
+        else if ((status.mode & 0o022) !== 0) {
+            throw new Error('Custom lifecycle spool directory cannot be group or world writable');
+        }
+    }
+    assertSafeFile(path, label) {
+        let status;
+        try {
+            status = (0, node_fs_1.lstatSync)(path);
+        }
+        catch (error) {
+            if (error.code === 'ENOENT')
+                return;
+            throw error;
+        }
+        const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+        if (status.isSymbolicLink() || !status.isFile())
+            throw new Error(`Lifecycle ${label} must be a regular file`);
+        if (uid !== null && status.uid !== uid)
+            throw new Error(`Lifecycle ${label} must be owned by the current user`);
+        if ((status.mode & 0o077) !== 0)
+            throw new Error(`Lifecycle ${label} permissions must be 0600 or stricter`);
     }
     acquireLock() {
         this.ensureDirectory();
@@ -418,6 +470,7 @@ class DurableEventSpool {
                 if (code !== 'EEXIST')
                     throw error;
                 try {
+                    this.assertSafeFile(this.lockPath, 'spool lock');
                     if (Date.now() - (0, node_fs_1.statSync)(this.lockPath).mtimeMs > LOCK_STALE_MS) {
                         (0, node_fs_1.unlinkSync)(this.lockPath);
                         continue;
@@ -447,6 +500,7 @@ class DurableEventSpool {
     readLocked() {
         if (!(0, node_fs_1.existsSync)(this.path))
             return [];
+        this.assertSafeFile(this.path, 'spool file');
         const serialized = (0, node_fs_1.readFileSync)(this.path, 'utf8');
         try {
             if (Buffer.byteLength(serialized, 'utf8') > MAX_SPOOL_BYTES) {
@@ -483,11 +537,13 @@ class DurableEventSpool {
         const temporary = `${this.path}.tmp-${process.pid}-${(0, node_crypto_1.randomUUID)()}`;
         let fd = null;
         try {
+            this.assertSafeFile(this.path, 'spool file');
             fd = (0, node_fs_1.openSync)(temporary, 'wx', 0o600);
             (0, node_fs_1.writeFileSync)(fd, serialized, { encoding: 'utf8' });
             (0, node_fs_1.fsyncSync)(fd);
             (0, node_fs_1.closeSync)(fd);
             fd = null;
+            this.assertSafeFile(this.path, 'spool file');
             (0, node_fs_1.renameSync)(temporary, this.path);
             (0, node_fs_1.chmodSync)(this.path, 0o600);
             const directoryFd = (0, node_fs_1.openSync)((0, node_path_1.dirname)(this.path), 'r');

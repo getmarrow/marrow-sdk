@@ -31,6 +31,13 @@ export type SpoolEventStatus = {
     record?: SpoolRecord;
     pending: number;
     failed: number;
+    oldest_pending_at: string | null;
+    oldest_failed_at: string | null;
+    record_capacity: number;
+    record_slots_available: number;
+    byte_capacity: number;
+    bytes_used: number;
+    bytes_available: number;
 };
 export declare class SpoolCorruptionError extends Error {
     constructor();
@@ -40,6 +47,7 @@ export declare function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput)
 export declare class DurableEventSpool {
     readonly path: string;
     private readonly lockPath;
+    private readonly ownsParent;
     constructor(input: {
         apiKey: string;
         agentId?: string | null;
@@ -55,6 +63,7 @@ export declare class DurableEventSpool {
     failedSize(): number;
     size(): number;
     private ensureDirectory;
+    private assertSafeFile;
     private acquireLock;
     private withLock;
     private readLocked;

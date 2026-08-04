@@ -169,7 +169,7 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
 
 test('passive command uses runGuarded with redacted command metadata', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const calls = [];
 
   marrow.runGuarded = async (options) => {
@@ -216,7 +216,7 @@ test('passive command uses runGuarded with redacted command metadata', async () 
 
 test('runGuarded blocks when workflow gate denies high-risk action', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   let executed = false;
   const lifecycle = [];
 
@@ -260,7 +260,7 @@ test('runGuarded blocks when workflow gate denies high-risk action', async () =>
 
 test('runGuarded uses one-call agent runtime before executing passive work', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const order = [];
   const lifecycle = [];
   let runtimeInput;
@@ -398,7 +398,7 @@ test('runGuarded uses one-call agent runtime before executing passive work', asy
 
 test('runGuarded fails closed when mandatory outcome closure cannot commit', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   marrow.agentRuntime = async () => ({
     ok: true,
     decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'safe' } },
@@ -429,7 +429,7 @@ test('runGuarded fails closed when mandatory outcome closure cannot commit', asy
 
 test('runGuarded never executes a protected action without a verified action-bound permit', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   let executed = false;
   marrow.agentRuntime = async () => ({
     ok: true,
@@ -458,7 +458,7 @@ test('runGuarded never executes a protected action without a verified action-bou
 
 test('runGuarded treats a runtime block as permit-required in advisory mode', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   let executed = false;
   marrow.agentRuntime = async () => ({
     ok: true,
@@ -485,7 +485,7 @@ test('runGuarded treats a runtime block as permit-required in advisory mode', as
 
 test('runGuarded preserves exact action binding through permit closure', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const order = [];
   const observed = {};
   marrow.agentRuntime = async (input) => {
@@ -530,7 +530,7 @@ test('runGuarded preserves exact action binding through permit closure', async (
 
 test('runGuarded keeps a failed protected action incomplete when permit close fails', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const lifecycle = [];
   marrow.agentRuntime = async () => ({
     ok: true,
@@ -568,7 +568,7 @@ test('runGuarded keeps a failed protected action incomplete when permit close fa
 
 test('runGuarded emits explicit failed outcome lifecycle closure after a successful commit', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const lifecycle = [];
   marrow.agentRuntime = async () => ({
     ok: true,
@@ -603,7 +603,7 @@ test('runGuarded emits explicit failed outcome lifecycle closure after a success
 
 test('runGuarded lifecycle and failure closure never reuse a stale decision ID', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const lifecycle = [];
   const commits = [];
   marrow.agentRuntime = async () => ({
@@ -667,7 +667,7 @@ test('runGuarded lifecycle and failure closure never reuse a stale decision ID',
 
 test('runGuarded redacts action and context across runtime, think, commit, and summaries', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const leakedKey = 'mrw_' + '123e4567-e89b-12d3-a456-426614174000_' + 'deadbeefdeadbeefdeadbeefdeadbeef';
   const rawAction = `deploy with ${leakedKey} https://example.com/path?token=secretvalue123`;
   const context = {
@@ -726,7 +726,7 @@ test('runGuarded redacts action and context across runtime, think, commit, and s
 
 test('passive deploy defaults to strict risk policy and workflow gate', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const calls = [];
 
   marrow.runGuarded = async (options) => {
@@ -756,7 +756,7 @@ test('passive deploy defaults to strict risk policy and workflow gate', async ()
 
 test('wrapFetch redacts sensitive query values and internal paths', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
   const beforeCalls = [];
   const afterCalls = [];
 
@@ -786,7 +786,7 @@ test('wrapFetch redacts sensitive query values and internal paths', async () => 
 
 test('quickStatus maps passive install health fields', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
-  const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+  const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
 
   marrow.request = async () => ({
     data: {
@@ -937,7 +937,7 @@ test('quickStatus maps passive install health fields', async () => {
 });
 
 test('quickStatus makes legacy drift availability explicitly unavailable', async () => {
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   marrow.request = async () => ({
     data: {
       ok: true,
@@ -982,7 +982,7 @@ test('SDK identifies its package version and exposes the server update advisory'
   };
 
   try {
-    const marrow = new MarrowClient('test-passive-runtime-key');
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
     const status = await marrow.quickStatus();
     assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
     assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.52');
@@ -1007,7 +1007,7 @@ test('commit queues transient network failures and drains on next request', asyn
   };
 
   try {
-    const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+    const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
     marrow.decisionId = 'decision_retry';
     await assert.rejects(
       () => marrow.commit({ success: true, outcome: 'retry me' }),
@@ -1042,7 +1042,7 @@ test('commit does not queue 409 proof or idempotency conflicts', async () => {
   };
 
   try {
-    const marrow = new MarrowClient(process.env.MARROW_API_KEY);
+    const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
     marrow.decisionId = 'decision_conflict';
     await assert.rejects(
       () => marrow.commit({ success: true, outcome: 'needs proof' }),
@@ -1058,7 +1058,7 @@ test('commit does not queue 409 proof or idempotency conflicts', async () => {
 
 test('agentRuntime redacts legacy Marrow keys from action context and proof', async () => {
   const leakedKey = 'mrw_' + '123e4567-e89b-12d3-a456-426614174000_' + 'abcdefabcdefabcdefabcdefabcdefab';
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   let captured;
 
   marrow.request = async (method, path, body) => {
@@ -1083,7 +1083,7 @@ test('agentRuntime redacts legacy Marrow keys from action context and proof', as
 
 test('arbitrate uses the existing runtime endpoint and redacts proposal content', async () => {
   const leaked = 'MARROW_API_KEY=arbitration-test-secret-value';
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   let captured;
 
   marrow.request = async (method, path, body) => {
@@ -1121,7 +1121,7 @@ test('arbitrate uses the existing runtime endpoint and redacts proposal content'
 
 test('arbitrate redacts generated and explicit actions and enforces public collection bounds', async () => {
   const leaked = 'MARROW_API_KEY=arbitration-objective-secret-value';
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   const captured = [];
   marrow.request = async (method, path, body) => {
     captured.push({ method, path, body });
@@ -1174,7 +1174,7 @@ test('arbitrate redacts generated and explicit actions and enforces public colle
 });
 
 test('arbitrate preserves valid opaque identifiers while rejecting secret-shaped references', async () => {
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   const captured = [];
   marrow.request = async (_method, _path, body) => {
     captured.push(body);
@@ -1235,7 +1235,7 @@ test('arbitrate preserves valid opaque identifiers while rejecting secret-shaped
 
 test('commit redacts outcome causedBy and proof token shapes', async () => {
   const leaked = 'cfut_abcdefghijklmnopqrstuvwxyz1234567890';
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   let captured;
 
   marrow.request = async (method, path, body) => {
@@ -1274,7 +1274,7 @@ test('commit redacts outcome causedBy and proof token shapes', async () => {
 
 test('think redacts direct action context provenance and previous outcome', async () => {
   const leaked = 'cfut_abcdefghijklmnopqrstuvwxyz1234567890';
-  const marrow = new MarrowClient('test-passive-runtime-key');
+  const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
   let captured;
   marrow.decisionId = 'decision_previous';
 

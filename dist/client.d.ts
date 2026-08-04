@@ -302,6 +302,8 @@ export declare class MarrowClient {
     lifecycleBacklog(): MarrowLifecycleBacklog;
     /** Drain durable lifecycle receipts and return aggregate backlog health. */
     flushLifecycleEvents(): Promise<MarrowLifecycleBacklog>;
+    /** Explicitly requeue durable failed receipts, then retry delivery once. */
+    recoverLifecycleEvents(eventIds?: string[]): Promise<MarrowLifecycleBacklog>;
     private flushLifecycleEventsInBackground;
     decisionTrace(decisionId: string): Promise<MarrowDecisionTraceResult>;
     agentPerformance(period?: string | number, agentId?: string | null): Promise<MarrowAgentPerformanceResult>;

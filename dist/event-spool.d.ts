@@ -58,6 +58,7 @@ export declare class DurableEventSpool {
     acknowledge(eventIds: string[]): void;
     retry(eventId: string): void;
     fail(eventId: string, failureCode: SpoolFailureCode): void;
+    requeueFailed(eventIds?: string[]): number;
     status(eventId?: string): SpoolEventStatus;
     pendingSize(): number;
     failedSize(): number;

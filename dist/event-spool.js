@@ -368,6 +368,26 @@ class DurableEventSpool {
                 this.writeLocked(updated);
         });
     }
+    requeueFailed(eventIds) {
+        if (eventIds && (eventIds.length > MAX_RECORDS || eventIds.some((eventId) => safeId(eventId) !== eventId))) {
+            throw new TypeError('Invalid lifecycle recovery event IDs');
+        }
+        const ids = eventIds ? new Set(eventIds) : null;
+        return this.withLock(() => {
+            const records = this.readLocked();
+            let changed = 0;
+            const updated = records.map((record) => {
+                if (record.delivery_state !== 'failed' || (ids && !ids.has(record.event_id)))
+                    return record;
+                changed += 1;
+                const { failure_code: _failureCode, failed_at: _failedAt, ...rest } = record;
+                return { ...rest, attempts: 0, delivery_state: 'pending' };
+            });
+            if (changed > 0)
+                this.writeLocked(updated);
+            return changed;
+        });
+    }
     status(eventId) {
         return this.withLock(() => {
             const records = this.readLocked();
@@ -424,7 +444,9 @@ class DurableEventSpool {
         if (this.ownsParent) {
             if (uid !== null && status.uid !== uid)
                 throw new Error('Lifecycle spool directory must be owned by the current user');
-            (0, node_fs_1.chmodSync)(directory, 0o700);
+            if ((status.mode & 0o077) !== 0) {
+                throw new Error('Default lifecycle spool directory permissions must be 0700 or stricter');
+            }
         }
         else if ((status.mode & 0o022) !== 0) {
             throw new Error('Custom lifecycle spool directory cannot be group or world writable');

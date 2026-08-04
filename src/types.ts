@@ -291,6 +291,7 @@ export interface MarrowPassiveRuntime {
 export interface MarrowPassiveRuntimeWithLifecycle extends MarrowPassiveRuntime {
   lifecycleBacklog(): MarrowLifecycleBacklog;
   flushLifecycleEvents(): Promise<MarrowLifecycleBacklog>;
+  recoverLifecycleEvents(eventIds?: string[]): Promise<MarrowLifecycleBacklog>;
 }
 
 export type MarrowFailureType =

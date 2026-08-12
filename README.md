@@ -65,7 +65,18 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.52
+## What's New in v3.7.53
+
+v3.7.53 makes a meaningful Marrow intervention visible inside the agent session without exposing private work content:
+
+- `decisionTrace()` returns an owner-readable `intervention_receipt` for an evidence-backed block, warning, or review;
+- the receipt identifies the required workflow, proof status, permit follow-through, and recorded outcome;
+- raw context, raw outcomes, proof values, credentials, and other tenants' data remain excluded;
+- agents can relay one factual intervention summary after Marrow changes a consequential action and stay quiet for routine low-risk work.
+
+It preserves the resilient passive capture introduced in v3.7.52.
+
+## Previous: v3.7.52
 
 v3.7.52 makes low-risk passive capture resilient without placing network delivery on the agent's critical path:
 
@@ -286,9 +297,14 @@ await marrow.integrationEvent({
 
 const { trace } = await marrow.decisionTrace(decisionId);
 console.log(trace.path);
+if (trace.intervention_receipt.intervention.available) {
+  console.log(trace.intervention_receipt.intervention.reason);
+}
 ```
 
 Tool or workflow completion keeps an outcome pending until Marrow receives explicit success/failure closure. That distinction prevents a successful command exit from being mistaken for a successful business outcome.
+
+`trace.intervention_receipt` is the owner-readable proof for one governed moment. It reports what Marrow blocked, warned about, or held for review; the required workflow; permit follow-through; proof status; and the recorded outcome. It never includes raw context, raw outcomes, proof values, credentials, or another tenant's data. Relay one factual receipt summary after a meaningful intervention; stay quiet for routine low-risk work.
 
 ## Adaptive Policy
 

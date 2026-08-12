@@ -944,9 +944,66 @@ export interface MarrowDecisionTraceResult {
     gate: Record<string, unknown> | null;
     proof: Record<string, unknown> | null;
     workflow: Record<string, unknown> | null;
+    intervention_receipt: MarrowInterventionReceipt;
     path: string[];
     generated_at: string;
   };
+}
+
+export interface MarrowInterventionReceipt {
+  receipt_id: string;
+  decision_id: string;
+  generated_at: string;
+  occurred_at: string;
+  agent_id: string | null;
+  action: { category: string; label: string };
+  intervention: {
+    available: boolean;
+    disposition: 'blocked' | 'review_required' | 'warned' | 'allowed_after_correction' | 'unavailable';
+    risk_level: string | null;
+    reason: string | null;
+    policy_reference: { kind: 'owner_approval' | 'workflow_playbook' | 'fleet_lesson'; label: string } | null;
+  };
+  correction: {
+    required: boolean;
+    steps: string[];
+    followed: boolean | null;
+    state: 'followed' | 'not_executed' | 'pending' | 'unavailable';
+  };
+  proof: {
+    available: boolean;
+    required: boolean;
+    status: string | null;
+    required_fields: string[];
+    provided_fields: string[];
+    missing_fields: string[];
+  };
+  execution: {
+    available: boolean;
+    state: 'issued' | 'verified' | 'consumed' | 'closed_success' | 'closed_failure' | 'expired' | 'unavailable';
+    completed_at: string | null;
+  };
+  outcome: {
+    available: boolean;
+    state: 'succeeded' | 'failed' | 'pending';
+    success: boolean | null;
+    recorded_at: string | null;
+  };
+  evidence: {
+    source: 'marrow_governance_ledger';
+    generated_at: string;
+    exact: true;
+    truncated: false;
+    available: boolean;
+  };
+  privacy: {
+    account_scoped: true;
+    raw_context_exposed: false;
+    raw_outcome_exposed: false;
+    proof_values_exposed: false;
+    public_share_enabled: false;
+  };
+  disclaimer: string;
 }
 
 export interface MemoryShareOptions {

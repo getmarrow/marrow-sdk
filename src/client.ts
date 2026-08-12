@@ -110,7 +110,7 @@ const REQUIRE_EXTERNAL_ERROR =
 const REQUIRE_COMPLETION_ERROR =
   'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set<MarrowDecisionSourceClient>(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
-const SDK_ADAPTER_VERSION = '3.7.52';
+const SDK_ADAPTER_VERSION = '3.7.53';
 const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
 const SDK_CONFIG_FINGERPRINT = createHash('sha256')
   .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)

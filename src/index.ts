@@ -81,6 +81,7 @@ export type {
   MarrowIntegrationCapabilityLevel,
   MarrowInterventionDisposition,
   MarrowDecisionTraceResult,
+  MarrowInterventionReceipt,
 
   // Result Types
   MarrowOrientResult,

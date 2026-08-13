@@ -13,7 +13,7 @@ const PRE_EXIT_REMINDER = 'Before ending the session, log the outcome to Marrow 
 const REQUIRE_EXTERNAL_ERROR = 'Marrow require mode: log intent with marrow.think() before external actions.';
 const REQUIRE_COMPLETION_ERROR = 'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
-const SDK_ADAPTER_VERSION = '3.7.53';
+const SDK_ADAPTER_VERSION = '3.7.54';
 const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
 const SDK_CONFIG_FINGERPRINT = (0, node_crypto_1.createHash)('sha256')
     .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)
@@ -616,6 +616,7 @@ class MarrowClient {
     eventSpool;
     eventSpoolDrainPromise = null;
     eventSpoolHealthError = null;
+    readCache = new Map();
     constructor(apiKey, options) {
         this.apiKey = apiKey;
         // Support legacy positional baseUrl: new MarrowClient(key, 'https://...')
@@ -2196,71 +2197,69 @@ class MarrowClient {
         return (res.data ?? res);
     }
     async orient(params) {
-        // When autoWarn is enabled, hit the new orient endpoint directly
+        const task = params?.taskType?.trim() || 'general work';
         if (params?.autoWarn) {
-            try {
-                const res = await this.request('POST', '/v1/agent/orient', {
-                    task: params.taskType,
-                    autoWarn: true,
-                });
-                const data = res.data ?? res;
-                const warnings = (data.warnings || []).map((w) => ({
-                    severity: String(w.severity || 'LOW'),
-                    message: String(w.message || ''),
-                    pattern: String(w.pattern || ''),
-                    recommendation: w.recommendation ? String(w.recommendation) : undefined,
-                }));
-                this.orientWarnings = warnings
-                    .filter((w) => w.severity === 'HIGH' || w.severity === 'MEDIUM')
-                    .map((w) => ({
-                    type: w.pattern,
-                    failureRate: w.message.match(/(\d+)%/)?.[1] ? parseInt((w.message.match(/(\d+)%/)?.[1] || '0'), 10) / 100 : 0,
-                    message: w.message,
-                }));
-                this.loopState.orientedAt = nowIso();
-                this.loopState.recommendedNext = this.loopState.hasIntentLog ? 'act' : 'think';
-                this.loopState.loopState = this.loopState.hasIntentLog ? 'intent_logged' : 'oriented';
-                const loop = this.check();
-                return {
-                    warnings: this.orientWarnings,
-                    serverWarnings: warnings,
-                    lessons: [],
-                    loopState: data.loopState || { isOpen: false, lastCommit: null },
-                    shouldPause: warnings.some((w) => w.severity === 'HIGH'),
-                    loop,
-                    recommendedNext: loop.recommendedNext,
-                    nudge: this.loopState.hasIntentLog ? null : POST_ORIENT_NUDGE,
-                    text: warnings.length > 0
-                        ? `⚠️ ${warnings[0].message}`
-                        : 'No recent failures detected. Proceed.',
-                };
+            const read = await this.readWithLastKnown('POST', '/v1/agent/runtime?response=slim', {
+                action: task,
+                type: params?.taskType || 'general',
+                role: 'general',
+                agent_id: this.agentId ?? undefined,
+                session_id: this.sessionId ?? undefined,
+                context: { sdk_orient: true },
+            }, 750, `orient:${task.slice(0, 120)}`);
+            if (!read.value) {
+                return this.unavailableOrient(read.errorCode || 'unavailable');
             }
-            catch (e) {
-                // Fall back to legacy orient if endpoint isn't deployed yet
-                process.stderr.write(`[marrow] Warning: autoWarn orient failed, falling back to legacy: ${safeErrorMessage(e)}\n`);
-            }
+            const data = read.value.data ?? read.value;
+            const intervention = data.intervention && typeof data.intervention === 'object' ? data.intervention : {};
+            const riskGate = data.risk_gate && typeof data.risk_gate === 'object' ? data.risk_gate : {};
+            const gateReceipt = data.gate_receipt && typeof data.gate_receipt === 'object' ? data.gate_receipt : {};
+            const decision = String(intervention.decision || riskGate.decision || gateReceipt.decision || 'proceed');
+            const shouldPause = read.stale || intervention.allow === false || riskGate.allow === false
+                || ['block', 'deny', 'denied', 'review_required', 'owner_approval_required'].includes(decision);
+            const reason = Array.isArray(riskGate.reasons) && riskGate.reasons[0] && typeof riskGate.reasons[0] === 'object'
+                ? String(riskGate.reasons[0].message || '')
+                : '';
+            const message = String(intervention.before_action || intervention.exact_next_action || intervention.headline
+                || gateReceipt.exact_fix || reason || data.before_you_act
+                || (read.stale ? 'Fresh Marrow guidance is unavailable; cached guidance cannot authorize this action.' : ''));
+            const severity = shouldPause ? 'HIGH' : decision === 'warn' ? 'MEDIUM' : 'LOW';
+            const serverWarnings = message ? [{ severity, message, pattern: `runtime_${decision}` }] : [];
+            this.orientWarnings = serverWarnings
+                .filter((warning) => warning.severity !== 'LOW')
+                .map((warning) => ({ type: warning.pattern, failureRate: 0, message: warning.message }));
+            this.loopState.orientedAt = nowIso();
+            this.loopState.recommendedNext = this.loopState.hasIntentLog ? 'act' : 'think';
+            this.loopState.loopState = this.loopState.hasIntentLog ? 'intent_logged' : 'oriented';
+            const loop = this.check();
+            return {
+                available: true,
+                source: read.source,
+                stale: read.stale,
+                stale_ms: read.staleMs,
+                warnings: this.orientWarnings,
+                serverWarnings,
+                lessons: Array.isArray(data.relevant_lessons) ? data.relevant_lessons.map((lesson) => ({ summary: redactSensitiveText(String(lesson)), severity: 'info' })) : [],
+                loopState: { isOpen: Boolean(gateReceipt.required), lastCommit: null },
+                shouldPause,
+                loop,
+                recommendedNext: loop.recommendedNext,
+                nudge: this.loopState.hasIntentLog ? null : POST_ORIENT_NUDGE,
+                text: message || 'No current Marrow warning. Proceed and record the outcome.',
+            };
         }
-        const patterns = await this.agentPatterns(params?.taskType ? { type: params.taskType } : undefined);
-        const warnings = patterns.failurePatterns
-            .filter((p) => p.failureRate > 0.15)
-            .map((p) => ({
-            type: p.decisionType,
-            failureRate: p.failureRate,
-            message: `${p.decisionType} has ${Math.round(p.failureRate * 100)}% failure rate over ${p.count} decisions — check lessons before proceeding`,
-        }));
-        let lessons = [];
-        try {
-            const res = await this.request('GET', `/v1/agent/think/history?type=lesson&limit=5`);
-            const ld = res.data ?? res;
-            const items = (ld.items || ld.decisions || []);
-            lessons = items.map((i) => ({
-                summary: String(i.action || i.summary || ''),
-                severity: warnings.length > 0 ? 'warning' : 'info',
-            }));
-        }
-        catch (e) {
-            process.stderr.write(`[marrow] Warning: lessons endpoint unavailable: ${safeErrorMessage(e)}\n`);
-        }
+        const read = await this.readWithLastKnown('GET', '/v1/agent/context', undefined, 400, 'agent-context');
+        if (!read.value)
+            return this.unavailableOrient(read.errorCode || 'unavailable');
+        const data = read.value.data ?? read.value;
+        const contextStatus = data.status && typeof data.status === 'object' ? data.status : {};
+        const warnings = Array.isArray(contextStatus.failure_reasons)
+            ? contextStatus.failure_reasons.slice(0, 3).map((warning) => ({
+                type: String(warning.code || 'context_warning'),
+                failureRate: 0,
+                message: String(warning.message || warning.exact_fix || 'Marrow context needs attention.'),
+            }))
+            : [];
         this.loopState.orientedAt = nowIso();
         this.loopState.recommendedNext = this.loopState.hasIntentLog
             ? 'act'
@@ -2278,15 +2277,19 @@ class MarrowClient {
             DEFAULT_HINT,
             nudge,
             warnings[0]?.message ? `Warning: ${warnings[0].message}` : null,
-            lessons[0]?.summary ? `Recent lesson: ${lessons[0].summary}` : null,
+            data.exact_next_action ? `Marrow: ${String(data.exact_next_action)}` : null,
             `Recommended next step: ${loop.recommendedNext}.`,
         ]
             .filter(Boolean)
             .join(' ');
         return {
+            available: true,
+            source: read.source,
+            stale: read.stale,
+            stale_ms: read.staleMs,
             warnings,
-            lessons,
-            shouldPause: warnings.some((w) => w.failureRate > 0.4),
+            lessons: [],
+            shouldPause: warnings.some((warning) => warning.failureRate > 0.4),
             loop,
             recommendedNext: loop.recommendedNext,
             nudge,
@@ -2325,20 +2328,44 @@ class MarrowClient {
         };
     }
     async ask(query) {
-        const res = await this.request('POST', '/v1/agent/ask', { query });
-        const data = res.data ?? res;
+        const read = await this.readWithLastKnown('POST', '/v1/analytics/decision-brief', {
+            action: redactSensitiveText(query).slice(0, 1000),
+            type: 'general',
+            role: 'general',
+            agent_id: this.agentId ?? undefined,
+            session_id: this.sessionId ?? undefined,
+        }, 400, `ask:${query.slice(0, 120)}`);
+        if (!read.value) {
+            return {
+                available: false,
+                source: 'unavailable',
+                stale: false,
+                stale_ms: null,
+                error_code: read.errorCode || 'unavailable',
+                answer: 'Marrow guidance is temporarily unavailable. Continue only if this action is low risk.',
+                stats: null,
+                top_outcomes: [],
+                decisions_matched: 0,
+                low_history: true,
+            };
+        }
+        const data = read.value.data ?? read.value;
+        const similarFailures = Array.isArray(data.risk?.similar_failures) ? data.risk.similar_failures : [];
         return {
-            answer: data.answer,
-            stats: data.stats || null,
-            top_outcomes: data.top_outcomes || [],
-            decisions_matched: data.decisions_matched || 0,
-            query_keywords: data.query_keywords,
-            low_history: data.low_history,
+            available: true,
+            source: read.source,
+            stale: read.stale,
+            stale_ms: read.staleMs,
+            answer: [data.summary, data.next_actions?.[0]].filter(Boolean).join(' '),
+            stats: null,
+            top_outcomes: Array.isArray(data.failure_alerts) ? data.failure_alerts.map((item) => String(item.message || '')).filter(Boolean).slice(0, 5) : [],
+            decisions_matched: similarFailures.reduce((total, item) => total + Number(item.failures || 0), 0),
+            low_history: Number(data.fleet_reliability?.outcome_coverage || 0) === 0,
         };
     }
     async quickStatus() {
-        const res = await this.request('GET', '/v1/agent/status');
-        const data = res.data ?? res;
+        const read = await this.readWithLastKnown('GET', '/v1/agent/status?fast=1', undefined, 400, 'quick-status');
+        const data = read.value ? (read.value.data ?? read.value) : {};
         const rawActivationCoverage = data.activation_coverage && typeof data.activation_coverage === 'object'
             ? data.activation_coverage
             : null;
@@ -2402,6 +2429,11 @@ class MarrowClient {
                 },
             };
         return {
+            available: Boolean(read.value),
+            source: read.value ? read.source : 'unavailable',
+            stale: read.stale,
+            stale_ms: read.staleMs,
+            ...(read.value ? {} : { error_code: read.errorCode || 'unavailable' }),
             ok: data.ok,
             enabled: Boolean(data.enabled ?? data.ok),
             health: data.health || 'degraded',
@@ -2727,11 +2759,11 @@ class MarrowClient {
      * source-of-truth surfaces, proof-pack requirements, and next actions.
      */
     async decisionBrief(input) {
-        const res = await this.request('POST', '/v1/analytics/decision-brief', {
+        const res = await this.requestRead('POST', '/v1/analytics/decision-brief', {
             ...input,
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
-        });
+        }, 400);
         return (res.data || res);
     }
     async workflowGate(input) {
@@ -2743,7 +2775,7 @@ class MarrowClient {
      * template suggestion, proof-pack requirements, and exact next action.
      */
     async agentRuntime(input) {
-        const res = await this.request('POST', '/v1/agent/runtime', {
+        const res = await this.requestRead('POST', '/v1/agent/runtime', {
             ...input,
             action: redactSensitiveText(input.action),
             context: input.context ? redactSensitiveValue(input.context) : undefined,
@@ -2753,7 +2785,7 @@ class MarrowClient {
                 : undefined,
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
-        });
+        }, 750);
         return (res.data || res);
     }
     /**
@@ -3156,17 +3188,66 @@ class MarrowClient {
             agent_ids: Array.isArray(raw.agent_ids) ? raw.agent_ids : [],
         };
     }
-    async request(method, path, body) {
-        await this.drainRetryQueue();
+    async request(method, path, body, options) {
+        if (!options?.skipRetryDrain)
+            await this.drainRetryQueue();
         try {
-            return await this.requestOnce(method, path, body);
+            return await this.requestOnce(method, path, body, options?.timeoutMs || 0, Boolean(options?.timeoutMs));
         }
         catch (error) {
-            if (this.shouldQueueRequest(method, path, error)) {
+            if (!options?.skipRetryDrain && this.shouldQueueRequest(method, path, error)) {
                 this.enqueueRetry(method, path, body, error);
             }
             throw error;
         }
+    }
+    async requestRead(method, path, body, timeoutMs = 400) {
+        return this.request(method, path, body, { skipRetryDrain: true, timeoutMs });
+    }
+    async readWithLastKnown(method, path, body, timeoutMs, cacheKey) {
+        try {
+            const value = await this.requestRead(method, path, body, timeoutMs);
+            this.readCache.set(cacheKey, { value, storedAt: Date.now() });
+            return { value, source: 'live', stale: false, staleMs: 0 };
+        }
+        catch (error) {
+            const failure = classifyMarrowFailure(error);
+            if (failure === 'auth' || failure === 'permission')
+                throw error;
+            const cached = this.readCache.get(cacheKey);
+            const staleMs = cached ? Date.now() - cached.storedAt : null;
+            if (cached && staleMs !== null && staleMs <= 60 * 60 * 1000) {
+                return { value: cached.value, source: 'last_known', stale: true, staleMs, errorCode: failure };
+            }
+            return { value: null, source: 'unavailable', stale: false, staleMs: null, errorCode: failure };
+        }
+    }
+    unavailableOrient(errorCode) {
+        const loop = this.check();
+        return {
+            available: false,
+            source: 'unavailable',
+            stale: false,
+            stale_ms: null,
+            error_code: errorCode,
+            warnings: [{
+                    type: 'marrow_guidance_unavailable',
+                    failureRate: 0,
+                    message: 'Fresh Marrow guidance is unavailable. Continue only with low-risk work; retry before a sensitive action.',
+                }],
+            serverWarnings: [{
+                    severity: 'HIGH',
+                    message: 'Fresh Marrow guidance is unavailable. Continue only with low-risk work; retry before a sensitive action.',
+                    pattern: 'marrow_guidance_unavailable',
+                }],
+            lessons: [],
+            loopState: { isOpen: false, lastCommit: null },
+            shouldPause: true,
+            loop,
+            recommendedNext: loop.recommendedNext,
+            nudge: null,
+            text: 'Fresh Marrow guidance is unavailable. Retry before high-risk work.',
+        };
     }
     async requestOnce(method, path, body, timeoutMs = 0, unrefTimeout = false) {
         const url = `${this.baseUrl}${path}`;
@@ -3197,7 +3278,7 @@ class MarrowClient {
                 new Promise((_, reject) => {
                     timeout = setTimeout(() => {
                         controller?.abort();
-                        reject(new Error('Marrow lifecycle delivery timed out'));
+                        reject(new Error(`Marrow request timed out after ${timeoutMs}ms`));
                     }, timeoutMs);
                     if (unrefTimeout)
                         timeout.unref?.();

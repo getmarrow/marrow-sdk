@@ -867,7 +867,7 @@ test('quickStatus maps passive install health fields', async () => {
           available: true,
           active: true,
           last_observed_at: '2026-05-08T01:00:00.000Z',
-          adapter_version: '3.7.53',
+          adapter_version: '3.7.54',
           capability_level: 'sdk_passive_runtime',
         },
         capture_coverage: {
@@ -954,6 +954,76 @@ test('quickStatus makes legacy drift availability explicitly unavailable', async
   assert.deepEqual(status.activationCoverage.drift.reasons, []);
 });
 
+test('ask uses the canonical decision brief, bypasses write drain, and labels last-known fallback', async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  let drained = 0;
+  globalThis.fetch = async (url) => {
+    call += 1;
+    assert.match(String(url), /\/v1\/analytics\/decision-brief$/);
+    if (call === 2) throw new Error('network timeout');
+    return new Response(JSON.stringify({ data: {
+      summary: 'Verify the release evidence first.',
+      next_actions: ['Run the required checks.'],
+      risk: { similar_failures: [{ decision_type: 'deploy', failures: 2, failure_rate: 0.5 }] },
+      failure_alerts: [{ message: 'Prior deploy proof was incomplete.' }],
+      fleet_reliability: { outcome_coverage: 0.75 },
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    marrow.drainRetryQueue = async () => { drained += 1; };
+    const live = await marrow.ask('How should I deploy?');
+    const stale = await marrow.ask('How should I deploy?');
+    assert.equal(drained, 0);
+    assert.equal(live.source, 'live');
+    assert.equal(live.decisions_matched, 2);
+    assert.equal(stale.source, 'last_known');
+    assert.equal(stale.stale, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('read fallback never converts authentication failure into cached guidance', async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call === 1) return new Response(JSON.stringify({ data: {
+      summary: 'Live guidance', next_actions: [], risk: { similar_failures: [] },
+      failure_alerts: [], fleet_reliability: { outcome_coverage: 1 },
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      statusText: 'Unauthorized',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    await marrow.ask('same query');
+    await assert.rejects(() => marrow.ask('same query'), /401 Unauthorized/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('quickStatus fails soft when no live or last-known response exists', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network timeout'); };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    const status = await marrow.quickStatus();
+    assert.equal(status.available, false);
+    assert.equal(status.source, 'unavailable');
+    assert.equal(status.health, 'degraded');
+    assert.equal(status.error_code, 'timeout');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('SDK identifies its package version and exposes the server update advisory', async () => {
   const originalFetch = globalThis.fetch;
   let capturedHeaders;
@@ -964,8 +1034,8 @@ test('SDK identifies its package version and exposes the server update advisory'
         ok: true,
         client_update: {
           package: '@getmarrow/sdk',
-          installed_version: '3.7.53',
-          latest_version: '3.7.53',
+          installed_version: '3.7.54',
+          latest_version: '3.7.54',
           version_status: 'behind',
           update_available: true,
           notification_state: 'recommended',
@@ -985,7 +1055,7 @@ test('SDK identifies its package version and exposes the server update advisory'
     const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
     const status = await marrow.quickStatus();
     assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
-    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.53');
+    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.54');
     assert.equal(status.clientUpdate.update_available, true);
     assert.equal(status.clientUpdate.update_command, 'npm install @getmarrow/sdk@latest');
   } finally {

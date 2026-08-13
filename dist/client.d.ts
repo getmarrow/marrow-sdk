@@ -26,6 +26,7 @@ export declare class MarrowClient {
     private eventSpool;
     private eventSpoolDrainPromise;
     private eventSpoolHealthError;
+    private readonly readCache;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
     enforce(options?: MarrowEnforceOptions): MarrowCheckResult;
     check(): MarrowCheckResult;
@@ -366,6 +367,9 @@ export declare class MarrowClient {
     }>;
     private mapApiKey;
     private request;
+    private requestRead;
+    private readWithLastKnown;
+    private unavailableOrient;
     private requestOnce;
     private normalizeModelUsage;
     private shouldQueueRequest;

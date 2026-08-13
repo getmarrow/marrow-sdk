@@ -65,7 +65,20 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.53
+## What's New in v3.7.54
+
+v3.7.54 keeps Marrow useful on every agent turn without putting write recovery on the read path:
+
+- `orient({ autoWarn: true })` now uses the canonical `/v1/agent/runtime` control path, and `ask()` uses the canonical decision brief;
+- status and guidance reads have explicit 400 ms client deadlines, while runtime governance has a separate 750 ms deadline;
+- reads do not wait for queued lifecycle writes to drain;
+- transient read failures can return a clearly labeled in-process last-known response for up to one hour;
+- authentication and permission failures never return cached guidance, and stale runtime guidance never authorizes high-risk work;
+- `quickStatus()` reports `available`, `source`, `stale`, `stale_ms`, and a bounded error code instead of hanging the agent turn.
+
+Existing method names remain stable. The server keeps bounded compatibility aliases for previously published clients while current clients use the canonical routes.
+
+## Previous: v3.7.53
 
 v3.7.53 makes a meaningful Marrow intervention visible inside the agent session without exposing private work content:
 

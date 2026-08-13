@@ -16,7 +16,7 @@ test('lifecycle receipts retain bounded activation, correlation, and interventio
     agent_id: 'agent-one',
     action: 'governed task completed',
     correlation_id: 'correlation-one',
-    adapter_version: '3.7.53',
+    adapter_version: '3.7.54',
     capability_level: 'sdk_passive_runtime',
     config_fingerprint: 'a'.repeat(64),
     expected_hooks: ['pre_action', 'action_result', 'outcome_closure'],

@@ -489,6 +489,11 @@ export interface MarrowEnforcementCoverageResult {
 }
 
 export interface MarrowOrientResult {
+  available?: boolean;
+  source?: 'live' | 'last_known' | 'unavailable';
+  stale?: boolean;
+  stale_ms?: number | null;
+  error_code?: string;
   warnings: Array<{
     type: string;
     failureRate: number;
@@ -653,6 +658,11 @@ export interface MarrowModelUsageResult {
 }
 
 export interface MarrowAskResult {
+  available?: boolean;
+  source?: 'live' | 'last_known' | 'unavailable';
+  stale?: boolean;
+  stale_ms?: number | null;
+  error_code?: string;
   answer: string;
   stats: {
     total: number;
@@ -735,6 +745,11 @@ export interface MarrowClientUpdateAdvisory {
 }
 
 export interface MarrowQuickStatusResult {
+  available?: boolean;
+  source?: 'live' | 'last_known' | 'unavailable';
+  stale?: boolean;
+  stale_ms?: number | null;
+  error_code?: string;
   ok: boolean;
   enabled: boolean;
   health: 'healthy' | 'degraded';

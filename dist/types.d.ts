@@ -244,6 +244,15 @@ export interface MarrowGuardedRunOptions<T> {
     role?: MarrowDecisionBriefRole | string;
     surfaces?: string[];
     context?: Record<string, unknown>;
+    /** Sanitized project signals used to bind guidance to this repository/workspace. */
+    project?: MarrowGovernanceProject & {
+        fingerprint?: string;
+        harness?: string;
+    };
+    /** Harness/client label reported with runtime coverage. */
+    harness?: string;
+    /** Measured completion evidence or an adapter that derives it from the execution result. */
+    completionEvidence?: MarrowCompletionEvidence | ((result: T) => MarrowCompletionEvidence | Promise<MarrowCompletionEvidence>);
     riskPolicy?: MarrowGuardedRiskPolicy;
     useAgentRuntime?: boolean;
     useWorkflowGate?: boolean;
@@ -263,6 +272,11 @@ export interface MarrowGuardedRunOptions<T> {
     actionTarget?: string;
     /** Server-issued owner approval receipt for review-required actions. */
     ownerApprovalReceiptId?: string;
+}
+export interface MarrowCompletionEvidence extends Record<string, unknown> {
+    evidence_source?: string;
+    evidence_state?: 'verified' | 'failed' | 'observed_only' | 'missing';
+    checks?: string[];
 }
 export interface MarrowGuardedRunResult<T> {
     ok: boolean;
@@ -301,6 +315,10 @@ export interface MarrowGuardedRunResult<T> {
         untrusted_memory_notice?: string | null;
         untrusted_memory_excerpt?: string | null;
     } | null;
+    /** Shareable, account-scoped receipt for a meaningful Marrow intervention. */
+    intervention_receipt?: MarrowInterventionReceipt | null;
+    intervention_receipt_error?: string | null;
+    completion_evidence_error?: string | null;
     summary: string;
 }
 export type MarrowEnforcementOperation = 'issue' | 'verify' | 'close' | 'heartbeat';
@@ -890,6 +908,95 @@ export interface MarrowInterventionReceipt {
     };
     disclaimer: string;
 }
+export type MarrowResourceLeaseType = 'file' | 'directory' | 'service' | 'workflow' | 'deployment' | 'custom';
+export interface MarrowResourceLease {
+    id: string;
+    resource_type: MarrowResourceLeaseType;
+    resource_label: string;
+    holder_agent_id: string;
+    workflow_id: string | null;
+    status: 'active' | 'released' | 'expired';
+    acquired_at: string;
+    expires_at: string;
+    released_at: string | null;
+    updated_at: string;
+    tenant_scoped: true;
+}
+export interface MarrowAcquireResourceLeaseInput {
+    resourceType: MarrowResourceLeaseType;
+    resource: string;
+    workflowId?: string;
+    ttlSeconds?: number;
+    agentId?: string;
+}
+export interface MarrowAcquireResourceLeaseResult {
+    acquired: boolean;
+    lease: MarrowResourceLease;
+    lease_token?: string;
+    token_returned_once?: boolean;
+    conflict?: {
+        holder_agent_id: string;
+        expires_at: string;
+    };
+    exact_next_action: string;
+}
+export interface MarrowCoordinationProofPacket {
+    id: string;
+    source_agent_id: string;
+    parent_agent_id: string | null;
+    lease_id: string | null;
+    decision_id: string | null;
+    workflow_id: string | null;
+    proof_pack_id: string | null;
+    status: 'complete' | 'failed' | 'incomplete';
+    summary: string;
+    evidence_refs: string[];
+    evidence_complete?: boolean;
+    created_at: string;
+    compact: true;
+    exact_next_action?: string;
+}
+export interface MarrowCreateCoordinationProofPacketInput {
+    summary: string;
+    status?: 'complete' | 'failed' | 'incomplete';
+    sourceAgentId?: string;
+    parentAgentId?: string;
+    leaseId?: string;
+    decisionId?: string;
+    workflowId?: string;
+    proofPackId?: string;
+    evidenceRefs?: string[];
+}
+export interface MarrowReplayComparisonInput {
+    sourceDecisionId: string;
+    baseline: {
+        label?: string;
+        decisionId: string;
+    };
+    candidate: {
+        label?: string;
+        decisionId: string;
+    };
+    workspaceBindingId?: string;
+    /** Sanitized constraints are hashed by the service and are not returned or stored raw. */
+    constraints?: Record<string, unknown>;
+}
+export interface MarrowReplayComparisonResult {
+    contract: 'marrow.replay-comparison.v1';
+    id: string;
+    source_decision_id: string;
+    agent_id: string | null;
+    workspace_binding_id: string | null;
+    baseline: Record<string, unknown>;
+    candidate: Record<string, unknown>;
+    winner: 'baseline' | 'candidate' | 'tie' | 'unavailable';
+    status: 'complete' | 'insufficient_evidence';
+    comparison_basis: Record<string, unknown>;
+    created_at: string;
+    exact: true;
+    generated_by_model: false;
+    exact_next_action: string;
+}
 export interface MemoryShareOptions {
     agentIds: string[];
     actor?: string;
@@ -1313,6 +1420,7 @@ export interface MarrowAgentRuntimeRequest extends MarrowDecisionBriefRequest {
     risk_tolerance?: MarrowWorkflowGateRiskTolerance;
     requires_approval?: boolean;
     project?: MarrowGovernanceProject;
+    harness?: string;
     profile_id?: string;
     profile_name?: string;
     branch?: string;
@@ -1329,6 +1437,9 @@ export interface MarrowGovernanceProject {
     signals?: string[];
     package_scripts?: string[];
     config_files?: string[];
+    /** Opaque local fingerprint; the API derives a tenant-bound ID and never returns this value. */
+    fingerprint?: string;
+    harness?: string;
 }
 export interface MarrowGovernanceWorkflow {
     action?: string;
@@ -1579,6 +1690,23 @@ export interface MarrowAgentRuntimeResult {
         commit_endpoint?: string;
         idempotency_key_hint?: string;
         fail_open_policy?: string;
+        [key: string]: unknown;
+    };
+    workspace_twin?: {
+        contract: 'marrow.workspace-twin.v1' | string;
+        available: boolean;
+        binding_id?: string;
+        reason?: string;
+        tenant_scoped: boolean;
+        raw_paths_stored: boolean;
+        raw_remote_stored?: boolean;
+        specificity?: 'repository_and_harness' | 'project_type_and_harness' | string;
+        project?: Record<string, unknown>;
+        harness?: string | null;
+        agent_id?: string | null;
+        matched_evidence?: Record<string, unknown>;
+        agent_copy?: string;
+        exact_next_action?: string;
         [key: string]: unknown;
     };
     risk_gate_event?: {

@@ -87,6 +87,14 @@ import type {
   MarrowLifecycleEventResult,
   MarrowLifecycleBacklog,
   MarrowDecisionTraceResult,
+  MarrowInterventionReceipt,
+  MarrowAcquireResourceLeaseInput,
+  MarrowAcquireResourceLeaseResult,
+  MarrowResourceLease,
+  MarrowCreateCoordinationProofPacketInput,
+  MarrowCoordinationProofPacket,
+  MarrowReplayComparisonInput,
+  MarrowReplayComparisonResult,
   MarrowActionPermitIssueInput,
   MarrowActionPermitIssueResult,
   MarrowActionPermitPublic,
@@ -670,9 +678,16 @@ function buildOutcomeProof(input: {
   gate?: MarrowWorkflowGateResult | null;
 }): Record<string, unknown> {
   const provided = input.proof || {};
+  const hasProvidedEvidence = Object.keys(provided).length > 0 || Boolean(input.checks?.length);
+  const checks = provided.checks || input.checks || [input.success ? 'execution_callback_returned' : 'execution_failed'];
+  const evidenceState = provided.evidence_state
+    || (input.success ? (hasProvidedEvidence ? 'verified' : 'observed_only') : 'failed');
   return redactSensitiveValue({
     summary: provided.summary || input.action,
-    checks: provided.checks || input.checks || ['execution completed', 'outcome captured'],
+    checks,
+    evidence_source: provided.evidence_source || 'sdk_guarded_execution',
+    evidence_state: evidenceState,
+    verified_completion: evidenceState === 'verified',
     outcome: provided.outcome || input.outcome,
     blockers: provided.blockers || (input.success ? 'none' : 'see outcome'),
     commits_prs_shas: provided.commits_prs_shas || 'not applicable',
@@ -691,6 +706,18 @@ function buildOutcomeProof(input: {
       gate_event_id: input.gate.gate_event_id || null,
     } : undefined,
   }) as Record<string, unknown>;
+}
+
+async function resolveCompletionEvidence<T>(
+  evidence: MarrowGuardedRunOptions<T>['completionEvidence'],
+  result: T,
+): Promise<Record<string, unknown>> {
+  if (!evidence) return {};
+  const value = typeof evidence === 'function' ? await evidence(result) : evidence;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Marrow completion evidence adapter returned an invalid value');
+  }
+  return value;
 }
 
 function mergeProvenance(
@@ -1102,6 +1129,9 @@ export class MarrowClient {
     let permitVerified = false;
     let permitClosed = false;
     let permitCloseErrorMessage: string | null = null;
+    let completionEvidenceErrorMessage: string | null = null;
+    let interventionReceipt: MarrowInterventionReceipt | null = null;
+    let interventionReceiptErrorMessage: string | null = null;
     let beforeActionDirective: MarrowGuardedRunResult<T>['before_action_directive'] = null;
     const lifecycleCorrelation = lifecycleCorrelationId(options.correlationId);
     const lifecycleBase = {
@@ -1120,6 +1150,8 @@ export class MarrowClient {
           type: options.type,
           role: options.role,
           surfaces: options.surfaces,
+          project: options.project,
+          harness: options.harness,
           context: {
             ...safeContext,
             marrow_sdk_guarded_run: true,
@@ -1485,6 +1517,7 @@ export class MarrowClient {
       }
 
       let result: T;
+      let completionEvidence: Record<string, unknown> = {};
       try {
         result = await options.execute();
       } catch (error) {
@@ -1577,6 +1610,19 @@ export class MarrowClient {
         };
       }
 
+      try {
+        completionEvidence = await resolveCompletionEvidence(options.completionEvidence, result);
+      } catch (error) {
+        completionEvidenceErrorMessage = safePublicErrorMessage(error);
+        completionEvidence = {
+          evidence_source: 'sdk_completion_adapter',
+          evidence_state: 'missing',
+          checks: ['completion_evidence_adapter_failed'],
+          verified_completion: false,
+        };
+        process.stderr.write(`[marrow] Warning: completion evidence adapter failed after execution: ${completionEvidenceErrorMessage}\n`);
+      }
+
       this.captureLifecycleEvent({
         ...lifecycleBase,
         event_type: resultLifecycleEventType(options, true),
@@ -1595,7 +1641,7 @@ export class MarrowClient {
           success: true,
           outcome: `Guarded run completed: ${safeAction}`,
           gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
-          proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
+          proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, proof: completionEvidence, runtime, gate }),
           modelUsage: options.modelUsage ? { ...options.modelUsage, success: true, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
         });
       } catch (error) {
@@ -1609,7 +1655,7 @@ export class MarrowClient {
             permit_id: actionPermit.permit_id,
             decision_id: decisionId,
             success: true,
-            evidence: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, runtime, gate }),
+            evidence: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, proof: completionEvidence, runtime, gate }),
           });
           permitClosed = closure.closed === true;
           if (!permitClosed) permitCloseErrorMessage = 'Marrow action permit close was not acknowledged';
@@ -1633,6 +1679,20 @@ export class MarrowClient {
           ...(typeof options.actionChanged === 'boolean' ? { action_changed: options.actionChanged } : {}),
         } : {}),
       });
+
+      const meaningfulIntervention = Boolean(
+        beforeActionDirective
+        && (beforeActionDirective.state !== 'proceed' || options.actionChanged === true),
+      );
+      if (decisionId && successOutcomeClosed && meaningfulIntervention) {
+        try {
+          const trace = await this.decisionTrace(decisionId);
+          interventionReceipt = trace.trace?.intervention_receipt || null;
+        } catch (error) {
+          interventionReceiptErrorMessage = safePublicErrorMessage(error);
+          process.stderr.write(`[marrow] Warning: intervention receipt unavailable: ${interventionReceiptErrorMessage}\n`);
+        }
+      }
 
       if (options.includeValueReport) {
         try {
@@ -1663,6 +1723,9 @@ export class MarrowClient {
           action_permit: publicActionPermit(actionPermit),
           permit_verified: permitVerified,
           permit_closed: permitClosed,
+          intervention_receipt: interventionReceipt,
+          intervention_receipt_error: interventionReceiptErrorMessage,
+          completion_evidence_error: completionEvidenceErrorMessage,
           summary: `Action completed, but Marrow outcome closure failed: ${commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error')}. Do not mark complete until closure is repaired.`,
         };
       }
@@ -1686,6 +1749,9 @@ export class MarrowClient {
         action_permit: publicActionPermit(actionPermit),
         permit_verified: permitVerified,
         permit_closed: permitClosed,
+        intervention_receipt: interventionReceipt,
+        intervention_receipt_error: interventionReceiptErrorMessage,
+        completion_evidence_error: completionEvidenceErrorMessage,
         summary: commitErrorMessage
           ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
           : beforeActionDirective?.message
@@ -3638,6 +3704,79 @@ export class MarrowClient {
     const safeId = validatePathParam(decisionId, 'decisionId');
     const res = await this.request('GET', `/v1/agent/governance/trace/${safeId}`);
     return (res.data || res) as MarrowDecisionTraceResult;
+  }
+
+  async listResourceLeases(options: { status?: 'active' | 'released' | 'expired'; limit?: number } = {}): Promise<MarrowResourceLease[]> {
+    const qs = new URLSearchParams();
+    if (options.status) qs.set('status', options.status);
+    if (options.limit) qs.set('limit', String(Math.max(1, Math.min(100, Math.floor(options.limit)))));
+    const res = await this.request('GET', `/v1/agent/governance/leases${qs.toString() ? `?${qs.toString()}` : ''}`);
+    const data = (res.data || res) as { leases?: MarrowResourceLease[] };
+    return data.leases || [];
+  }
+
+  async acquireResourceLease(input: MarrowAcquireResourceLeaseInput): Promise<MarrowAcquireResourceLeaseResult> {
+    const agentId = input.agentId || this.agentId;
+    if (!agentId) throw new Error('Marrow resource lease requires agentId or MARROW_FLEET_AGENT_ID');
+    const res = await this.request('POST', '/v1/agent/governance/leases/acquire', {
+      agent_id: agentId,
+      resource_type: input.resourceType,
+      resource: redactSensitiveText(input.resource),
+      workflow_id: input.workflowId,
+      ttl_seconds: input.ttlSeconds,
+    });
+    return (res.data || res) as MarrowAcquireResourceLeaseResult;
+  }
+
+  async releaseResourceLease(leaseId: string, leaseToken: string, agentId: string | null = this.agentId): Promise<{ released: true; lease: MarrowResourceLease | null }> {
+    const safeId = validatePathParam(leaseId, 'leaseId');
+    if (!agentId) throw new Error('Marrow resource lease release requires agentId or MARROW_FLEET_AGENT_ID');
+    const res = await this.request('POST', `/v1/agent/governance/leases/${safeId}/release`, {
+      agent_id: agentId,
+      lease_token: leaseToken,
+    });
+    return (res.data || res) as { released: true; lease: MarrowResourceLease | null };
+  }
+
+  async listCoordinationProofPackets(limit = 50): Promise<MarrowCoordinationProofPacket[]> {
+    const bounded = Math.max(1, Math.min(100, Math.floor(limit)));
+    const res = await this.request('GET', `/v1/agent/governance/proof-packets?limit=${bounded}`);
+    const data = (res.data || res) as { proof_packets?: MarrowCoordinationProofPacket[] };
+    return data.proof_packets || [];
+  }
+
+  async createCoordinationProofPacket(input: MarrowCreateCoordinationProofPacketInput): Promise<MarrowCoordinationProofPacket> {
+    const sourceAgentId = input.sourceAgentId || this.agentId;
+    if (!sourceAgentId) throw new Error('Marrow proof packet requires sourceAgentId or MARROW_FLEET_AGENT_ID');
+    const res = await this.request('POST', '/v1/agent/governance/proof-packets', {
+      source_agent_id: sourceAgentId,
+      parent_agent_id: input.parentAgentId,
+      lease_id: input.leaseId,
+      decision_id: input.decisionId,
+      workflow_id: input.workflowId,
+      proof_pack_id: input.proofPackId,
+      status: input.status,
+      summary: redactSensitiveText(input.summary),
+      evidence_refs: input.evidenceRefs,
+    });
+    return (res.data || res) as MarrowCoordinationProofPacket;
+  }
+
+  async compareReplayEvidence(input: MarrowReplayComparisonInput): Promise<MarrowReplayComparisonResult> {
+    const res = await this.request('POST', '/v1/agent/governance/replay-comparisons', {
+      source_decision_id: input.sourceDecisionId,
+      baseline: { label: input.baseline.label, decision_id: input.baseline.decisionId },
+      candidate: { label: input.candidate.label, decision_id: input.candidate.decisionId },
+      workspace_binding_id: input.workspaceBindingId,
+      constraints: redactSensitiveValue(input.constraints || {}),
+    });
+    return (res.data || res) as MarrowReplayComparisonResult;
+  }
+
+  async getReplayComparison(comparisonId: string): Promise<MarrowReplayComparisonResult> {
+    const safeId = validatePathParam(comparisonId, 'comparisonId');
+    const res = await this.request('GET', `/v1/agent/governance/replay-comparisons/${safeId}`);
+    return (res.data || res) as MarrowReplayComparisonResult;
   }
 
   async agentPerformance(period: string | number = '7d', agentId: string | null = this.agentId): Promise<MarrowAgentPerformanceResult> {

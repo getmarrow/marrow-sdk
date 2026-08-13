@@ -9,6 +9,7 @@ import { MarrowClient } from './client';
 export { MarrowClient, MarrowLoopRequiredError, classifyMarrowFailure } from './client';
 export { createMarrowClient, marrowFromEnv } from './factory';
 export { resolveMarrowEnv } from './env';
+export { marrowEvidence } from './evidence-adapters';
 export type { MarrowResolvedEnv, MarrowResolveEnvOptions } from './env';
 
 export type {
@@ -64,6 +65,7 @@ export type {
   MarrowGuardedRiskPolicy,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowCompletionEvidence,
   MarrowActionPermitIssueInput,
   MarrowActionPermitPublic,
   MarrowActionPermitIssueResult,

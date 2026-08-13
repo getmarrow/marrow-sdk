@@ -65,9 +65,9 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.54
+## What's New in v3.7.55
 
-v3.7.54 keeps Marrow useful on every agent turn without putting write recovery on the read path:
+v3.7.55 makes evidence-backed steering, completion evidence, coordination, and replay available through typed SDK surfaces:
 
 - `orient({ autoWarn: true })` now uses the canonical `/v1/agent/runtime` control path, and `ask()` uses the canonical decision brief;
 - status and guidance reads have explicit 400 ms client deadlines, while runtime governance has a separate 750 ms deadline;
@@ -75,6 +75,10 @@ v3.7.54 keeps Marrow useful on every agent turn without putting write recovery o
 - transient read failures can return a clearly labeled in-process last-known response for up to one hour;
 - authentication and permission failures never return cached guidance, and stale runtime guidance never authorizes high-risk work;
 - `quickStatus()` reports `available`, `source`, `stale`, `stale_ms`, and a bounded error code instead of hanging the agent turn.
+- `runGuarded()` can attach command, test, deployment, or owner-acceptance evidence through the exported `marrowEvidence` adapters; a process exit alone remains `observed_only`;
+- meaningful interventions return a tenant-scoped `intervention_receipt` in the guarded result without making receipt retrieval part of action success;
+- runtime requests can bind a privacy-safe project/harness fingerprint so prior evidence is specific to this workspace without sending raw paths or repository URLs;
+- resource leases, compact child proof packets, and evidence-only replay comparisons are available through typed client methods.
 
 Existing method names remain stable. The server keeps bounded compatibility aliases for previously published clients while current clients use the canonical routes.
 
@@ -147,7 +151,7 @@ The spool never needs raw prompts, completions, command output, tool output, or 
 ## Quick Start
 
 ```ts
-import { MarrowClient } from '@getmarrow/sdk';
+import { MarrowClient, marrowEvidence } from '@getmarrow/sdk';
 
 const marrow = new MarrowClient(process.env.MARROW_API_KEY!, {
   agentId: 'deploy-agent',
@@ -160,6 +164,10 @@ const result = await marrow.runGuarded({
   surfaces: ['repository', 'deployment', 'production'],
   riskPolicy: 'block_high',
   execute: async () => deploy(),
+  completionEvidence: async () => marrowEvidence.combine(
+    marrowEvidence.tests({ passed: true, suite: 'release-smoke' }),
+    marrowEvidence.deployment({ status: 'healthy', environment: 'production' }),
+  ),
 });
 
 if (result.blocked) {
@@ -209,6 +217,13 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | --- | --- |
 | `agentRuntime(input)` | One-call status, policy gate, relevant lessons, proof requirements, and exact next action |
 | `arbitrate(input)` | Resolve conflicting tenant-agent proposals through the same runtime gate and return an explainable arbitration receipt |
+| `listResourceLeases(options)` | List tenant and agent-scoped active, released, or expired resource leases |
+| `acquireResourceLease(input)` | Acquire a bounded resource lease and one-time release capability |
+| `releaseResourceLease(id, token, agentId?)` | Release the lease using the same bound identity and capability |
+| `listCoordinationProofPackets(limit)` | List compact child-to-parent evidence packets without transcripts |
+| `createCoordinationProofPacket(input)` | Create a packet that cannot claim complete without durable outcome and required proof |
+| `compareReplayEvidence(input)` | Compare two existing closed decisions under the same task and constraints without executing a model |
+| `getReplayComparison(id)` | Fetch a tenant and agent-scoped replay comparison |
 | `decisionBrief(input)` | Compact pre-action operating brief |
 | `think(input)` | Record intent and retrieve governance intelligence |
 | `commit(input)` | Close work with outcome, gate receipt, and proof |
@@ -232,6 +247,8 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | `governanceTimeline(options)` | Inspect decisions, gates, proof packs, and outcomes |
 | `fleetLessons(options)` | Retrieve proven lessons authorized for the current tenant/agent |
 | `modelUsage(input)` | Record compact token, cost, and latency counts exposed by the harness |
+
+`marrowEvidence.command()`, `.tests()`, `.deployment()`, `.ownerAcceptance()`, and `.combine()` produce bounded proof metadata. They do not include raw stdout, source code, prompts, credentials, or customer content. Adapter failures are reported separately and never relabel a successful action as failed; required proof still prevents unverified completion.
 
 ## Agent Disagreement Arbitration
 

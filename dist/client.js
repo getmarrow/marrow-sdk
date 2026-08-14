@@ -174,12 +174,23 @@ function sanitizeArbitrationRequest(input) {
 function safePublicErrorMessage(error) {
     return truncate(redactSensitiveText(safeErrorMessage(error)), 500);
 }
+class MarrowHttpError extends Error {
+    status;
+    constructor(status, statusText, detail) {
+        super(`Marrow API error: ${status} ${statusText} — ${detail}`);
+        this.name = 'MarrowHttpError';
+        this.status = status;
+    }
+}
 function classifyMarrowFailure(error) {
     const message = safeErrorMessage(error).toLowerCase();
-    if (/\b(unauthorized|unauthenticated|invalid api key|bad token|expired token|auth(?:entication)? failed)\b/.test(message)) {
+    const numericStatus = typeof error === 'object' && error !== null && 'status' in error
+        ? Number(error.status)
+        : null;
+    if (numericStatus === 401 || /\b(401|unauthorized|unauthenticated|invalid api key|bad token|expired token|auth(?:entication)? failed)\b/.test(message)) {
         return 'auth';
     }
-    if (/\b(forbidden|permission denied|insufficient scope|access denied|not allowed|eacces|eperm)\b/.test(message)) {
+    if (numericStatus === 403 || /\b(403|forbidden|permission denied|insufficient scope|access denied|not allowed|eacces|eperm)\b/.test(message)) {
         return 'permission';
     }
     if (/\b(rate limit|too many requests|429|quota exceeded|throttl)\b/.test(message)) {
@@ -238,6 +249,92 @@ function exactFixForFailure(failure) {
     return 'Run npx @getmarrow/install@latest doctor, verify outbound HTTPS to api.getmarrow.ai, and retry once.';
 }
 const HIGH_RISK_RUNTIME_ACTION = /\b(?:billing|credential|database|delete|deploy|destructive|financial|key|merge|migrat(?:e|ion)|payment|production|publish|release|remove|rollback|secret|security|token|truncate|wipe)\b/i;
+function stableHashValue(value, seen = new WeakSet()) {
+    if (value === null)
+        return 'null';
+    if (typeof value === 'string' || typeof value === 'boolean')
+        return JSON.stringify(value);
+    if (typeof value === 'number')
+        return Number.isFinite(value) ? JSON.stringify(value) : 'null';
+    if (typeof value === 'bigint')
+        return JSON.stringify(String(value));
+    if (typeof value === 'undefined' || typeof value === 'function' || typeof value === 'symbol')
+        return 'null';
+    if (seen.has(value))
+        return JSON.stringify('[circular]');
+    seen.add(value);
+    if (Array.isArray(value)) {
+        const serialized = `[${value.map((item) => stableHashValue(item, seen)).join(',')}]`;
+        seen.delete(value);
+        return serialized;
+    }
+    const entries = Object.entries(value)
+        .filter(([, item]) => item !== undefined && typeof item !== 'function' && typeof item !== 'symbol')
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+    const serialized = `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableHashValue(item, seen)}`).join(',')}}`;
+    seen.delete(value);
+    return serialized;
+}
+function boundedDeterministicHash(namespace, value) {
+    return (0, node_crypto_1.createHash)('sha256')
+        .update(namespace)
+        .update('\0')
+        .update(stableHashValue(value))
+        .digest('hex')
+        .slice(0, 32);
+}
+function runtimeRequestRequiresFreshGate(request) {
+    if (request.requires_approval === true || request.risk_tolerance === 'low')
+        return true;
+    const budget = { remaining: 32_768 };
+    const seen = new WeakSet();
+    const inspect = (value, depth) => {
+        if (depth > 8 || budget.remaining <= 0)
+            return true;
+        if (typeof value === 'string') {
+            budget.remaining -= value.length;
+            if (budget.remaining < 0)
+                return true;
+            return HIGH_RISK_RUNTIME_ACTION.test(value);
+        }
+        if (value == null || typeof value !== 'object')
+            return false;
+        if (seen.has(value))
+            return false;
+        seen.add(value);
+        if (Array.isArray(value))
+            return value.some((item) => inspect(item, depth + 1));
+        return Object.entries(value)
+            .some(([key, item]) => inspect(key, depth + 1) || inspect(item, depth + 1));
+    };
+    return inspect(request, 0);
+}
+const STALE_RUNTIME_ARTIFACT_KEYS = new Set([
+    'decision_id',
+    'arbitration',
+    'intervention',
+    'before_you_act_injection',
+    'runtime_contract',
+    'runtime_policy',
+    'capacity_guidance',
+    'risk_gate_event',
+    'behavior_governance',
+]);
+function stripStaleRuntimeArtifacts(value, depth = 0) {
+    if (depth > 8)
+        return null;
+    if (Array.isArray(value))
+        return value.map((item) => stripStaleRuntimeArtifacts(item, depth + 1));
+    if (value == null || typeof value !== 'object')
+        return value;
+    const sanitized = {};
+    for (const [key, item] of Object.entries(value)) {
+        if (STALE_RUNTIME_ARTIFACT_KEYS.has(key) || /(?:receipt|permit|authorization)/i.test(key))
+            continue;
+        sanitized[key] = stripStaleRuntimeArtifacts(item, depth + 1);
+    }
+    return sanitized;
+}
 function clampPeriodDays(value, defaultDays = 7) {
     const parsed = typeof value === 'number' ? value : parseInt(String(value || defaultDays), 10);
     if (!Number.isFinite(parsed))
@@ -2317,6 +2414,7 @@ class MarrowClient {
                 source: read.source,
                 stale: read.stale,
                 stale_ms: read.staleMs,
+                exact_fix: read.stale ? exactFixForFailure((read.errorCode || 'unknown')) : undefined,
                 client_update: data.client_update || sdkClientUpdate(),
                 warnings: this.orientWarnings,
                 serverWarnings,
@@ -2368,6 +2466,7 @@ class MarrowClient {
             source: read.source,
             stale: read.stale,
             stale_ms: read.staleMs,
+            exact_fix: read.stale ? exactFixForFailure((read.errorCode || 'unknown')) : undefined,
             client_update: data.client_update || sdkClientUpdate(),
             warnings,
             lessons: [],
@@ -2440,6 +2539,7 @@ class MarrowClient {
             source: read.source,
             stale: read.stale,
             stale_ms: read.staleMs,
+            exact_fix: read.stale ? exactFixForFailure((read.errorCode || 'unknown')) : undefined,
             client_update: data.client_update || sdkClientUpdate(),
             answer: [data.summary, data.next_actions?.[0]].filter(Boolean).join(' '),
             stats: null,
@@ -2451,6 +2551,7 @@ class MarrowClient {
     async quickStatus() {
         const read = await this.readWithLastKnown('GET', '/v1/agent/status?fast=1', undefined, 400, 'quick-status');
         const data = read.value ? (read.value.data ?? read.value) : {};
+        const clientUpdate = data.client_update || sdkClientUpdate();
         const rawActivationCoverage = data.activation_coverage && typeof data.activation_coverage === 'object'
             ? data.activation_coverage
             : null;
@@ -2519,10 +2620,10 @@ class MarrowClient {
             stale: read.stale,
             stale_ms: read.staleMs,
             ...(read.value ? {} : { error_code: read.errorCode || 'unavailable' }),
-            ...(read.value ? {} : {
+            ...(read.value && !read.stale ? {} : {
                 exact_fix: exactFixForFailure((read.errorCode || 'unknown')),
-                client_update: sdkClientUpdate(),
             }),
+            client_update: clientUpdate,
             ok: data.ok,
             enabled: Boolean(data.enabled ?? data.ok),
             health: data.health || 'degraded',
@@ -2555,7 +2656,7 @@ class MarrowClient {
             nextAction: data.next_action || null,
             autoOutcomeClosure: data.auto_outcome_closure || null,
             tokenCapture: data.token_capture || null,
-            clientUpdate: data.client_update || null,
+            clientUpdate,
             proof: data.proof || null,
             failureReasons: Array.isArray(data.failure_reasons) ? data.failure_reasons : [],
             agentWarnings: Array.isArray(data.agent_warnings) ? data.agent_warnings : [],
@@ -2875,14 +2976,8 @@ class MarrowClient {
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
         };
-        const highRisk = HIGH_RISK_RUNTIME_ACTION.test(`${input.type || ''} ${input.action || ''}`);
-        const cacheKey = `runtime:${(0, node_crypto_1.createHash)('sha256').update(JSON.stringify({
-            action: requestBody.action,
-            type: requestBody.type || 'general',
-            agent_id: requestBody.agent_id || null,
-            session_id: requestBody.session_id || null,
-            surfaces: requestBody.surfaces || [],
-        })).digest('hex').slice(0, 24)}`;
+        const highRisk = runtimeRequestRequiresFreshGate(requestBody);
+        const cacheKey = `runtime:${boundedDeterministicHash('agent-runtime-cache:v2', requestBody)}`;
         const read = await this.readWithLastKnown('POST', '/v1/agent/runtime', requestBody, highRisk ? 2_000 : 750, cacheKey);
         if (!read.value) {
             const failure = (read.errorCode || 'unknown');
@@ -2940,8 +3035,15 @@ class MarrowClient {
                 client_update: data.client_update || sdkClientUpdate(),
             };
         }
+        const staleContext = stripStaleRuntimeArtifacts(data);
+        const cachedRisk = data.risk_gate && typeof data.risk_gate === 'object' ? data.risk_gate : {};
+        const staleDecision = cachedRisk.decision === 'block' ? 'block' : 'review_required';
+        const staleRiskLevel = cachedRisk.risk_level === 'high' ? 'high' : 'medium';
+        const cachedProof = data.proof_pack && typeof data.proof_pack === 'object' ? data.proof_pack : null;
+        const missingProof = Array.isArray(cachedProof?.missing) ? cachedProof.missing : [];
         return {
-            ...data,
+            ...staleContext,
+            ok: false,
             available: true,
             source: 'last_known',
             stale: true,
@@ -2949,22 +3051,26 @@ class MarrowClient {
             error_code: read.errorCode,
             exact_fix: exactFixForFailure((read.errorCode || 'unknown')),
             risk_gate: {
-                ...data.risk_gate,
-                allow: !highRisk,
-                decision: highRisk ? 'review_required' : 'warn',
+                allow: false,
+                decision: staleDecision,
+                risk_level: staleRiskLevel,
                 reasons: [
-                    { code: 'last_known_guidance', severity: highRisk ? 'high' : 'medium', message: 'Live Marrow read failed; this response is cached guidance.' },
-                    ...(Array.isArray(data.risk_gate?.reasons) ? data.risk_gate.reasons : []),
+                    { code: 'fresh_runtime_gate_required', severity: 'high', message: 'Live Marrow read failed; cached guidance cannot authorize this action.' },
+                    ...(Array.isArray(cachedRisk.reasons) ? cachedRisk.reasons : []),
                 ],
             },
-            gate_receipt: null,
-            gate_receipt_id: null,
-            before_you_act: highRisk
-                ? 'Pause. Cached guidance cannot authorize high-risk work.'
-                : data.before_you_act,
-            exact_next_action: highRisk
-                ? 'Obtain a fresh Marrow runtime gate before this action.'
-                : data.exact_next_action,
+            proof_pack: {
+                required: true,
+                enforced: true,
+                fields: Array.isArray(cachedProof?.fields) ? cachedProof.fields : [],
+                missing: [...new Set([...missingProof, 'fresh_runtime_gate'])],
+                complete: false,
+                commit_endpoint: cachedProof?.commit_endpoint || '/v1/agent/commit',
+                rule: 'A fresh Marrow runtime gate is required before this action can be authorized.',
+            },
+            before_you_act: 'Pause. Cached guidance cannot authorize this action; use it as context only.',
+            exact_next_action: 'Obtain a fresh Marrow runtime gate before this action.',
+            auto_outcome_closure: null,
             client_update: data.client_update || sdkClientUpdate(),
         };
     }
@@ -3481,6 +3587,8 @@ class MarrowClient {
             stale: false,
             stale_ms: null,
             error_code: errorCode,
+            exact_fix: exactFixForFailure(errorCode),
+            client_update: sdkClientUpdate(),
             warnings: [{
                     type: 'marrow_guidance_unavailable',
                     failureRate: 0,
@@ -3554,7 +3662,7 @@ class MarrowClient {
                 }
                 catch { /* ignore */ }
             }
-            throw new Error(`Marrow API error: ${res.status} ${res.statusText} — ${errorDetail}`);
+            throw new MarrowHttpError(res.status, res.statusText, errorDetail);
         }
         return res.json();
     }

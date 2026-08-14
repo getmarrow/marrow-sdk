@@ -985,25 +985,27 @@ test('ask uses the canonical decision brief, bypasses write drain, and labels la
   }
 });
 
-test('read fallback never converts authentication failure into cached guidance', async () => {
+test('read fallback classifies numeric 401 and 403 responses without using cached guidance', async () => {
   const originalFetch = globalThis.fetch;
-  let call = 0;
-  globalThis.fetch = async () => {
-    call += 1;
-    if (call === 1) return new Response(JSON.stringify({ data: {
-      summary: 'Live guidance', next_actions: [], risk: { similar_failures: [] },
-      failure_alerts: [], fleet_reliability: { outcome_coverage: 1 },
-    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      statusText: 'Unauthorized',
-      headers: { 'Content-Type': 'application/json' },
-    });
-  };
   try {
-    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
-    await marrow.ask('same query');
-    await assert.rejects(() => marrow.ask('same query'), /401 Unauthorized/);
+    for (const status of [401, 403]) {
+      let call = 0;
+      globalThis.fetch = async () => {
+        call += 1;
+        if (call === 1) return new Response(JSON.stringify({ data: {
+          summary: 'Live guidance', next_actions: [], risk: { similar_failures: [] },
+          failure_alerts: [], fleet_reliability: { outcome_coverage: 1 },
+        } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: 'credentials rejected' }), {
+          status,
+          statusText: '',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      };
+      const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+      await marrow.ask('same query');
+      await assert.rejects(() => marrow.ask('same query'), new RegExp(`Marrow API error: ${status}`));
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1019,6 +1021,23 @@ test('quickStatus fails soft when no live or last-known response exists', async 
     assert.equal(status.source, 'unavailable');
     assert.equal(status.health, 'degraded');
     assert.equal(status.error_code, 'timeout');
+    assert.deepEqual(status.clientUpdate, status.client_update);
+    assert.equal(status.clientUpdate.installed_version, '3.7.56');
+    assert.match(status.exact_fix, /doctor/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('orient unavailable response includes normalized repair and update guidance', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network timeout'); };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    const orient = await marrow.orient({ autoWarn: true, taskType: 'documentation' });
+    assert.equal(orient.available, false);
+    assert.match(orient.exact_fix, /doctor/);
+    assert.equal(orient.client_update.installed_version, '3.7.56');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1151,11 +1170,165 @@ test('stale agentRuntime guidance cannot authorize a high-risk action', async ()
     assert.equal(live.gate_receipt_id, 'receipt-live');
     assert.equal(stale.source, 'last_known');
     assert.equal(stale.stale, true);
+    assert.equal(stale.ok, false);
     assert.equal(stale.risk_gate.allow, false);
     assert.equal(stale.risk_gate.decision, 'review_required');
-    assert.equal(stale.gate_receipt, null);
-    assert.equal(stale.gate_receipt_id, null);
+    assert.equal('gate_receipt' in stale, false);
+    assert.equal('gate_receipt_id' in stale, false);
+    assert.equal(stale.proof_pack.complete, false);
+    assert.ok(stale.proof_pack.missing.includes('fresh_runtime_gate'));
     assert.match(stale.before_you_act, /Cached guidance cannot authorize/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stale agentRuntime preserves cached denial and strips authorization artifacts', async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call > 1) throw new Error('network timeout');
+    return new Response(JSON.stringify({ data: {
+      ok: true,
+      decision_id: 'decision-stale',
+      action: 'grant administrator access',
+      agent_id: 'agent-runtime-test',
+      session_id: null,
+      status: { health: 'healthy' },
+      decision_brief: { metadata: { receipt_id: 'nested-receipt', authorization: 'allow', safe_context: 'retained' } },
+      risk_gate: { allow: false, decision: 'block', risk_level: 'high', reasons: [] },
+      relevant_lessons: [],
+      deployment_playbooks: [],
+      template_suggestion: {},
+      gate_receipt: { receipt_id: 'receipt-stale' },
+      gate_receipt_id: 'receipt-stale',
+      arbitration: { decision_id: 'arbitration-stale' },
+      intervention: { decision: 'proceed', allow: true },
+      before_you_act_injection: { state: 'proceed' },
+      runtime_contract: { fail_open_policy: 'allow' },
+      runtime_policy: { interruption: 'proceed' },
+      capacity_guidance: { low_risk_continue_after_accept: true },
+      risk_gate_event: { id: 'event-stale' },
+      proof_pack: { required: false, enforced: false, fields: [], missing: [], complete: true, commit_endpoint: '/v1/agent/commit', rule: 'cached' },
+      before_you_act: 'Proceed.',
+      exact_next_action: 'Grant access.',
+      auto_outcome_closure: { state: 'active' },
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    await marrow.agentRuntime({ action: 'grant administrator access', type: 'access' });
+    const stale = await marrow.agentRuntime({ action: 'grant administrator access', type: 'access' });
+    assert.equal(stale.source, 'last_known');
+    assert.equal(stale.ok, false);
+    assert.equal(stale.risk_gate.allow, false);
+    assert.equal(stale.risk_gate.decision, 'block');
+    assert.equal(stale.proof_pack.required, true);
+    assert.equal(stale.proof_pack.enforced, true);
+    assert.equal(stale.proof_pack.complete, false);
+    for (const key of [
+      'decision_id', 'gate_receipt', 'gate_receipt_id', 'arbitration', 'intervention',
+      'before_you_act_injection', 'runtime_contract', 'runtime_policy', 'capacity_guidance', 'risk_gate_event',
+    ]) assert.equal(key in stale, false, `${key} must be stripped from stale runtime output`);
+    assert.equal(stale.auto_outcome_closure, null);
+    assert.equal(stale.decision_brief.metadata.safe_context, 'retained');
+    assert.doesNotMatch(JSON.stringify(stale), /nested-receipt|"authorization":"allow"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('agentRuntime cache identity includes every security-relevant request dimension', async () => {
+  const originalFetch = globalThis.fetch;
+  const coordination = (suffix) => ({
+    objective: `choose-${suffix}`,
+    proposals: [
+      { proposal_id: `proposal-a-${suffix}`, agent_id: 'agent-a', action: 'inspect' },
+      { proposal_id: `proposal-b-${suffix}`, agent_id: 'agent-b', action: 'review' },
+    ],
+  });
+  const cases = [
+    ['target', { target: 'target-a' }, { target: 'target-b' }],
+    ['role', { role: 'general' }, { role: 'review' }],
+    ['period', { period: 7 }, { period: 30 }],
+    ['context', { context: { tenant: 'a' } }, { context: { tenant: 'b' } }],
+    ['proof', { proof: { state: 'missing' } }, { proof: { state: 'verified' } }],
+    ['risk_tolerance', { risk_tolerance: 'medium' }, { risk_tolerance: 'high' }],
+    ['requires_approval', { requires_approval: false }, { requires_approval: true }],
+    ['project', { project: { fingerprint: 'project-a' } }, { project: { fingerprint: 'project-b' } }],
+    ['harness', { harness: 'codex' }, { harness: 'cursor' }],
+    ['profile_id', { profile_id: 'profile-a' }, { profile_id: 'profile-b' }],
+    ['profile_name', { profile_name: 'standard' }, { profile_name: 'strict' }],
+    ['branch', { branch: 'feature-a' }, { branch: 'feature-b' }],
+    ['environment', { environment: 'staging' }, { environment: 'preview' }],
+    ['coordination', { coordination: coordination('one') }, { coordination: coordination('two') }],
+  ];
+  try {
+    for (const [label, first, second] of cases) {
+      let call = 0;
+      globalThis.fetch = async () => {
+        call += 1;
+        if (call > 1) throw new Error('network timeout');
+        return new Response(JSON.stringify({ data: {
+          ok: true,
+          action: 'inspect configuration',
+          agent_id: null,
+          session_id: null,
+          status: { health: 'healthy' },
+          decision_brief: {},
+          risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+          relevant_lessons: [], deployment_playbooks: [], template_suggestion: {},
+          proof_pack: { required: false, enforced: false, fields: [], missing: [], complete: true, commit_endpoint: '/v1/agent/commit', rule: 'live' },
+          before_you_act: 'Proceed.', exact_next_action: 'Inspect.', auto_outcome_closure: null,
+        } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      };
+      const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+      await marrow.agentRuntime({ action: 'inspect configuration', type: 'inspection', ...first });
+      const changed = await marrow.agentRuntime({ action: 'inspect configuration', type: 'inspection', ...second });
+      assert.equal(changed.source, 'unavailable', `${label} must participate in the runtime cache identity`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('agentRuntime cache identity is deterministic, bounded, and contains no request text', async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call > 1) throw new Error('network timeout');
+    return new Response(JSON.stringify({ data: {
+      ok: true,
+      action: 'inspect configuration',
+      agent_id: null,
+      session_id: null,
+      status: { health: 'healthy' },
+      decision_brief: {},
+      risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+      relevant_lessons: [], deployment_playbooks: [], template_suggestion: {},
+      proof_pack: { required: false, enforced: false, fields: [], missing: [], complete: true, commit_endpoint: '/v1/agent/commit', rule: 'live' },
+      before_you_act: 'Proceed.', exact_next_action: 'Inspect.', auto_outcome_closure: null,
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    await marrow.agentRuntime({
+      action: 'inspect configuration',
+      type: 'inspection',
+      context: { beta: 'second-sensitive-value', alpha: 'first-sensitive-value' },
+    });
+    const stale = await marrow.agentRuntime({
+      action: 'inspect configuration',
+      type: 'inspection',
+      context: { alpha: 'first-sensitive-value', beta: 'second-sensitive-value' },
+    });
+    const runtimeKeys = [...marrow.readCache.keys()].filter((key) => key.startsWith('runtime:'));
+    assert.equal(stale.source, 'last_known');
+    assert.equal(runtimeKeys.length, 1);
+    assert.match(runtimeKeys[0], /^runtime:[a-f0-9]{32}$/);
+    assert.doesNotMatch(runtimeKeys[0], /inspect|sensitive|first|second/);
   } finally {
     globalThis.fetch = originalFetch;
   }

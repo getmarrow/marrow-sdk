@@ -510,6 +510,8 @@ export interface MarrowOrientResult {
   stale?: boolean;
   stale_ms?: number | null;
   error_code?: string;
+  exact_fix?: string;
+  client_update?: MarrowClientUpdateAdvisory | null;
   warnings: Array<{
     type: string;
     failureRate: number;
@@ -679,6 +681,8 @@ export interface MarrowAskResult {
   stale?: boolean;
   stale_ms?: number | null;
   error_code?: string;
+  exact_fix?: string;
+  client_update?: MarrowClientUpdateAdvisory | null;
   answer: string;
   stats: {
     total: number;
@@ -766,6 +770,8 @@ export interface MarrowQuickStatusResult {
   stale?: boolean;
   stale_ms?: number | null;
   error_code?: string;
+  exact_fix?: string;
+  client_update?: MarrowClientUpdateAdvisory | null;
   ok: boolean;
   enabled: boolean;
   health: 'healthy' | 'degraded';
@@ -1744,6 +1750,12 @@ export interface MarrowBeforeActionIntervention {
 
 export interface MarrowAgentRuntimeResult {
   ok: boolean;
+  available?: boolean;
+  source?: 'live' | 'last_known' | 'unavailable';
+  stale?: boolean;
+  stale_ms?: number | null;
+  error_code?: string;
+  exact_fix?: string;
   /** Server-created coordination decision to use for arbitration outcome closure. */
   decision_id?: string;
   action: string;

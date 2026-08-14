@@ -1055,7 +1055,7 @@ test('SDK identifies its package version and exposes the server update advisory'
     const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
     const status = await marrow.quickStatus();
     assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
-    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.54');
+    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.56');
     assert.equal(status.clientUpdate.update_available, true);
     assert.equal(status.clientUpdate.update_command, 'npm install @getmarrow/sdk@latest');
   } finally {
@@ -1081,12 +1081,81 @@ test('commit queues transient network failures and drains on next request', asyn
     marrow.decisionId = 'decision_retry';
     await assert.rejects(
       () => marrow.commit({ success: true, outcome: 'retry me' }),
-      /network timeout/
+      /Marrow request failed \(timeout\).*doctor/
     );
     await marrow.commit({ success: true, outcome: 'drain queue' });
     assert.equal(calls.length, 3);
     assert.equal(calls[1].body.decision_id, 'decision_retry');
     assert.equal(calls[2].body.outcome, 'drain queue');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('agentRuntime returns structured low-risk guidance when the live read is unavailable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('fetch failed'); };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', {
+      durableEventSpool: false,
+      agentId: 'agent-runtime-test',
+    });
+    const runtime = await marrow.agentRuntime({ action: 'format documentation', type: 'docs' });
+    assert.equal(runtime.ok, false);
+    assert.equal(runtime.available, false);
+    assert.equal(runtime.source, 'unavailable');
+    assert.equal(runtime.risk_gate.allow, true);
+    assert.equal(runtime.risk_gate.decision, 'warn');
+    assert.match(runtime.exact_fix, /doctor/);
+    assert.doesNotMatch(runtime.exact_fix, /fetch failed/i);
+    assert.equal(runtime.client_update.package, '@getmarrow/sdk');
+    assert.equal(runtime.client_update.installed_version, '3.7.56');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('stale agentRuntime guidance cannot authorize a high-risk action', async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call > 1) throw new Error('network timeout');
+    return new Response(JSON.stringify({ data: {
+      ok: true,
+      action: 'deploy production',
+      agent_id: 'agent-runtime-test',
+      session_id: null,
+      status: { health: 'healthy' },
+      decision_brief: {},
+      risk_gate: { allow: true, decision: 'proceed', risk_level: 'high', reasons: [] },
+      relevant_lessons: [],
+      deployment_playbooks: [],
+      template_suggestion: {},
+      gate_receipt: { receipt_id: 'receipt-live' },
+      gate_receipt_id: 'receipt-live',
+      proof_pack: { required: true, enforced: true, fields: [], missing: [], complete: false },
+      before_you_act: 'Proceed with the fresh gate.',
+      exact_next_action: 'Deploy.',
+      auto_outcome_closure: null,
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', {
+      durableEventSpool: false,
+      agentId: 'agent-runtime-test',
+    });
+    const live = await marrow.agentRuntime({ action: 'deploy production', type: 'deploy' });
+    const stale = await marrow.agentRuntime({ action: 'deploy production', type: 'deploy' });
+    assert.equal(live.source, 'live');
+    assert.equal(live.gate_receipt_id, 'receipt-live');
+    assert.equal(stale.source, 'last_known');
+    assert.equal(stale.stale, true);
+    assert.equal(stale.risk_gate.allow, false);
+    assert.equal(stale.risk_gate.decision, 'review_required');
+    assert.equal(stale.gate_receipt, null);
+    assert.equal(stale.gate_receipt_id, null);
+    assert.match(stale.before_you_act, /Cached guidance cannot authorize/);
   } finally {
     globalThis.fetch = originalFetch;
   }

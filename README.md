@@ -65,7 +65,18 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.55
+## What's New in v3.7.56
+
+v3.7.56 makes the SDK read and runtime control path fail soft, fast, and explicitly:
+
+- every authenticated request identifies the actual `3.7.56` client version;
+- transient transport failures return bounded error classes and exact repair commands rather than raw network errors;
+- low-risk runtime reads can continue with a structured warning when Marrow is temporarily unavailable;
+- high-risk runtime reads fail closed unless a fresh gate is available;
+- a last-known runtime brief remains useful context but its receipt is stripped and it cannot authorize sensitive work;
+- update guidance is present on unavailable runtime responses so stale clients can repair themselves.
+
+## Previous: v3.7.55
 
 v3.7.55 makes evidence-backed steering, completion evidence, coordination, and replay available through typed SDK surfaces:
 

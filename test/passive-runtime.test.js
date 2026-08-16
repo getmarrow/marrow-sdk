@@ -1082,6 +1082,108 @@ test('SDK identifies its package version and exposes the server update advisory'
   }
 });
 
+test('SDK runtime identity and authorization semantics are model and harness neutral', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalClient = process.env.MARROW_CLIENT;
+  const observed = [];
+  globalThis.fetch = async (_url, options) => {
+    observed.push(options.headers);
+    return new Response(JSON.stringify({ data: {
+      ok: true,
+      decision_id: null,
+      action: 'review documentation',
+      agent_id: 'agent-runtime-neutral',
+      session_id: null,
+      status: { health: 'healthy' },
+      decision_brief: {},
+      risk_gate: { allow: true, decision: 'warn', risk_level: 'medium', reasons: [], gate_receipt_id: 'gate-neutral' },
+      relevant_lessons: [],
+      deployment_playbooks: [],
+      template_suggestion: {},
+      gate_receipt: { id: 'gate-neutral', required: true },
+      gate_receipt_id: 'gate-neutral',
+      proof_pack: { required: false, enforced: false, fields: [], missing: [], complete: true, commit_endpoint: '/v1/agent/commit', rule: 'close meaningful work' },
+      before_you_act: 'Review the guidance.',
+      exact_next_action: 'Continue.',
+      auto_outcome_closure: null,
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    const expectedClients = new Map([
+      ['grok', 'grok'],
+      ['claude-code', 'claude-code'],
+      ['future-model-host', 'custom'],
+    ]);
+    for (const [configuredClient, expectedClient] of expectedClients) {
+      process.env.MARROW_CLIENT = configuredClient;
+      const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+      const runtime = await marrow.agentRuntime({ action: `review documentation ${configuredClient}`, type: 'docs' });
+      const headers = observed.at(-1);
+      assert.equal(headers['X-Marrow-Client'], expectedClient);
+      assert.equal(headers['X-Marrow-Package'], '@getmarrow/sdk');
+      assert.equal(headers['X-Marrow-Package-Version'], '3.7.56');
+      assert.equal('decision_id' in runtime, false);
+      assert.deepEqual(runtime.runtime_authorization, {
+        id: 'gate-neutral',
+        kind: 'durable_gate_receipt',
+        durable: true,
+        decision_state: 'not_created',
+        decision_creation_required: true,
+        decision_creation_endpoint: '/v1/agent/think',
+      });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalClient === undefined) delete process.env.MARROW_CLIENT;
+    else process.env.MARROW_CLIENT = originalClient;
+  }
+});
+
+test('SDK preserves only an authoritative server-created arbitration decision identifier', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: {
+    ok: true,
+    decision_id: null,
+    action: 'resolve release proposals',
+    agent_id: 'agent-runtime-arbitration',
+    session_id: null,
+    status: { health: 'healthy' },
+    decision_brief: {},
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'high', reasons: [], gate_receipt_id: 'gate-arbitration' },
+    relevant_lessons: [],
+    deployment_playbooks: [],
+    template_suggestion: {},
+    gate_receipt: { id: 'gate-arbitration', required: true },
+    gate_receipt_id: 'gate-arbitration',
+    arbitration: {
+      receipt_id: 'arbitration-receipt',
+      decision_id: 'decision-authoritative',
+      resolution: 'selected',
+    },
+    proof_pack: { required: true, enforced: true, fields: [], missing: [], complete: false, commit_endpoint: '/v1/agent/commit', rule: 'close the selected decision' },
+    before_you_act: 'Follow the selected proposal.',
+    exact_next_action: 'Continue with the selected proposal.',
+    auto_outcome_closure: null,
+  } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  try {
+    const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
+    const runtime = await marrow.agentRuntime({
+      action: 'resolve release proposals',
+      type: 'coordination',
+    });
+    assert.equal(runtime.decision_id, 'decision-authoritative');
+    assert.equal(runtime.runtime_authorization.id, 'gate-arbitration');
+    assert.equal(runtime.runtime_authorization.decision_id, 'decision-authoritative');
+    assert.equal(runtime.runtime_authorization.decision_state, 'created');
+    assert.equal(runtime.runtime_authorization.decision_creation_required, false);
+    assert.equal(runtime.runtime_authorization.decision_creation_endpoint, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('commit queues transient network failures and drains on next request', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const originalFetch = globalThis.fetch;
@@ -1192,6 +1294,15 @@ test('stale agentRuntime preserves cached denial and strips authorization artifa
     return new Response(JSON.stringify({ data: {
       ok: true,
       decision_id: 'decision-stale',
+      runtime_authorization: {
+        id: 'runtime-authorization-stale',
+        kind: 'durable_gate_receipt',
+        durable: true,
+        decision_state: 'created',
+        decision_creation_required: false,
+        decision_creation_endpoint: null,
+        decision_id: 'decision-stale',
+      },
       action: 'grant administrator access',
       agent_id: 'agent-runtime-test',
       session_id: null,
@@ -1228,7 +1339,7 @@ test('stale agentRuntime preserves cached denial and strips authorization artifa
     assert.equal(stale.proof_pack.enforced, true);
     assert.equal(stale.proof_pack.complete, false);
     for (const key of [
-      'decision_id', 'gate_receipt', 'gate_receipt_id', 'arbitration', 'intervention',
+      'decision_id', 'runtime_authorization', 'gate_receipt', 'gate_receipt_id', 'arbitration', 'intervention',
       'before_you_act_injection', 'runtime_contract', 'runtime_policy', 'capacity_guidance', 'risk_gate_event',
     ]) assert.equal(key in stale, false, `${key} must be stripped from stale runtime output`);
     assert.equal(stale.auto_outcome_closure, null);

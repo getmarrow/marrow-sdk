@@ -453,6 +453,7 @@ function runtimeRequestRequiresFreshGate(request: Record<string, unknown>): bool
 
 const STALE_RUNTIME_ARTIFACT_KEYS = new Set([
   'decision_id',
+  'runtime_authorization',
   'arbitration',
   'intervention',
   'before_you_act_injection',
@@ -462,6 +463,67 @@ const STALE_RUNTIME_ARTIFACT_KEYS = new Set([
   'risk_gate_event',
   'behavior_governance',
 ]);
+
+function safeRuntimeIdentifier(value: unknown): string | null {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized && isSafeLifecycleIdentifier(normalized) ? normalized : null;
+}
+
+/**
+ * Keep the SDK's runtime identifier contract aligned with the canonical API
+ * while older servers are still in circulation. A runtime authorization is a
+ * gate receipt, not a decision. Only propagate a decision identifier that the
+ * server actually returned; never manufacture one from the receipt.
+ */
+function normalizeLiveRuntimeIdentifiers(
+  runtime: MarrowAgentRuntimeResult,
+): MarrowAgentRuntimeResult {
+  const existingAuthorization = runtime.runtime_authorization;
+  const riskGateShape = (runtime.risk_gate && typeof runtime.risk_gate === 'object'
+    ? runtime.risk_gate
+    : {}) as Partial<MarrowWorkflowGateResult> & {
+    gate_receipt_id?: unknown;
+    gate_required?: unknown;
+  };
+  const decisionId = safeRuntimeIdentifier(runtime.decision_id)
+    || safeRuntimeIdentifier(existingAuthorization?.decision_id)
+    || safeRuntimeIdentifier(runtime.arbitration?.decision_id);
+  const receiptId = safeRuntimeIdentifier(existingAuthorization?.id)
+    || safeRuntimeIdentifier(runtime.gate_receipt?.id)
+    || safeRuntimeIdentifier(runtime.gate_receipt?.receipt_id)
+    || safeRuntimeIdentifier(runtime.gate_receipt_id)
+    || safeRuntimeIdentifier(riskGateShape.gate_receipt_id);
+  const shape = runtime as MarrowAgentRuntimeResult & {
+    response_mode?: unknown;
+    gate_required?: unknown;
+    risk_level?: unknown;
+    performance?: { mode?: unknown };
+  };
+  const fastGuidance = shape.performance?.mode === 'summary_backed_fast_path'
+    || (shape.response_mode === 'slim'
+      && shape.gate_required !== true
+      && shape.risk_level === 'low');
+  const durable = typeof existingAuthorization?.durable === 'boolean'
+    ? existingAuthorization.durable
+    : Boolean(receiptId && (runtime.gate_receipt?.required || riskGateShape.gate_required || !fastGuidance));
+  const { decision_id: _nullableAuthorizationDecisionId, ...authorizationWithoutNullableDecision } = existingAuthorization || {};
+  const runtimeAuthorization = receiptId ? {
+    ...authorizationWithoutNullableDecision,
+    id: receiptId,
+    kind: existingAuthorization?.kind || (durable ? 'durable_gate_receipt' : 'low_risk_guidance_receipt'),
+    durable,
+    decision_state: decisionId ? 'created' as const : 'not_created' as const,
+    decision_creation_required: !decisionId,
+    decision_creation_endpoint: decisionId ? null : '/v1/agent/think',
+    ...(decisionId ? { decision_id: decisionId } : {}),
+  } : undefined;
+  const { decision_id: _nullableDecisionId, runtime_authorization: _existingAuthorization, ...withoutNullableDecision } = runtime;
+  return {
+    ...withoutNullableDecision,
+    ...(decisionId ? { decision_id: decisionId } : {}),
+    ...(runtimeAuthorization ? { runtime_authorization: runtimeAuthorization } : {}),
+  };
+}
 
 function stripStaleRuntimeArtifacts(value: unknown, depth: number = 0): unknown {
   if (depth > 8) return null;
@@ -3583,7 +3645,7 @@ export class MarrowClient {
         client_update: sdkClientUpdate(),
       };
     }
-    const data = (read.value.data || read.value) as MarrowAgentRuntimeResult;
+    const data = normalizeLiveRuntimeIdentifiers((read.value.data || read.value) as MarrowAgentRuntimeResult);
     if (!read.stale) {
       return {
         ...data,

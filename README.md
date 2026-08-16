@@ -259,6 +259,14 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | `fleetLessons(options)` | Retrieve proven lessons authorized for the current tenant/agent |
 | `modelUsage(input)` | Record compact token, cost, and latency counts exposed by the harness |
 
+`agentRuntime()` returns `runtime_authorization` with the authoritative gate
+receipt. An ordinary runtime check does not create a decision, so it omits
+`decision_id`; call `think()` (or use the guarded/automatic loop) when a
+decision must be created and closed. Arbitration returns `decision_id` only
+when the server actually creates that decision. These semantics are identical
+across SDK-owned runtimes and MCP-compatible hosts; the host/model identity is
+provenance, not a behavior switch.
+
 `marrowEvidence.command()`, `.tests()`, `.deployment()`, `.ownerAcceptance()`, and `.combine()` produce bounded proof metadata. They do not include raw stdout, source code, prompts, credentials, or customer content. Adapter failures are reported separately and never relabel a successful action as failed; required proof still prevents unverified completion.
 
 ## Agent Disagreement Arbitration

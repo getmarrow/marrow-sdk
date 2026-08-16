@@ -1661,6 +1661,21 @@ export interface MarrowAgentRuntimeResult {
     exact_fix?: string;
     /** Server-created coordination decision to use for arbitration outcome closure. */
     decision_id?: string;
+    /**
+     * Authoritative authorization receipt for this runtime evaluation. Ordinary
+     * runtime checks do not create decisions; decision_id is present only when
+     * the server actually created one (for example, during arbitration).
+     */
+    runtime_authorization?: {
+        id: string;
+        kind: 'durable_gate_receipt' | 'low_risk_guidance_receipt' | string;
+        durable: boolean;
+        decision_state: 'not_created' | 'created' | string;
+        decision_creation_required: boolean;
+        decision_creation_endpoint: string | null;
+        decision_id?: string;
+        [key: string]: unknown;
+    };
     action: string;
     agent_id: string | null;
     session_id: string | null;
@@ -1673,6 +1688,7 @@ export interface MarrowAgentRuntimeResult {
     gate_receipt_id?: string | null;
     gate_receipt?: {
         id: string;
+        receipt_id?: string;
         required: boolean;
         decision?: string;
         expires_at?: string;
@@ -1766,6 +1782,13 @@ export interface MarrowAgentRuntimeResult {
     };
     exact_next_action: string | null;
     auto_outcome_closure: Record<string, unknown> | null;
+    completion_contract?: {
+        decision_state?: 'not_created' | 'created' | string;
+        decision_creation_required?: boolean;
+        decision_creation_endpoint?: string | null;
+        decision_id?: string;
+        [key: string]: unknown;
+    };
     client_update?: MarrowClientUpdateAdvisory | null;
 }
 export type MarrowFleetLessonType = 'success' | 'failure' | 'deploy' | 'incident' | 'handoff' | 'general';

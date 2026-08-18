@@ -65,7 +65,15 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.56
+## What's New in v3.7.58
+
+v3.7.58 lets a caller close an identified workflow without rediscovering it:
+
+- `commit()` accepts `identifiedWorkflowId` / `identified_workflow_id` and `reusedIdentifiedWorkflow`;
+- when a workflow id is present, commit records `reused_identified_workflow` so token savings stay evidence-backed;
+- live Marrow runtime already returns the identified-workflow contract; this client now sends that id back on outcome closure.
+
+## Previous: v3.7.56
 
 v3.7.56 makes the SDK read and runtime control path fail soft, fast, and explicitly:
 

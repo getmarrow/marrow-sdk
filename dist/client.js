@@ -2329,6 +2329,17 @@ class MarrowClient {
             body.owner_approval_receipt_id = ownerApprovalReceiptId;
         if (params.proof)
             body.proof = redactSensitiveValue(params.proof);
+        const identifiedWorkflowId = params.identifiedWorkflowId
+            || params.identified_workflow_id
+            || params.identifiedWorkflow?.id
+            || params.identified_workflow?.id
+            || undefined;
+        if (typeof identifiedWorkflowId === 'string' && identifiedWorkflowId.trim()) {
+            body.identified_workflow_id = identifiedWorkflowId.trim().slice(0, 128);
+        }
+        if (params.reusedIdentifiedWorkflow === true || params.reused_identified_workflow === true || body.identified_workflow_id) {
+            body.reused_identified_workflow = true;
+        }
         const modelUsage = params.modelUsage || params.model_usage;
         if (modelUsage)
             body.model_usage = this.normalizeModelUsage(modelUsage);

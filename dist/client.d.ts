@@ -101,6 +101,16 @@ export declare class MarrowClient {
         proof?: Record<string, unknown>;
         modelUsage?: MarrowModelUsageInput;
         model_usage?: MarrowModelUsageInput;
+        identifiedWorkflowId?: string;
+        identified_workflow_id?: string;
+        identifiedWorkflow?: {
+            id?: string | null;
+        } | null;
+        identified_workflow?: {
+            id?: string | null;
+        } | null;
+        reusedIdentifiedWorkflow?: boolean;
+        reused_identified_workflow?: boolean;
     }): Promise<MarrowCommitResult>;
     modelUsage(params: MarrowModelUsageInput): Promise<MarrowModelUsageResult>;
     issueActionPermit(params: MarrowActionPermitIssueInput): Promise<MarrowActionPermitIssueResult>;

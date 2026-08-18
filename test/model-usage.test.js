@@ -109,6 +109,34 @@ test('commit can attach model usage and returns token_value_signal', async () =>
   assert.equal(result.token_value_signal.proof_line, 'Marrow observed 1 model calls.');
 });
 
+test('commit sends identified_workflow_id when the caller reused a known path', async () => {
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    if (String(url).endsWith('/v1/agent/think')) {
+      return new Response(JSON.stringify({ data: { decision_id: 'dec_reuse', accepted_as: 'intent' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ data: { committed: true, success_rate: 1 } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetch;
+  try {
+    const marrow = testClient();
+    await marrow.think({ action: 'deploy safely', type: 'implementation' });
+    await marrow.commit({
+      success: true,
+      outcome: 'Reused the identified workflow',
+      identifiedWorkflowId: 'wf-deploy',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const commitCall = calls.find((call) => call.url.endsWith('/v1/agent/commit'));
+  assert.ok(commitCall);
+  assert.equal(commitCall.body.identified_workflow_id, 'wf-deploy');
+  assert.equal(commitCall.body.reused_identified_workflow, true);
+});
+
 test('wrapFetch passively captures model usage from provider responses', async () => {
   const marrowCalls = [];
   const originalFetch = globalThis.fetch;

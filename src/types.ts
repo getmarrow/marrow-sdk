@@ -838,6 +838,14 @@ export interface MarrowQuickStatusResult {
   recommendedFix: string | null;
   fixCommands: string[];
   nextAction: string | null;
+  habitLoopCopy?: {
+    contract: 'marrow.habit-loop.v1';
+    headline: string;
+    next: string;
+    avoid: string[];
+    savings: string;
+    text: string;
+  } | null;
   autoOutcomeClosure: {
     enabled: boolean;
     required?: boolean;
@@ -1340,6 +1348,14 @@ export interface MarrowAgentStatusResult {
     raw_data_exposed: false;
   };
   next_actions: string[];
+  habit_loop_copy?: {
+    contract: 'marrow.habit-loop.v1';
+    headline: string;
+    next: string;
+    avoid: string[];
+    savings: string;
+    text: string;
+  } | null;
 }
 
 export interface MarrowValueReportResult {

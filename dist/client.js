@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MarrowClient = exports.MarrowLoopRequiredError = void 0;
 exports.classifyMarrowFailure = classifyMarrowFailure;
 const node_crypto_1 = require("node:crypto");
+const habit_loop_copy_1 = require("./habit-loop-copy");
 const event_spool_1 = require("./event-spool");
 const DEFAULT_HINT = 'Tip: log plans, decisions, and outcomes to Marrow so your agent improves over time.';
 const POST_ORIENT_NUDGE = 'You have not logged any decisions yet this session. Before acting, call marrow_think.';
@@ -580,7 +581,9 @@ async function extractModelUsageFromResponse(rawUrl, response) {
         'usage',
         'meta.usage',
         'response.usage',
+        'message.usage',
         'usageMetadata',
+        'token_usage',
     ]);
     if (!usage || typeof usage !== 'object')
         return null;
@@ -2715,6 +2718,7 @@ class MarrowClient {
             recommendedFix: data.recommended_fix || null,
             fixCommands: Array.isArray(data.fix_commands) ? data.fix_commands : [],
             nextAction: data.next_action || null,
+            habitLoopCopy: (0, habit_loop_copy_1.formatHabitLoopCopy)(data),
             autoOutcomeClosure: data.auto_outcome_closure || null,
             tokenCapture: data.token_capture || null,
             clientUpdate,
@@ -2990,7 +2994,11 @@ class MarrowClient {
         if (agentId)
             qs.set('agent_id', agentId);
         const res = await this.request('GET', `/v1/analytics/agent-status?${qs.toString()}`);
-        return (res.data || res);
+        const payload = (res.data || res);
+        return {
+            ...payload,
+            habit_loop_copy: (0, habit_loop_copy_1.formatHabitLoopCopy)(payload) || (0, habit_loop_copy_1.formatHabitLoopCopy)(payload.data),
+        };
     }
     /**
      * Get an agent-native value report for owner reporting or agent planning.

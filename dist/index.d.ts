@@ -5,6 +5,8 @@
  */
 import { MarrowClient } from './client';
 export { MarrowClient, MarrowLoopRequiredError, classifyMarrowFailure } from './client';
+export { formatHabitLoopCopy } from './habit-loop-copy';
+export type { MarrowHabitLoopCopy } from './habit-loop-copy';
 export { createMarrowClient, marrowFromEnv } from './factory';
 export { resolveMarrowEnv } from './env';
 export { marrowEvidence } from './evidence-adapters';

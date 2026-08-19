@@ -1,0 +1,1 @@
+{"version":3,"file":"habit-loop-copy.d.ts","sourceRoot":"","sources":["../src/habit-loop-copy.ts"],"names":[],"mappings":"AAUA,MAAM,WAAW,mBAAmB;IAClC,QAAQ,EAAE,sBAAsB,CAAC;IACjC,QAAQ,EAAE,MAAM,CAAC;IACjB,IAAI,EAAE,MAAM,CAAC;IACb,KAAK,EAAE,MAAM,EAAE,CAAC;IAChB,OAAO,EAAE,MAAM,CAAC;IAChB,IAAI,EAAE,MAAM,CAAC;CACd;AAED,wBAAgB,mBAAmB,CAAC,MAAM,EAAE,OAAO,GAAG,mBAAmB,GAAG,IAAI,CAmC/E"}

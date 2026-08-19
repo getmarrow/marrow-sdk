@@ -3,6 +3,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { formatHabitLoopCopy } from './habit-loop-copy';
 
 import type {
   MarrowClientOptions,
@@ -731,7 +732,9 @@ async function extractModelUsageFromResponse(rawUrl: string, response: Response)
     'usage',
     'meta.usage',
     'response.usage',
+    'message.usage',
     'usageMetadata',
+    'token_usage',
   ]);
   if (!usage || typeof usage !== 'object') return null;
 
@@ -3206,6 +3209,7 @@ export class MarrowClient {
       recommendedFix: data.recommended_fix || null,
       fixCommands: Array.isArray(data.fix_commands) ? data.fix_commands : [],
       nextAction: data.next_action || null,
+      habitLoopCopy: formatHabitLoopCopy(data),
       autoOutcomeClosure: data.auto_outcome_closure || null,
       tokenCapture: data.token_capture || null,
       clientUpdate,
@@ -3558,7 +3562,11 @@ export class MarrowClient {
     const qs = new URLSearchParams({ period: String(days) });
     if (agentId) qs.set('agent_id', agentId);
     const res = await this.request('GET', `/v1/analytics/agent-status?${qs.toString()}`);
-    return (res.data || res) as MarrowAgentStatusResult;
+    const payload = (res.data || res) as MarrowAgentStatusResult;
+    return {
+      ...payload,
+      habit_loop_copy: formatHabitLoopCopy(payload) || formatHabitLoopCopy((payload as unknown as { data?: unknown }).data),
+    };
   }
 
   /**

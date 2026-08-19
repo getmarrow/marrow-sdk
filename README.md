@@ -65,7 +65,15 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.58
+## What's New in v3.7.59
+
+v3.7.59 makes daily status readable and captures observed model usage without inventing savings:
+
+- `quickStatus()` pretty-prints `habit_loop_copy` from the live `marrow.habit-loop.v1` contract;
+- `createPassiveRuntime().install()` still patches fetch and records compact token counts only when a provider response includes usage;
+- empty savings stay honest until those observed counts land.
+
+## Previous: v3.7.58
 
 v3.7.58 lets a caller close an identified workflow without rediscovering it:
 

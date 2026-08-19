@@ -187,3 +187,48 @@ test('wrapFetch passively captures model usage from provider responses', async (
   assert.equal(usageCall.body.prompt, undefined);
   assert.equal(usageCall.body.output, undefined);
 });
+
+test('wrapFetch captures message.usage and token_usage JSON paths', async () => {
+  async function captureFromBody(body) {
+    const marrowCalls = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      marrowCalls.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ data: { recorded: true } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    try {
+      const wrapped = testClient().wrapFetch(async () => new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      await (await wrapped('https://api.openai.com/v1/chat/completions', { method: 'POST' })).json();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    return marrowCalls.find((call) => call.url.endsWith('/v1/agent/model-usage'));
+  }
+
+  const fromMessage = await captureFromBody({
+    model: 'gpt-test',
+    message: { usage: { prompt_tokens: 9, completion_tokens: 4, total_tokens: 13 } },
+  });
+  assert.ok(fromMessage);
+  assert.equal(fromMessage.body.input_tokens, 9);
+  assert.equal(fromMessage.body.output_tokens, 4);
+  assert.equal(fromMessage.body.total_tokens, 13);
+
+  const fromTokenUsage = await captureFromBody({
+    model: 'gpt-test',
+    token_usage: { input_tokens: 6, output_tokens: 2, total_tokens: 8 },
+  });
+  assert.ok(fromTokenUsage);
+  assert.equal(fromTokenUsage.body.input_tokens, 6);
+  assert.equal(fromTokenUsage.body.total_tokens, 8);
+
+  const empty = await captureFromBody({ model: 'gpt-test', ok: true });
+  assert.equal(empty, undefined);
+});

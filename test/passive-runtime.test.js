@@ -29,6 +29,35 @@ test('createPassiveRuntime patches and restores global fetch', () => {
   }
 });
 
+test('createPassiveRuntime binds session-end auto-commit and restores the listener', () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const originalOnce = process.once;
+  const originalOff = process.off;
+  const listeners = [];
+  process.once = (event, listener) => {
+    if (event === 'beforeExit') listeners.push(listener);
+    return originalOnce.call(process, event, listener);
+  };
+  process.off = (event, listener) => {
+    if (event === 'beforeExit') {
+      const index = listeners.indexOf(listener);
+      if (index >= 0) listeners.splice(index, 1);
+    }
+    return originalOff.call(process, event, listener);
+  };
+  try {
+    const runtime = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false })
+      .createPassiveRuntime({ patchGlobalFetch: false });
+    runtime.install();
+    assert.equal(listeners.length, 1);
+    runtime.restore();
+    assert.equal(listeners.length, 0);
+  } finally {
+    process.once = originalOnce;
+    process.off = originalOff;
+  }
+});
+
 test('passive install contains corrupt-spool drain failures and reports unavailable health', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-passive-corrupt-'));
   const spoolPath = join(directory, 'events.json');

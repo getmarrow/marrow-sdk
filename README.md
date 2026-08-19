@@ -65,7 +65,15 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.59
+## What's New in v3.7.60
+
+v3.7.60 closes the first hour without inventing savings:
+
+- `createPassiveRuntime().install()` auto-commits open decisions when the Node process exits;
+- empty savings stay honest; token counts are recorded only when a provider response includes usage;
+- `quickStatus()` still pretty-prints `habit_loop_copy` from the live `marrow.habit-loop.v1` contract.
+
+## Previous: v3.7.59
 
 v3.7.59 makes daily status readable and captures observed model usage without inventing savings:
 

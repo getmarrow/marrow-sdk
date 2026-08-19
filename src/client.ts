@@ -2015,6 +2015,10 @@ export class MarrowClient {
   createPassiveRuntime(options: MarrowPassiveRuntimeOptions = {}): MarrowPassiveRuntimeWithLifecycle {
     const client = this;
     client.enforce({ mode: options.mode || 'auto' });
+    let sessionEndBound = false;
+    const closeOpenSession = () => {
+      void client.endSession(true).catch(() => undefined);
+    };
 
     const registry = typeof globalThis !== 'undefined'
       ? (globalThis as typeof globalThis & {
@@ -2124,14 +2128,26 @@ export class MarrowClient {
           state.owners.push({ token: ownerToken, wrapper: passiveFetch });
           globalThis.fetch = passiveFetch;
           installed = true;
+          if (options.requireOutcomeClosure !== false && !sessionEndBound) {
+            process.once('beforeExit', closeOpenSession);
+            sessionEndBound = true;
+          }
           return { fetchPatched: true };
         }
 
         installed = true;
+        if (options.requireOutcomeClosure !== false && !sessionEndBound) {
+          process.once('beforeExit', closeOpenSession);
+          sessionEndBound = true;
+        }
         return { fetchPatched: false };
       },
 
       restore(): void {
+        if (sessionEndBound) {
+          process.off('beforeExit', closeOpenSession);
+          sessionEndBound = false;
+        }
         if (lifecycleTimer) {
           clearInterval(lifecycleTimer);
           lifecycleTimer = null;

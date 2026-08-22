@@ -5,6 +5,7 @@ const { join } = require('node:path');
 const test = require('node:test');
 
 const { MarrowClient } = require('../dist/index.js');
+const { version: sdkVersion } = require('../package.json');
 
 test('createPassiveRuntime patches and restores global fetch', () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
@@ -23,6 +24,53 @@ test('createPassiveRuntime patches and restores global fetch', () => {
 
     runtime.restore();
     assert.equal(runtime.installed, false);
+    assert.equal(globalThis.fetch, fakeFetch);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('passive global fetch never intercepts SDK control-plane requests', async () => {
+  process.env.MARROW_API_KEY = 'test-passive-runtime-key';
+  const originalFetch = globalThis.fetch;
+  const transportCalls = [];
+  const fakeFetch = async (input) => {
+    transportCalls.push(String(input));
+    return Response.json({
+      data: {
+        enabled: true,
+        available: true,
+        service_ok: true,
+      },
+    });
+  };
+
+  globalThis.fetch = fakeFetch;
+  try {
+    const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
+    const interceptions = { before: 0, after: 0 };
+    marrow.beforeAction = async () => {
+      interceptions.before += 1;
+      return { ok: true };
+    };
+    marrow.afterAction = async () => {
+      interceptions.after += 1;
+      return { ok: true };
+    };
+
+    const runtime = marrow.createPassiveRuntime();
+    runtime.install();
+
+    await marrow.quickStatus();
+    assert.equal(transportCalls.length, 1);
+    assert.match(transportCalls[0], /\/v1\/agent\/status\?fast=1$/);
+    assert.deepEqual(interceptions, { before: 0, after: 0 });
+
+    await globalThis.fetch('https://provider.example/v1/chat');
+    assert.equal(transportCalls.length, 2);
+    assert.deepEqual(interceptions, { before: 1, after: 1 });
+
+    runtime.restore();
     assert.equal(globalThis.fetch, fakeFetch);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1051,7 +1099,7 @@ test('quickStatus fails soft when no live or last-known response exists', async 
     assert.equal(status.health, 'degraded');
     assert.equal(status.error_code, 'timeout');
     assert.deepEqual(status.clientUpdate, status.client_update);
-    assert.equal(status.clientUpdate.installed_version, '3.7.58');
+    assert.equal(status.clientUpdate.installed_version, sdkVersion);
     assert.match(status.exact_fix, /doctor/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1066,7 +1114,7 @@ test('orient unavailable response includes normalized repair and update guidance
     const orient = await marrow.orient({ autoWarn: true, taskType: 'documentation' });
     assert.equal(orient.available, false);
     assert.match(orient.exact_fix, /doctor/);
-    assert.equal(orient.client_update.installed_version, '3.7.58');
+    assert.equal(orient.client_update.installed_version, sdkVersion);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1103,7 +1151,7 @@ test('SDK identifies its package version and exposes the server update advisory'
     const marrow = new MarrowClient('test-passive-runtime-key', { durableEventSpool: false });
     const status = await marrow.quickStatus();
     assert.equal(capturedHeaders['X-Marrow-Package'], '@getmarrow/sdk');
-    assert.equal(capturedHeaders['X-Marrow-Package-Version'], '3.7.58');
+    assert.equal(capturedHeaders['X-Marrow-Package-Version'], sdkVersion);
     assert.equal(status.clientUpdate.update_available, true);
     assert.equal(status.clientUpdate.update_command, 'npm install @getmarrow/sdk@latest');
   } finally {
@@ -1151,7 +1199,7 @@ test('SDK runtime identity and authorization semantics are model and harness neu
       const headers = observed.at(-1);
       assert.equal(headers['X-Marrow-Client'], expectedClient);
       assert.equal(headers['X-Marrow-Package'], '@getmarrow/sdk');
-      assert.equal(headers['X-Marrow-Package-Version'], '3.7.58');
+      assert.equal(headers['X-Marrow-Package-Version'], sdkVersion);
       assert.equal('decision_id' in runtime, false);
       assert.deepEqual(runtime.runtime_authorization, {
         id: 'gate-neutral',
@@ -1259,7 +1307,7 @@ test('agentRuntime returns structured low-risk guidance when the live read is un
     assert.match(runtime.exact_fix, /doctor/);
     assert.doesNotMatch(runtime.exact_fix, /fetch failed/i);
     assert.equal(runtime.client_update.package, '@getmarrow/sdk');
-    assert.equal(runtime.client_update.installed_version, '3.7.58');
+    assert.equal(runtime.client_update.installed_version, sdkVersion);
   } finally {
     globalThis.fetch = originalFetch;
   }

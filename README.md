@@ -65,7 +65,11 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.60
+## What's New in v3.7.61
+
+v3.7.61 keeps SDK control-plane requests outside the passive global-fetch wrapper. Installing `createPassiveRuntime()` still governs application and provider fetches, but Marrow's own status, runtime, proof, and outcome requests now use the captured unwrapped transport so they cannot recursively govern themselves. The SDK adapter identity also matches the published package version.
+
+## Previous: v3.7.60
 
 v3.7.60 closes the first hour without inventing savings:
 

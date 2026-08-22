@@ -14,7 +14,7 @@ const PRE_EXIT_REMINDER = 'Before ending the session, log the outcome to Marrow 
 const REQUIRE_EXTERNAL_ERROR = 'Marrow require mode: log intent with marrow.think() before external actions.';
 const REQUIRE_COMPLETION_ERROR = 'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
-const SDK_ADAPTER_VERSION = '3.7.58';
+const SDK_ADAPTER_VERSION = '3.7.61';
 const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
 const SDK_CONFIG_FINGERPRINT = (0, node_crypto_1.createHash)('sha256')
     .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)
@@ -3710,7 +3710,12 @@ class MarrowClient {
         headers['X-Marrow-Package-Version'] = SDK_ADAPTER_VERSION;
         const controller = timeoutMs > 0 ? new AbortController() : null;
         let timeout = null;
-        const requestPromise = fetch(url, {
+        const registry = globalThis;
+        const transportFetch = registry[GLOBAL_FETCH_PATCH_KEY]?.originalFetch || globalThis.fetch;
+        if (typeof transportFetch !== 'function') {
+            throw new Error('Marrow request failed (tooling). A fetch implementation is required.');
+        }
+        const requestPromise = transportFetch.call(globalThis, url, {
             method,
             headers,
             body: body ? JSON.stringify(body) : undefined,

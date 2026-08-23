@@ -18,7 +18,12 @@ test('createPassiveRuntime patches and restores global fetch', () => {
     const runtime = marrow.createPassiveRuntime();
 
     assert.equal(runtime.installed, false);
-    assert.equal(runtime.install().fetchPatched, true);
+    assert.deepEqual(runtime.install(), {
+      fetchPatched: true,
+      coverageScope: 'owned_node_process',
+      fetchControlMode: 'observation_only',
+      governanceEnforced: false,
+    });
     assert.equal(runtime.installed, true);
     assert.notEqual(globalThis.fetch, fakeFetch);
 
@@ -63,7 +68,7 @@ test('passive global fetch never intercepts SDK control-plane requests', async (
 
     await marrow.quickStatus();
     assert.equal(transportCalls.length, 1);
-    assert.match(transportCalls[0], /\/v1\/agent\/status\?fast=1$/);
+    assert.match(transportCalls[0], /\/v1\/agent\/status$/);
     assert.deepEqual(interceptions, { before: 0, after: 0 });
 
     await globalThis.fetch('https://provider.example/v1/chat');
@@ -72,6 +77,31 @@ test('passive global fetch never intercepts SDK control-plane requests', async (
 
     runtime.restore();
     assert.equal(globalThis.fetch, fakeFetch);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('observation-only passive fetch never blocks the provider call on telemetry failure', async () => {
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  const fakeFetch = async () => {
+    providerCalls += 1;
+    return new Response('provider result', { status: 200 });
+  };
+  globalThis.fetch = fakeFetch;
+  try {
+    const marrow = new MarrowClient('test-observation-fetch-key', { durableEventSpool: false });
+    marrow.beforeAction = async () => { throw new Error('telemetry pre-action unavailable'); };
+    marrow.afterAction = async () => { throw new Error('telemetry outcome unavailable'); };
+    const runtime = marrow.createPassiveRuntime({ mode: 'require' });
+    const install = runtime.install();
+    assert.equal(install.fetchControlMode, 'observation_only');
+    assert.equal(install.governanceEnforced, false);
+    const response = await globalThis.fetch('https://provider.example/v1/responses', { method: 'POST' });
+    assert.equal(response.status, 200);
+    assert.equal(providerCalls, 1);
+    runtime.restore();
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -104,6 +134,128 @@ test('createPassiveRuntime binds session-end auto-commit and restores the listen
     process.once = originalOnce;
     process.off = originalOff;
   }
+});
+
+test('governed passive fetch uses the signed runGuarded chain before a consequential provider call', async () => {
+  const order = [];
+  const providerFetch = async () => {
+    order.push('provider');
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  const marrow = new MarrowClient('test-governed-fetch-key', { durableEventSpool: false });
+  marrow.agentRuntime = async () => {
+    order.push('runtime');
+    return {
+      ok: true,
+      decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'governed provider request' } },
+      risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+      gate_receipt: { id: 'gate-provider', required: true },
+      proof_pack: { required: false, fields: [] },
+    };
+  };
+  marrow.workflowGate = async () => {
+    order.push('workflow');
+    return { allow: true, decision: 'allow', risk_level: 'low', reasons: [] };
+  };
+  marrow.think = async () => {
+    order.push('think');
+    return { decisionId: 'decision-provider' };
+  };
+  marrow.issueActionPermit = async (input) => {
+    order.push('issue');
+    assert.equal(input.gate_receipt_id, 'gate-provider');
+    return { permit_id: 'permit-provider', permit: 'signed-provider-permit', required_proof: [] };
+  };
+  marrow.verifyActionPermit = async (input) => {
+    order.push('verify');
+    assert.equal(input.permit, 'signed-provider-permit');
+    return { verified: true };
+  };
+  marrow.commit = async (input) => {
+    order.push('commit');
+    assert.equal(input.gateReceiptId, 'gate-provider');
+    return { committed: true };
+  };
+  marrow.closeActionPermit = async () => {
+    order.push('close');
+    return { closed: true };
+  };
+  marrow.integrationEvent = async () => ({
+    accepted: true,
+    queued: false,
+    failed: false,
+    delivery_state: 'accepted',
+    event_id: 'event-provider',
+    pending_spool_events: 0,
+    failed_spool_events: 0,
+    evidence_authority: 'client_self_reported',
+    certified_coverage: false,
+  });
+
+  const runtime = marrow.createPassiveRuntime({
+    fetch: providerFetch,
+    patchGlobalFetch: false,
+    fetchControlMode: 'governed',
+    captureModelUsage: false,
+  });
+  assert.deepEqual(runtime.install(), {
+    fetchPatched: false,
+    coverageScope: 'owned_node_process',
+    fetchControlMode: 'governed',
+    governanceEnforced: true,
+  });
+  const response = await runtime.fetch('https://provider.example/v1/responses', { method: 'POST' });
+  assert.equal(response.status, 200);
+  assert.deepEqual(order.filter((step) => step !== 'commit' && step !== 'close'), [
+    'runtime', 'workflow', 'think', 'issue', 'verify', 'provider',
+  ]);
+  assert.ok(order.indexOf('provider') > order.indexOf('verify'));
+  assert.ok(order.indexOf('commit') > order.indexOf('provider'));
+  assert.ok(order.indexOf('close') > order.indexOf('commit'));
+  runtime.restore();
+});
+
+test('governed passive fetch fails closed before a consequential provider call when permit verification is unavailable', async () => {
+  let providerCalls = 0;
+  const marrow = new MarrowClient('test-governed-fetch-block-key', { durableEventSpool: false });
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'verify permit' } },
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+    gate_receipt: { id: 'gate-blocked-provider', required: true },
+    proof_pack: { required: false, fields: [] },
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
+  marrow.think = async () => ({ decisionId: 'decision-blocked-provider' });
+  marrow.issueActionPermit = async () => { throw new Error('permit service unavailable'); };
+  marrow.commit = async () => ({ committed: true });
+  marrow.integrationEvent = async () => ({
+    accepted: true,
+    queued: false,
+    failed: false,
+    delivery_state: 'accepted',
+    event_id: 'event-blocked-provider',
+    pending_spool_events: 0,
+    failed_spool_events: 0,
+    evidence_authority: 'client_self_reported',
+    certified_coverage: false,
+  });
+  const runtime = marrow.createPassiveRuntime({
+    fetch: async () => {
+      providerCalls += 1;
+      return new Response('should not execute');
+    },
+    patchGlobalFetch: false,
+    fetchControlMode: 'governed',
+  });
+  await assert.rejects(
+    runtime.fetch('https://provider.example/v1/deploy', { method: 'POST' }),
+    /governed fetch did not execute as complete/i,
+  );
+  assert.equal(providerCalls, 0);
 });
 
 test('passive install contains corrupt-spool drain failures and reports unavailable health', async () => {
@@ -142,7 +294,10 @@ test('explicit lifecycle drain is wall-clock bounded when delivery ignores abort
         headers: { 'Content-Type': 'application/json' },
       });
   try {
-    const marrow = new MarrowClient('test-passive-runtime-key', { eventSpoolPath: spoolPath });
+    const marrow = new MarrowClient('test-passive-runtime-key', {
+      eventSpoolPath: spoolPath,
+      lifecycleTimeoutMs: 1_000,
+    });
     const queued = await marrow.integrationEvent({
       event_id: 'bounded-stalled-delivery',
       event_type: 'tool_completed',
@@ -861,6 +1016,159 @@ test('wrapFetch redacts sensitive query values and internal paths', async () => 
   assert.equal(afterCalls[0].result, 'HTTP 200 OK');
 });
 
+test('request deadlines use service-compatible defaults and clamp unsafe overrides', () => {
+  const defaults = new MarrowClient('test-deadline-defaults-key', { durableEventSpool: false });
+  assert.deepEqual(defaults.requestDeadlines, {
+    request: 8_000,
+    read: 5_000,
+    runtime: 5_500,
+    highRiskRuntime: 7_500,
+    lifecycle: 5_000,
+  });
+
+  const clamped = new MarrowClient('test-deadline-clamps-key', {
+    durableEventSpool: false,
+    requestTimeoutMs: Number.POSITIVE_INFINITY,
+    readTimeoutMs: 5,
+    runtimeTimeoutMs: 45_000,
+    highRiskRuntimeTimeoutMs: 1_500,
+    lifecycleTimeoutMs: -10,
+  });
+  assert.deepEqual(clamped.requestDeadlines, {
+    request: 8_000,
+    read: 1_000,
+    runtime: 30_000,
+    highRiskRuntime: 30_000,
+    lifecycle: 1_000,
+  });
+});
+
+test('quickStatus accepts a valid cold response beyond the retired sub-second budget', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(new Response(JSON.stringify({ data: {
+      ok: true,
+      enabled: true,
+      health: 'healthy',
+      decision_count: 3,
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } })), 1_300);
+    init.signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new Error('aborted by deadline'));
+    }, { once: true });
+  });
+  try {
+    const marrow = new MarrowClient('test-cold-status-key', { durableEventSpool: false });
+    const status = await marrow.quickStatus();
+    assert.equal(status.available, true);
+    assert.equal(status.source, 'live');
+    assert.equal(status.decisionCount, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('status, runtime, and commit preserve exact repaired proof fields', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path === '/v1/agent/status') {
+      return Response.json({ data: {
+        ok: true,
+        enabled: true,
+        health: 'healthy',
+        decision_count: 66,
+        success_rate: 0.65,
+        last_event_at: '2026-08-23T15:09:00.000Z',
+        coherent_generation: true,
+        status_generation: 'generation-exact',
+        billing: { state: 'verified', plan: 'free' },
+      } });
+    }
+    if (path === '/v1/agent/runtime') {
+      return Response.json({ data: {
+        ok: true,
+        action: 'repair the control path',
+        agent_id: 'agent-proof-parity',
+        session_id: 'session-proof-parity',
+        status: { health: 'healthy', coherent_generation: true },
+        decision_brief: {},
+        risk_gate: { allow: true, decision: 'warn', risk_level: 'medium', reasons: [] },
+        relevant_lessons: [],
+        deployment_playbooks: [],
+        template_suggestion: {},
+        gate_receipt: { id: 'gate-proof-parity', required: true },
+        gate_receipt_id: 'gate-proof-parity',
+        proof_pack: { required: false, enforced: false, fields: [], missing: [], complete: true, commit_endpoint: '/v1/agent/commit', rule: 'close work' },
+        runtime_proof: { generation: 'generation-exact', exact: true },
+        before_you_act: 'Use the gate receipt.',
+      } });
+    }
+    if (path === '/v1/agent/commit') {
+      return Response.json({ data: {
+        committed: true,
+        decision_id: 'decision-proof-parity',
+        success_rate: 0.65,
+        success_rate_available: true,
+        success_rate_source: 'exact_outcomes',
+        insight: null,
+        narrative: null,
+        pre_action_gate: {
+          receipt_id: 'gate-proof-parity',
+          receipt_present: true,
+          receipt_verified: true,
+          receipt_used: true,
+          enforced: false,
+          validation_code: 'MARROW_ADVISORY_GATE_RECEIPT_VERIFIED',
+        },
+        loop_integrity: {
+          runtime_gate_used: true,
+          receipt_present: true,
+          receipt_verified: true,
+          receipt_used: true,
+          gate_enforced: false,
+          status: 'closed_with_advisory_governance',
+        },
+        commit_processing: { durability: 'outcome_and_gate_receipt_confirmed' },
+      } });
+    }
+    throw new Error(`unexpected SDK route ${path}`);
+  };
+  try {
+    const marrow = new MarrowClient('test-proof-parity-key', {
+      durableEventSpool: false,
+      agentId: 'agent-proof-parity',
+      sessionId: 'session-proof-parity',
+    });
+    const status = await marrow.quickStatus();
+    assert.equal(status.decision_count, 66);
+    assert.equal(status.success_rate, 0.65);
+    assert.equal(status.last_event_at, '2026-08-23T15:09:00.000Z');
+    assert.equal(status.coherent_generation, true);
+    assert.deepEqual(status.billing, { state: 'verified', plan: 'free' });
+
+    const runtime = await marrow.agentRuntime({ action: 'repair the control path' });
+    assert.equal(runtime.runtime_authorization.id, 'gate-proof-parity');
+    assert.deepEqual(runtime.runtime_proof, { generation: 'generation-exact', exact: true });
+
+    marrow.decisionId = 'decision-proof-parity';
+    const commit = await marrow.commit({
+      success: true,
+      outcome: 'control path repaired',
+      gateReceiptId: 'gate-proof-parity',
+    });
+    assert.equal(commit.decision_id, 'decision-proof-parity');
+    assert.equal(commit.success_rate_available, true);
+    assert.equal(commit.pre_action_gate.receipt_verified, true);
+    assert.equal(commit.pre_action_gate.receipt_used, true);
+    assert.equal(commit.loop_integrity.runtime_gate_used, true);
+    assert.equal(commit.loop_integrity.status, 'closed_with_advisory_governance');
+    assert.equal(commit.commit_processing.durability, 'outcome_and_gate_receipt_confirmed');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('quickStatus maps passive install health fields', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const marrow = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
@@ -1098,6 +1406,11 @@ test('quickStatus fails soft when no live or last-known response exists', async 
     assert.equal(status.source, 'unavailable');
     assert.equal(status.health, 'degraded');
     assert.equal(status.error_code, 'timeout');
+    assert.equal(status.decisionCount, null);
+    assert.equal(status.outcomeCount, null);
+    assert.equal(status.recentDecisions24h, null);
+    assert.equal(status.captureCoverage.decisions, null);
+    assert.equal(status.captureCoverage.outcomes, null);
     assert.deepEqual(status.clientUpdate, status.client_update);
     assert.equal(status.clientUpdate.installed_version, sdkVersion);
     assert.match(status.exact_fix, /doctor/);

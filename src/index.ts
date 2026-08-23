@@ -59,6 +59,8 @@ export type {
   MarrowActionMeta,
   MarrowAutoWrapOptions,
   MarrowPassiveRuntimeSurface,
+  MarrowPassiveFetchControlMode,
+  MarrowPassiveInstallResult,
   MarrowPassiveRuntimeOptions,
   MarrowPassiveActionOptions,
   MarrowPassiveRuntime,

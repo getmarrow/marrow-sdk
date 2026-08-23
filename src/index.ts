@@ -69,6 +69,7 @@ export type {
   MarrowGuardedRiskPolicy,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowGuardedResultClassification,
   MarrowCompletionEvidence,
   MarrowActionPermitIssueInput,
   MarrowActionPermitPublic,

@@ -159,7 +159,7 @@ export interface MarrowPassiveInstallResult {
     fetchPatched: boolean;
     /** Scope is limited to the Node process that installed this runtime. */
     coverageScope: 'owned_node_process';
-    /** Observation queues bounded correlated telemetry; governed uses runGuarded for consequential fetches. */
+    /** Observation queues lifecycle/usage telemetry only; governed uses runGuarded for consequential fetches. */
     fetchControlMode: 'observation_only' | 'governed';
     /** True when runtime.fetch is available with the governed wrapper. */
     governedFetchAvailable: boolean;
@@ -179,9 +179,10 @@ export interface MarrowPassiveRuntimeOptions {
     actionPrefix?: string;
     captureModelUsage?: boolean;
     /**
-     * `observe` (default) records passive think/outcome telemetry but does not
-     * authorize or govern provider fetches. `governed` routes non-read fetches
-     * through runGuarded() and requires a verified action-bound permit.
+     * `observe` (default) records client-self-reported lifecycle and measured
+     * provider-usage telemetry only. It never creates or commits a decision.
+     * `governed` routes non-read fetches through runGuarded() and requires a
+     * verified action-bound permit.
      */
     fetchControlMode?: MarrowPassiveFetchControlMode;
     fetch?: typeof fetch | false;

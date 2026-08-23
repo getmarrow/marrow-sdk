@@ -45,6 +45,7 @@ test('npm entry point matches the product positioning contract', () => {
   assert.match(readme, /fetchControlMode: 'governed'/);
   assert.match(readme, /governedFetchAvailable: true/);
   assert.match(readme, /without waiting on Marrow before starting the provider request or returning its response/i);
+  assert.match(readme, /Observation mode never calls `beforeAction\(\)`, `think\(\)`, `afterAction\(\)`, `commit\(\)`, or a permit endpoint/i);
   assert.match(readme, /HTTP 4xx\/5xx responses are returned normally/i);
   assert.match(readme, /client-self-reported/i);
   assert.match(readme, /Accepted lifecycle telemetry is not certified coverage or permit closure/i);

@@ -2724,7 +2724,6 @@ export class MarrowClient {
             correlation_id: observationCorrelation || undefined,
             outcome_state: 'pending',
           });
-          await this.beforeAction(meta);
         });
       } else {
         await this.beforeAction(meta);
@@ -2742,15 +2741,8 @@ export class MarrowClient {
             })
             .catch(() => undefined);
         }
-        const afterMeta: MarrowActionMeta = {
-          ...meta,
-          success: response.ok,
-          result: response.ok
-            ? `HTTP ${response.status} ${response.statusText || 'OK'}`
-            : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
-        };
         if (options.observationOnly) {
-          void beforeObservation?.then((beforeCompleted) => this.schedulePassiveObservation('outcome', async () => {
+          void beforeObservation?.then(() => this.schedulePassiveObservation('outcome', async () => {
             this.captureLifecycleEvent({
               event_type: response.ok ? 'tool_completed' : 'tool_failed',
               observed_hook: 'action_result',
@@ -2759,20 +2751,20 @@ export class MarrowClient {
               outcome_state: 'closed',
               success: response.ok,
             });
-            if (beforeCompleted) await this.afterAction(afterMeta);
           }));
         } else {
-          await this.afterAction(afterMeta);
+          await this.afterAction({
+            ...meta,
+            success: response.ok,
+            result: response.ok
+              ? `HTTP ${response.status} ${response.statusText || 'OK'}`
+              : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
+          });
         }
         return response;
       } catch (error) {
-        const afterMeta: MarrowActionMeta = {
-            ...meta,
-          success: false,
-          result: safeErrorMessage(error),
-        };
         if (options.observationOnly) {
-          void beforeObservation?.then((beforeCompleted) => this.schedulePassiveObservation('failure', async () => {
+          void beforeObservation?.then(() => this.schedulePassiveObservation('failure', async () => {
             this.captureLifecycleEvent({
               event_type: 'tool_failed',
               observed_hook: 'action_result',
@@ -2781,10 +2773,13 @@ export class MarrowClient {
               outcome_state: 'closed',
               success: false,
             });
-            if (beforeCompleted) await this.afterAction(afterMeta);
           }));
         } else {
-          await this.afterAction(afterMeta);
+          await this.afterAction({
+            ...meta,
+            success: false,
+            result: safeErrorMessage(error),
+          });
         }
         throw error;
       }

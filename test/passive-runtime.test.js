@@ -66,7 +66,7 @@ test('governanceEnforced is true only when governed global fetch interception is
   }
 });
 
-test('passive global fetch never intercepts SDK control-plane requests', async () => {
+test('observation lifecycle never invokes stateful action methods or intercepts SDK control-plane requests', async () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const originalFetch = globalThis.fetch;
   const transportCalls = [];
@@ -103,10 +103,10 @@ test('passive global fetch never intercepts SDK control-plane requests', async (
     assert.deepEqual(interceptions, { before: 0, after: 0 });
 
     await globalThis.fetch('https://provider.example/v1/chat');
-    await waitFor(() => interceptions.after === 1);
+    await waitFor(() => marrow.passiveObservationTasks.size === 0);
     assert.equal(transportCalls.filter((url) => url === 'https://provider.example/v1/chat').length, 1);
     assert.equal(transportCalls.filter((url) => /\/v1\/agent\/status$/.test(url)).length, 1);
-    assert.deepEqual(interceptions, { before: 1, after: 1 });
+    assert.deepEqual(interceptions, { before: 0, after: 0 });
 
     runtime.restore();
     assert.equal(globalThis.fetch, fakeFetch);
@@ -136,8 +136,9 @@ test('observation-only passive fetch never blocks the provider call on telemetry
       evidence_authority: 'none',
       certified_coverage: false,
     });
-    marrow.beforeAction = async () => { throw new Error('telemetry pre-action unavailable'); };
-    marrow.afterAction = async () => { throw new Error('telemetry outcome unavailable'); };
+    let statefulCalls = 0;
+    marrow.beforeAction = async () => { statefulCalls += 1; throw new Error('must not run'); };
+    marrow.afterAction = async () => { statefulCalls += 1; throw new Error('must not run'); };
     const runtime = marrow.createPassiveRuntime({ mode: 'require' });
     const install = runtime.install();
     assert.equal(install.fetchControlMode, 'observation_only');
@@ -146,24 +147,43 @@ test('observation-only passive fetch never blocks the provider call on telemetry
     assert.equal(response.status, 200);
     assert.equal(providerCalls, 1);
     await waitFor(() => marrow.passiveObservationTasks.size === 0);
+    assert.equal(statefulCalls, 0);
     runtime.restore();
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('observation-only passive fetch keeps delayed telemetry off provider start and response delivery', async () => {
+test('observation-only real methods emit lifecycle and usage only before and after the control deadline', async () => {
   const originalFetch = globalThis.fetch;
   const observations = [];
+  const usage = [];
+  const transportCalls = [];
   let providerStartedAt = 0;
-  let beforeCompleted = false;
-  let afterCompleted = false;
-  globalThis.fetch = async () => {
-    providerStartedAt = Date.now();
-    return new Response('fast provider response', { status: 200 });
+  let permitCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    transportCalls.push(url);
+    if (url === 'https://api.openai.com/v1/responses') {
+      providerStartedAt = Date.now();
+      return Response.json({
+        model: 'neutral-provider-model',
+        usage: { input_tokens: 8, output_tokens: 5, total_tokens: 13 },
+      });
+    }
+    if (/\/v1\/agent\/(context|think)$/.test(url)) {
+      await delay(700);
+      return /\/context$/.test(url)
+        ? Response.json({ data: { lessons: [], warnings: [], loopState: { isOpen: false } } })
+        : Response.json({ data: { decision_id: 'decision-created-after-observation-deadline' } });
+    }
+    if (/\/v1\/agent\/commit$/.test(url)) {
+      return Response.json({ data: { committed: true } });
+    }
+    return Response.json({ data: { accepted: true } });
   };
   try {
-    const marrow = new MarrowClient('test-delayed-observation-key', {
+    const marrow = new MarrowClient('test-observation-real-method-key', {
       durableEventSpool: false,
       lifecycleTimeoutMs: 1_000,
     });
@@ -181,81 +201,35 @@ test('observation-only passive fetch keeps delayed telemetry off provider start 
         certified_coverage: false,
       };
     };
-    marrow.beforeAction = async () => {
-      await delay(300);
-      beforeCompleted = true;
-      return { ok: true };
+    marrow.modelUsage = async (input) => {
+      usage.push(input);
+      return { recorded: true };
     };
-    marrow.afterAction = async () => {
-      assert.equal(beforeCompleted, true);
-      await delay(300);
-      afterCompleted = true;
-      return { ok: true };
-    };
+    marrow.issueActionPermit = async () => { permitCalls += 1; throw new Error('must not run'); };
+    marrow.verifyActionPermit = async () => { permitCalls += 1; throw new Error('must not run'); };
+    marrow.closeActionPermit = async () => { permitCalls += 1; throw new Error('must not run'); };
 
     const runtime = marrow.createPassiveRuntime();
     runtime.install();
     const startedAt = Date.now();
-    const response = await globalThis.fetch('https://provider.example/v1/responses', { method: 'POST' });
+    const response = await globalThis.fetch('https://api.openai.com/v1/responses', { method: 'POST' });
     const deliveredAt = Date.now();
 
     assert.equal(response.status, 200);
     assert.ok(providerStartedAt - startedAt < 100, `provider start was delayed ${providerStartedAt - startedAt}ms`);
     assert.ok(deliveredAt - startedAt < 100, `provider response was delayed ${deliveredAt - startedAt}ms`);
-    await waitFor(() => afterCompleted);
+    await waitFor(() => observations.length === 2 && usage.length === 1);
     assert.equal(observations.length, 2);
     assert.equal(observations[0].event_type, 'pre_action_checked');
     assert.equal(observations[1].event_type, 'tool_completed');
     assert.equal(observations[0].correlation_id, observations[1].correlation_id);
-    runtime.restore();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('observation-only passive fetch bounds unavailable telemetry and still correlates durable result receipt', async () => {
-  const originalFetch = globalThis.fetch;
-  const observations = [];
-  let afterCalls = 0;
-  globalThis.fetch = async () => new Response('provider available', { status: 200 });
-  try {
-    const marrow = new MarrowClient('test-stalled-observation-key', {
-      durableEventSpool: false,
-      lifecycleTimeoutMs: 1_000,
-    });
-    marrow.integrationEvent = async (input) => {
-      observations.push(input);
-      return {
-        accepted: true,
-        queued: false,
-        failed: false,
-        delivery_state: 'accepted',
-        event_id: `stalled-event-${observations.length}`,
-        pending_spool_events: 0,
-        failed_spool_events: 0,
-        evidence_authority: 'client_self_reported',
-        certified_coverage: false,
-      };
-    };
-    marrow.beforeAction = async () => new Promise(() => {});
-    marrow.afterAction = async () => {
-      afterCalls += 1;
-      return { ok: true };
-    };
-
-    const runtime = marrow.createPassiveRuntime();
-    runtime.install();
-    const startedAt = Date.now();
-    const response = await globalThis.fetch('https://provider.example/v1/responses', { method: 'POST' });
-    const deliveredAt = Date.now();
-
-    assert.equal(response.status, 200);
-    assert.ok(deliveredAt - startedAt < 100, `provider response was delayed ${deliveredAt - startedAt}ms`);
-    await waitFor(() => observations.length === 2, 1_500);
-    assert.equal(observations[0].correlation_id, observations[1].correlation_id);
-    assert.equal(observations[1].event_type, 'tool_completed');
-    assert.equal(afterCalls, 0);
-    assert.equal(marrow.passiveObservationTasks.size, 1);
+    assert.equal(usage[0].total_tokens, 13);
+    await delay(1_550);
+    const controlCalls = transportCalls.filter((url) => /\/v1\/agent\/(context|think|commit|enforcement)/.test(url));
+    assert.deepEqual(controlCalls, []);
+    assert.equal(permitCalls, 0);
+    assert.equal(marrow.loopState.hasIntentLog, false);
+    assert.equal(marrow.loopState.pendingDecisionId, null);
     runtime.restore();
   } finally {
     globalThis.fetch = originalFetch;
@@ -572,6 +546,8 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
   globalThis.fetch = fakeFetch;
   try {
     const marrowA = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
+    let eventsA = 0;
+    marrowA.integrationEvent = async () => { eventsA += 1; return { accepted: true }; };
     const callsA = { before: 0, after: 0 };
     marrowA.beforeAction = async () => {
       callsA.before += 1;
@@ -586,6 +562,8 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
     runtimeA.install();
 
     const marrowB = new MarrowClient(process.env.MARROW_API_KEY, { durableEventSpool: false });
+    let eventsB = 0;
+    marrowB.integrationEvent = async () => { eventsB += 1; return { accepted: true }; };
     const callsB = { before: 0, after: 0 };
     marrowB.beforeAction = async () => {
       callsB.before += 1;
@@ -600,15 +578,17 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
     runtimeB.install();
 
     await globalThis.fetch('https://api.example.com/ok?page=1');
-    await waitFor(() => callsB.after === 1);
+    await waitFor(() => eventsB === 2);
     assert.deepEqual(callsA, { before: 0, after: 0 });
-    assert.deepEqual(callsB, { before: 1, after: 1 });
+    assert.deepEqual(callsB, { before: 0, after: 0 });
+    assert.equal(eventsA, 0);
 
     runtimeA.restore();
     await globalThis.fetch('https://api.example.com/ok?page=2');
-    await waitFor(() => callsB.after === 2);
+    await waitFor(() => eventsB === 4);
     assert.deepEqual(callsA, { before: 0, after: 0 });
-    assert.deepEqual(callsB, { before: 2, after: 2 });
+    assert.deepEqual(callsB, { before: 0, after: 0 });
+    assert.equal(eventsA, 0);
 
     runtimeB.restore();
     assert.equal(globalThis.fetch, fakeFetch);

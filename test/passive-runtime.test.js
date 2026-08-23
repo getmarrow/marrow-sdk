@@ -154,6 +154,74 @@ test('observation-only passive fetch never blocks the provider call on telemetry
   }
 });
 
+test('observation lifecycle cap owns real unresolved deliveries and recovers after settlement', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWrite = process.stderr.write;
+  const unhandled = [];
+  const pending = [];
+  let active = 0;
+  let peak = 0;
+  let started = 0;
+  let skippedWarnings = 0;
+  const onUnhandled = (error) => unhandled.push(error);
+  globalThis.fetch = async () => new Response('provider response', { status: 200 });
+  process.stderr.write = (chunk, ...args) => {
+    if (String(chunk).includes('bounded observation queue is full')) skippedWarnings += 1;
+    return true;
+  };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const marrow = new MarrowClient('test-observation-cap-key', {
+      durableEventSpool: false,
+      lifecycleTimeoutMs: 30_000,
+    });
+    marrow.integrationEvent = async () => new Promise((resolve) => {
+      started += 1;
+      active += 1;
+      peak = Math.max(peak, active);
+      pending.push(() => {
+        active -= 1;
+        resolve({ accepted: true });
+      });
+    });
+    const runtime = marrow.createPassiveRuntime();
+    runtime.install();
+
+    const providerStarted = Date.now();
+    const responses = await Promise.all(Array.from({ length: 80 }, (_, index) =>
+      globalThis.fetch(`https://provider.example/v1/responses/${index}`, { method: 'POST' })));
+    assert.equal(responses.length, 80);
+    assert.ok(Date.now() - providerStarted < 250, 'provider burst waited on lifecycle delivery');
+    await waitFor(() => started === 64 && marrow.passiveObservationTasks.size === 64);
+    assert.equal(active, 64);
+    assert.equal(peak, 64);
+    assert.ok(skippedWarnings >= 16);
+
+    pending.splice(0).forEach((settle) => settle());
+    await waitFor(() => started === 128 && marrow.passiveObservationTasks.size === 64);
+    assert.equal(active, 64);
+    assert.equal(peak, 64);
+
+    pending.splice(0).forEach((settle) => settle());
+    await waitFor(() => active === 0 && marrow.passiveObservationTasks.size === 0);
+
+    const recovery = await globalThis.fetch('https://provider.example/v1/recovery', { method: 'POST' });
+    assert.equal(recovery.status, 200);
+    await waitFor(() => started === 129);
+    pending.splice(0).forEach((settle) => settle());
+    await waitFor(() => started === 130);
+    pending.splice(0).forEach((settle) => settle());
+    await waitFor(() => active === 0 && marrow.passiveObservationTasks.size === 0);
+    assert.equal(peak, 64);
+    assert.deepEqual(unhandled, []);
+    runtime.restore();
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+    process.stderr.write = originalWrite;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('observation-only real methods emit lifecycle and usage only before and after the control deadline', async () => {
   const originalFetch = globalThis.fetch;
   const observations = [];

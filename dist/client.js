@@ -2355,7 +2355,7 @@ class MarrowClient {
             let beforeObservation = null;
             if (options.observationOnly) {
                 beforeObservation = this.schedulePassiveObservation('pre-action', async () => {
-                    this.captureLifecycleEvent({
+                    await this.captureLifecycleEvent({
                         event_type: 'pre_action_checked',
                         observed_hook: 'pre_action',
                         action,
@@ -2383,7 +2383,7 @@ class MarrowClient {
                 }
                 if (options.observationOnly) {
                     void beforeObservation?.then(() => this.schedulePassiveObservation('outcome', async () => {
-                        this.captureLifecycleEvent({
+                        await this.captureLifecycleEvent({
                             event_type: response.ok ? 'tool_completed' : 'tool_failed',
                             observed_hook: 'action_result',
                             action,
@@ -2407,7 +2407,7 @@ class MarrowClient {
             catch (error) {
                 if (options.observationOnly) {
                     void beforeObservation?.then(() => this.schedulePassiveObservation('failure', async () => {
-                        this.captureLifecycleEvent({
+                        await this.captureLifecycleEvent({
                             event_type: 'tool_failed',
                             observed_hook: 'action_result',
                             action,
@@ -4075,7 +4075,7 @@ class MarrowClient {
         return /\b(408|425|429|500|502|503|504|timeout|timed out|econnreset|enotfound|eai_again|network|fetch failed|temporar|rate limit)\b/.test(message);
     }
     captureLifecycleEvent(input) {
-        void this.integrationEvent(input).catch((error) => {
+        return this.integrationEvent(input).then(() => undefined).catch((error) => {
             process.stderr.write(`[marrow] Warning: lifecycle receipt failed: ${safePublicErrorMessage(error)}\n`);
         });
     }

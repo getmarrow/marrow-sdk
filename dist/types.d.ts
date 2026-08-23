@@ -159,9 +159,11 @@ export interface MarrowPassiveInstallResult {
     fetchPatched: boolean;
     /** Scope is limited to the Node process that installed this runtime. */
     coverageScope: 'owned_node_process';
-    /** Observation records think/outcome telemetry; governed uses runGuarded for consequential fetches. */
+    /** Observation queues bounded correlated telemetry; governed uses runGuarded for consequential fetches. */
     fetchControlMode: 'observation_only' | 'governed';
-    /** True only when consequential fetches are routed through fresh gates and signed permits. */
+    /** True when runtime.fetch is available with the governed wrapper. */
+    governedFetchAvailable: boolean;
+    /** True only when the installed global fetch control point enforces governance. */
     governanceEnforced: boolean;
 }
 export interface MarrowPassiveRuntimeOptions {
@@ -222,7 +224,7 @@ export interface MarrowPassiveRuntimeWithLifecycle extends MarrowPassiveRuntime 
     flushLifecycleEvents(): Promise<MarrowLifecycleBacklog>;
     recoverLifecycleEvents(eventIds?: string[]): Promise<MarrowLifecycleBacklog>;
 }
-export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'outcome_commit_failed' | 'unknown';
+export type MarrowFailureType = 'auth' | 'permission' | 'rate_limit' | 'timeout' | 'http_failure' | 'test_failure' | 'deploy_failure' | 'dependency' | 'migration' | 'tooling' | 'missing_context' | 'policy_block' | 'outcome_commit_failed' | 'unknown';
 export type MarrowGuardedRiskPolicy = 'off' | 'warn' | 'block_high';
 export type MarrowWorkflowGateRiskTolerance = 'low' | 'medium' | 'high';
 export type MarrowWorkflowGateDecision = 'allow' | 'warn' | 'review_required' | 'block';
@@ -267,6 +269,11 @@ export interface MarrowGuardedRunOptions<T> {
     harness?: string;
     /** Measured completion evidence or an adapter that derives it from the execution result. */
     completionEvidence?: MarrowCompletionEvidence | ((result: T) => MarrowCompletionEvidence | Promise<MarrowCompletionEvidence>);
+    /**
+     * Optional typed classification for APIs that return a value for unsuccessful
+     * application outcomes (for example a Fetch Response with HTTP 500).
+     */
+    classifyResult?: (result: T) => MarrowGuardedResultClassification | Promise<MarrowGuardedResultClassification>;
     riskPolicy?: MarrowGuardedRiskPolicy;
     useAgentRuntime?: boolean;
     useWorkflowGate?: boolean;
@@ -292,10 +299,17 @@ export interface MarrowCompletionEvidence extends Record<string, unknown> {
     evidence_state?: 'verified' | 'failed' | 'observed_only' | 'missing';
     checks?: string[];
 }
+export interface MarrowGuardedResultClassification {
+    success: boolean;
+    outcome?: string;
+    failureType?: MarrowFailureType;
+}
 export interface MarrowGuardedRunResult<T> {
     ok: boolean;
     blocked: boolean;
     result?: T;
+    /** Execution result truth when execute() returned; distinct from control-path closure. */
+    execution_succeeded?: boolean;
     error?: string;
     failure_type: MarrowFailureType | null;
     decision_id: string | null;

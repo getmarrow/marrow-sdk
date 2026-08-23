@@ -28,6 +28,7 @@ export declare class MarrowClient {
     private eventSpoolDrainPromise;
     private eventSpoolHealthError;
     private readonly lifecycleDeliveryResults;
+    private readonly passiveObservationTasks;
     private readonly requestDeadlines;
     private readonly readCache;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
@@ -400,6 +401,7 @@ export declare class MarrowClient {
     private normalizeModelUsage;
     private shouldQueueRequest;
     private captureLifecycleEvent;
+    private schedulePassiveObservation;
     private drainEventSpool;
     private enqueueRetry;
     private drainRetryQueue;

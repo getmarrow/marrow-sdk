@@ -69,8 +69,9 @@ Detection and notification are automatic. Package and configuration changes rema
 
 v3.7.62 makes the SDK control boundary explicit and preserves the repaired server proof contract:
 
-- `createPassiveRuntime().install()` covers only the owned Node process. Its default global-fetch patch is observation-only think/outcome telemetry; it is not a runtime gate, certified coverage, or a signed permit.
-- `fetchControlMode: 'governed'` routes consequential non-read fetches through `runGuarded()`, including fresh runtime and workflow gates plus an action-bound signed permit before the provider call. That mode fails closed before execution when the required control path is unavailable.
+- `createPassiveRuntime().install()` covers only the owned Node process. Its default global-fetch patch queues bounded, correlated observation telemetry off the provider request and response critical path; it is not a runtime gate, certified coverage, or a signed permit.
+- `fetchControlMode: 'governed'` routes consequential non-read fetches through `runGuarded()`, including fresh runtime and workflow gates plus an action-bound signed permit before the provider call. Install results distinguish an explicit governed `runtime.fetch` wrapper from governed global interception.
+- governed fetch preserves normal Fetch semantics for HTTP 4xx/5xx responses while committing `success: false`, failed HTTP evidence, and a failed permit closeout. Transport exceptions remain exceptions.
 - `integrationEvent()` exposes `evidence_authority`, `certified_coverage`, activation scope, lifecycle processing, and enforcement closeout truth. Public lifecycle submissions are `client_self_reported`; accepted delivery cannot certify coverage or close a permit.
 - status, runtime, and commit retain additive server proof fields such as coherent generation, exact receipt linkage, `runtime_gate_used`, receipt verification/use, enforcement state, and closeout status.
 - missing compact status measurements remain `null`; the SDK does not turn unavailable decision, outcome, or recent-activity counts into observed zeroes.
@@ -227,6 +228,8 @@ if (result.blocked) {
 
 `runGuarded()` obtains the runtime and workflow gates, records intent, issues and verifies a permit bound to the authenticated account, key, agent, session, exact action, target, and canonical action surfaces when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome only after every exact server-required proof field is present. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration preserves the same surfaces through issue and verify and implements the same closure discipline explicitly.
 
+When an API returns a value for an unsuccessful application outcome, use the typed `classifyResult(result)` option. A classification with `success: false` preserves the returned value while committing and closing failure truth; the governed fetch adapter uses this for normal HTTP 4xx/5xx `Response` objects.
+
 A successful `quickStatus()` proves authenticated status connectivity for this configured client and agent identity. It does not prove that every action is intercepted, that passive coverage is certified, or that an unwrapped harness is governed. Measured token savings remain zero until provider-observed usage counts land.
 
 ## Passive Runtime
@@ -244,7 +247,7 @@ const installed = marrow.createPassiveRuntime().install();
 console.log(installed);
 ```
 
-The default installation reports `fetchControlMode: 'observation_only'`, `governanceEnforced: false`, and `coverageScope: 'owned_node_process'`. It automatically records observed fetch think/outcome telemetry and provider token counts when the response contains usage. Calls outside this process, actions that bypass the patched fetch, and process termination before delivery remain outside that scope. Accepted lifecycle telemetry is not certified coverage or permit closure.
+The default installation reports `fetchControlMode: 'observation_only'`, `governedFetchAvailable: false`, `governanceEnforced: false`, and `coverageScope: 'owned_node_process'`. It schedules ordered, correlated before/result observations without waiting on Marrow before starting the provider request or returning its response. Background observation work is capped and uses the bounded lifecycle deadline; the durable spool retains receipts that have been enqueued, while queue saturation or process termination before enqueue remains honest missing coverage. Provider token counts are recorded only when the response contains usage. Calls outside this process and actions that bypass the patched fetch remain outside that scope. Accepted lifecycle telemetry is not certified coverage or permit closure.
 
 Use explicit `runtime.tool()`, `.command()`, `.deploy()`, `.publish()`, or `runGuarded()` for consequential work. If this owned process must place all non-read global fetches on the signed control path, opt in explicitly:
 
@@ -253,11 +256,11 @@ const runtime = marrow.createPassiveRuntime({ fetchControlMode: 'governed' });
 const install = runtime.install();
 
 if (!install.governanceEnforced) {
-  throw new Error('The governed fetch wrapper was not installed');
+  throw new Error('Governed global fetch interception was not installed');
 }
 ```
 
-In governed fetch mode, `POST`, `PUT`, `PATCH`, `DELETE`, and other non-read methods require the same fresh runtime/workflow gates, signed action permit, and closeout used by `runGuarded()`. `GET`, `HEAD`, and `OPTIONS` remain observation-only. This is model- and harness-neutral behavior for the owned Node process, not a claim of native hooks in another agent harness.
+With `patchGlobalFetch: false`, `governedFetchAvailable: true` means explicit `runtime.fetch(...)` calls use the governed wrapper, while `governanceEnforced: false` truthfully says ordinary global fetch was not intercepted. In governed fetch mode, `POST`, `PUT`, `PATCH`, `DELETE`, and other non-read methods require the same fresh runtime/workflow gates, signed action permit, and closeout used by `runGuarded()`. `GET`, `HEAD`, and `OPTIONS` remain observation-only. HTTP 4xx/5xx responses are returned normally, but their commit and permit closure use `success: false` with failed HTTP evidence; only transport errors throw as provider failures. This is model- and harness-neutral behavior for the owned Node process, not a claim of native hooks in another agent harness.
 
 When a transient network or server error prevents delivery, the SDK can retain the compact event in an owner-only local spool and retry it with the same event ID. The default spool is bounded to 100 records, written atomically, and stored with owner-only permissions.
 

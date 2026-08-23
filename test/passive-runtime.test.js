@@ -7,6 +7,15 @@ const test = require('node:test');
 const { MarrowClient } = require('../dist/index.js');
 const { version: sdkVersion } = require('../package.json');
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitFor(predicate, timeoutMs = 1_500) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for background observation');
+    await delay(5);
+  }
+}
+
 test('createPassiveRuntime patches and restores global fetch', () => {
   process.env.MARROW_API_KEY = 'test-passive-runtime-key';
   const originalFetch = globalThis.fetch;
@@ -22,6 +31,7 @@ test('createPassiveRuntime patches and restores global fetch', () => {
       fetchPatched: true,
       coverageScope: 'owned_node_process',
       fetchControlMode: 'observation_only',
+      governedFetchAvailable: false,
       governanceEnforced: false,
     });
     assert.equal(runtime.installed, true);
@@ -29,6 +39,27 @@ test('createPassiveRuntime patches and restores global fetch', () => {
 
     runtime.restore();
     assert.equal(runtime.installed, false);
+    assert.equal(globalThis.fetch, fakeFetch);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('governanceEnforced is true only when governed global fetch interception is installed', () => {
+  const originalFetch = globalThis.fetch;
+  const fakeFetch = async () => new Response('ok', { status: 200 });
+  globalThis.fetch = fakeFetch;
+  try {
+    const runtime = new MarrowClient('test-installed-governance-key', { durableEventSpool: false })
+      .createPassiveRuntime({ fetchControlMode: 'governed' });
+    assert.deepEqual(runtime.install(), {
+      fetchPatched: true,
+      coverageScope: 'owned_node_process',
+      fetchControlMode: 'governed',
+      governedFetchAvailable: true,
+      governanceEnforced: true,
+    });
+    runtime.restore();
     assert.equal(globalThis.fetch, fakeFetch);
   } finally {
     globalThis.fetch = originalFetch;
@@ -72,7 +103,9 @@ test('passive global fetch never intercepts SDK control-plane requests', async (
     assert.deepEqual(interceptions, { before: 0, after: 0 });
 
     await globalThis.fetch('https://provider.example/v1/chat');
-    assert.equal(transportCalls.length, 2);
+    await waitFor(() => interceptions.after === 1);
+    assert.equal(transportCalls.filter((url) => url === 'https://provider.example/v1/chat').length, 1);
+    assert.equal(transportCalls.filter((url) => /\/v1\/agent\/status$/.test(url)).length, 1);
     assert.deepEqual(interceptions, { before: 1, after: 1 });
 
     runtime.restore();
@@ -92,6 +125,17 @@ test('observation-only passive fetch never blocks the provider call on telemetry
   globalThis.fetch = fakeFetch;
   try {
     const marrow = new MarrowClient('test-observation-fetch-key', { durableEventSpool: false });
+    marrow.integrationEvent = async () => ({
+      accepted: false,
+      queued: false,
+      failed: true,
+      delivery_state: 'failed',
+      event_id: 'event-unavailable-observation',
+      pending_spool_events: 0,
+      failed_spool_events: 0,
+      evidence_authority: 'none',
+      certified_coverage: false,
+    });
     marrow.beforeAction = async () => { throw new Error('telemetry pre-action unavailable'); };
     marrow.afterAction = async () => { throw new Error('telemetry outcome unavailable'); };
     const runtime = marrow.createPassiveRuntime({ mode: 'require' });
@@ -101,6 +145,117 @@ test('observation-only passive fetch never blocks the provider call on telemetry
     const response = await globalThis.fetch('https://provider.example/v1/responses', { method: 'POST' });
     assert.equal(response.status, 200);
     assert.equal(providerCalls, 1);
+    await waitFor(() => marrow.passiveObservationTasks.size === 0);
+    runtime.restore();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('observation-only passive fetch keeps delayed telemetry off provider start and response delivery', async () => {
+  const originalFetch = globalThis.fetch;
+  const observations = [];
+  let providerStartedAt = 0;
+  let beforeCompleted = false;
+  let afterCompleted = false;
+  globalThis.fetch = async () => {
+    providerStartedAt = Date.now();
+    return new Response('fast provider response', { status: 200 });
+  };
+  try {
+    const marrow = new MarrowClient('test-delayed-observation-key', {
+      durableEventSpool: false,
+      lifecycleTimeoutMs: 1_000,
+    });
+    marrow.integrationEvent = async (input) => {
+      observations.push(input);
+      return {
+        accepted: true,
+        queued: false,
+        failed: false,
+        delivery_state: 'accepted',
+        event_id: `event-${observations.length}`,
+        pending_spool_events: 0,
+        failed_spool_events: 0,
+        evidence_authority: 'client_self_reported',
+        certified_coverage: false,
+      };
+    };
+    marrow.beforeAction = async () => {
+      await delay(300);
+      beforeCompleted = true;
+      return { ok: true };
+    };
+    marrow.afterAction = async () => {
+      assert.equal(beforeCompleted, true);
+      await delay(300);
+      afterCompleted = true;
+      return { ok: true };
+    };
+
+    const runtime = marrow.createPassiveRuntime();
+    runtime.install();
+    const startedAt = Date.now();
+    const response = await globalThis.fetch('https://provider.example/v1/responses', { method: 'POST' });
+    const deliveredAt = Date.now();
+
+    assert.equal(response.status, 200);
+    assert.ok(providerStartedAt - startedAt < 100, `provider start was delayed ${providerStartedAt - startedAt}ms`);
+    assert.ok(deliveredAt - startedAt < 100, `provider response was delayed ${deliveredAt - startedAt}ms`);
+    await waitFor(() => afterCompleted);
+    assert.equal(observations.length, 2);
+    assert.equal(observations[0].event_type, 'pre_action_checked');
+    assert.equal(observations[1].event_type, 'tool_completed');
+    assert.equal(observations[0].correlation_id, observations[1].correlation_id);
+    runtime.restore();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('observation-only passive fetch bounds unavailable telemetry and still correlates durable result receipt', async () => {
+  const originalFetch = globalThis.fetch;
+  const observations = [];
+  let afterCalls = 0;
+  globalThis.fetch = async () => new Response('provider available', { status: 200 });
+  try {
+    const marrow = new MarrowClient('test-stalled-observation-key', {
+      durableEventSpool: false,
+      lifecycleTimeoutMs: 1_000,
+    });
+    marrow.integrationEvent = async (input) => {
+      observations.push(input);
+      return {
+        accepted: true,
+        queued: false,
+        failed: false,
+        delivery_state: 'accepted',
+        event_id: `stalled-event-${observations.length}`,
+        pending_spool_events: 0,
+        failed_spool_events: 0,
+        evidence_authority: 'client_self_reported',
+        certified_coverage: false,
+      };
+    };
+    marrow.beforeAction = async () => new Promise(() => {});
+    marrow.afterAction = async () => {
+      afterCalls += 1;
+      return { ok: true };
+    };
+
+    const runtime = marrow.createPassiveRuntime();
+    runtime.install();
+    const startedAt = Date.now();
+    const response = await globalThis.fetch('https://provider.example/v1/responses', { method: 'POST' });
+    const deliveredAt = Date.now();
+
+    assert.equal(response.status, 200);
+    assert.ok(deliveredAt - startedAt < 100, `provider response was delayed ${deliveredAt - startedAt}ms`);
+    await waitFor(() => observations.length === 2, 1_500);
+    assert.equal(observations[0].correlation_id, observations[1].correlation_id);
+    assert.equal(observations[1].event_type, 'tool_completed');
+    assert.equal(afterCalls, 0);
+    assert.equal(marrow.passiveObservationTasks.size, 1);
     runtime.restore();
   } finally {
     globalThis.fetch = originalFetch;
@@ -205,7 +360,8 @@ test('governed passive fetch uses the signed runGuarded chain before a consequen
     fetchPatched: false,
     coverageScope: 'owned_node_process',
     fetchControlMode: 'governed',
-    governanceEnforced: true,
+    governedFetchAvailable: true,
+    governanceEnforced: false,
   });
   const response = await runtime.fetch('https://provider.example/v1/responses', { method: 'POST' });
   assert.equal(response.status, 200);
@@ -216,6 +372,66 @@ test('governed passive fetch uses the signed runGuarded chain before a consequen
   assert.ok(order.indexOf('commit') > order.indexOf('provider'));
   assert.ok(order.indexOf('close') > order.indexOf('commit'));
   runtime.restore();
+});
+
+test('governed passive fetch returns HTTP failure response and closes failed outcome truthfully', async () => {
+  const commits = [];
+  const closures = [];
+  const marrow = new MarrowClient('test-governed-http-failure-key', { durableEventSpool: false });
+  marrow.agentRuntime = async () => ({
+    ok: true,
+    decision_brief: { risk: { level: 'low' }, workflow: { recommended: 'governed provider request' } },
+    risk_gate: { allow: true, decision: 'allow', risk_level: 'low', reasons: [] },
+    gate_receipt: { id: 'gate-http-failure', required: true },
+    proof_pack: { required: false, fields: [] },
+  });
+  marrow.workflowGate = async () => ({ allow: true, decision: 'allow', risk_level: 'low', reasons: [] });
+  marrow.think = async () => ({ decisionId: 'decision-http-failure' });
+  marrow.issueActionPermit = async () => ({
+    permit_id: 'permit-http-failure',
+    permit: 'signed-http-failure-permit',
+    required_proof: [],
+  });
+  marrow.verifyActionPermit = async () => ({ verified: true });
+  marrow.commit = async (input) => {
+    commits.push(input);
+    return { committed: true };
+  };
+  marrow.closeActionPermit = async (input) => {
+    closures.push(input);
+    return { closed: true };
+  };
+  marrow.integrationEvent = async () => ({
+    accepted: true,
+    queued: false,
+    failed: false,
+    delivery_state: 'accepted',
+    event_id: 'event-http-failure',
+    pending_spool_events: 0,
+    failed_spool_events: 0,
+    evidence_authority: 'client_self_reported',
+    certified_coverage: false,
+  });
+
+  const runtime = marrow.createPassiveRuntime({
+    fetch: async () => new Response('provider failure body', { status: 503, statusText: 'Unavailable' }),
+    patchGlobalFetch: false,
+    fetchControlMode: 'governed',
+    captureModelUsage: false,
+  });
+  const response = await runtime.fetch('https://provider.example/v1/responses', { method: 'POST' });
+
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), 'provider failure body');
+  assert.equal(commits.length, 1);
+  assert.equal(commits[0].success, false);
+  assert.equal(commits[0].outcome, 'HTTP 503 Unavailable');
+  assert.equal(commits[0].proof.http_ok, false);
+  assert.equal(commits[0].proof.evidence_state, 'failed');
+  assert.equal(closures.length, 1);
+  assert.equal(closures[0].success, false);
+  assert.equal(closures[0].evidence.http_ok, false);
+  assert.equal(closures[0].evidence.evidence_state, 'failed');
 });
 
 test('governed passive fetch fails closed before a consequential provider call when permit verification is unavailable', async () => {
@@ -384,11 +600,13 @@ test('createPassiveRuntime does not nest fetch wrappers for later runtimes', asy
     runtimeB.install();
 
     await globalThis.fetch('https://api.example.com/ok?page=1');
+    await waitFor(() => callsB.after === 1);
     assert.deepEqual(callsA, { before: 0, after: 0 });
     assert.deepEqual(callsB, { before: 1, after: 1 });
 
     runtimeA.restore();
     await globalThis.fetch('https://api.example.com/ok?page=2');
+    await waitFor(() => callsB.after === 2);
     assert.deepEqual(callsA, { before: 0, after: 0 });
     assert.deepEqual(callsB, { before: 2, after: 2 });
 

@@ -45,6 +45,7 @@ void lifecycleRuntime.recoverLifecycleEvents;
 void legacyRuntimeCompatibility;
 void installResult.coverageScope;
 void installResult.fetchControlMode;
+void installResult.governedFetchAvailable;
 void installResult.governanceEnforced;
 void (null as unknown as MarrowActivationCoverage);
 void (null as unknown as MarrowDecisionTraceResult);

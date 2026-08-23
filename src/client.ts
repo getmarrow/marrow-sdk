@@ -76,6 +76,7 @@ import type {
   MarrowGuardedRiskPolicy,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowGuardedResultClassification,
   MarrowPassiveActionOptions,
   MarrowPassiveInstallResult,
   MarrowPassiveRuntimeWithLifecycle,
@@ -136,6 +137,7 @@ const DEFAULT_REQUEST_DEADLINES = Object.freeze({
   highRiskRuntime: 7_500,
   lifecycle: 5_000,
 });
+const MAX_PASSIVE_OBSERVATION_TASKS = 64;
 
 type MarrowRequestDeadlines = {
   request: number;
@@ -1019,6 +1021,24 @@ async function resolveCompletionEvidence<T>(
   return value;
 }
 
+async function resolveResultClassification<T>(
+  classifier: MarrowGuardedRunOptions<T>['classifyResult'],
+  result: T,
+): Promise<MarrowGuardedResultClassification> {
+  if (!classifier) return { success: true };
+  const value = await classifier(result);
+  if (!value || typeof value !== 'object' || typeof value.success !== 'boolean') {
+    throw new Error('Marrow result classifier returned an invalid value');
+  }
+  return {
+    success: value.success,
+    ...(typeof value.outcome === 'string' && value.outcome.trim()
+      ? { outcome: redactSensitiveText(value.outcome) }
+      : {}),
+    ...(value.failureType ? { failureType: value.failureType } : {}),
+  };
+}
+
 function mergeProvenance(
   provided: MarrowDecisionProvenanceInput | undefined,
   defaults: MarrowDecisionProvenanceInput
@@ -1140,6 +1160,7 @@ export class MarrowClient {
   private eventSpoolDrainPromise: Promise<void> | null = null;
   private eventSpoolHealthError: string | null = null;
   private readonly lifecycleDeliveryResults = new Map<string, LifecycleControlTruth>();
+  private readonly passiveObservationTasks = new Set<Promise<void>>();
   private readonly requestDeadlines: MarrowRequestDeadlines;
   private readonly readCache = new Map<string, { value: any; storedAt: number }>();
 
@@ -1939,30 +1960,40 @@ export class MarrowClient {
         process.stderr.write(`[marrow] Warning: completion evidence adapter failed after execution: ${completionEvidenceErrorMessage}\n`);
       }
 
+      const resultClassification = await resolveResultClassification(options.classifyResult, result);
+      const executionSucceeded = resultClassification.success;
+      const classifiedFailureType = executionSucceeded
+        ? null
+        : resultClassification.failureType || 'unknown';
+      const classifiedOutcome = resultClassification.outcome
+        || (executionSucceeded
+          ? `Guarded run completed: ${safeAction}`
+          : `Guarded run returned an unsuccessful result: ${safeAction}`);
+
       this.captureLifecycleEvent({
         ...lifecycleBase,
-        event_type: resultLifecycleEventType(options, true),
+        event_type: resultLifecycleEventType(options, executionSucceeded),
         observed_hook: 'action_result',
         action: safeAction,
         decision_id: decisionId || undefined,
         risk_level: runtime?.risk_gate?.risk_level,
         outcome_state: 'pending',
-        success: true,
+        success: executionSucceeded,
       });
 
       let commitErrorMessage: string | null = null;
       try {
         commit = await this.commit({
           decisionId: decisionId || undefined,
-          success: true,
-          outcome: `Guarded run completed: ${safeAction}`,
+          success: executionSucceeded,
+          outcome: classifiedOutcome,
           gateReceiptId: runtimeGateReceiptId(runtime) || undefined,
-          proof: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, proof: completionEvidence, runtime, gate }),
-          modelUsage: options.modelUsage ? { ...options.modelUsage, success: true, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
+          proof: buildOutcomeProof({ action: safeAction, success: executionSucceeded, outcome: classifiedOutcome, proof: completionEvidence, runtime, gate }),
+          modelUsage: options.modelUsage ? { ...options.modelUsage, success: executionSucceeded, marrow_intervention: options.modelUsage.marrow_intervention || 'guarded_run' } : undefined,
         });
       } catch (error) {
         commitErrorMessage = safePublicErrorMessage(error);
-        process.stderr.write(`[marrow] Warning: guarded run success commit failed: ${commitErrorMessage}\n`);
+        process.stderr.write(`[marrow] Warning: guarded run outcome commit failed: ${commitErrorMessage}\n`);
       }
       if (actionPermit?.permit) {
         try {
@@ -1970,8 +2001,8 @@ export class MarrowClient {
             permit: actionPermit.permit,
             permit_id: actionPermit.permit_id,
             decision_id: decisionId,
-            success: true,
-            evidence: buildOutcomeProof({ action: safeAction, success: true, outcome: `Guarded run completed: ${safeAction}`, proof: completionEvidence, runtime, gate }),
+            success: executionSucceeded,
+            evidence: buildOutcomeProof({ action: safeAction, success: executionSucceeded, outcome: classifiedOutcome, proof: completionEvidence, runtime, gate }),
           });
           permitClosed = closure.closed === true;
           if (!permitClosed) permitCloseErrorMessage = 'Marrow action permit close was not acknowledged';
@@ -1980,16 +2011,16 @@ export class MarrowClient {
           commitErrorMessage = commitErrorMessage || `Action permit closure failed: ${permitCloseErrorMessage}`;
         }
       }
-      const successOutcomeClosed = Boolean(commit && (!actionPermit?.permit || permitClosed));
+      const resultOutcomeClosed = Boolean(commit && (!actionPermit?.permit || permitClosed));
       this.captureLifecycleEvent({
         ...lifecycleBase,
-        event_type: successOutcomeClosed ? 'outcome_committed' : 'workflow_completed',
-        observed_hook: successOutcomeClosed ? 'outcome_closure' : 'action_result',
+        event_type: resultOutcomeClosed ? 'outcome_committed' : 'workflow_completed',
+        observed_hook: resultOutcomeClosed ? 'outcome_closure' : 'action_result',
         action: safeAction,
         decision_id: decisionId || undefined,
         risk_level: runtime?.risk_gate?.risk_level,
-        outcome_state: successOutcomeClosed ? 'closed' : 'pending',
-        success: true,
+        outcome_state: resultOutcomeClosed ? 'closed' : 'pending',
+        success: executionSucceeded,
         ...(options.interventionDisposition ? {
           intervention_disposition: options.interventionDisposition,
           ...(typeof options.actionChanged === 'boolean' ? { action_changed: options.actionChanged } : {}),
@@ -2000,7 +2031,7 @@ export class MarrowClient {
         beforeActionDirective
         && (beforeActionDirective.state !== 'proceed' || options.actionChanged === true),
       );
-      if (decisionId && successOutcomeClosed && meaningfulIntervention) {
+      if (decisionId && executionSucceeded && resultOutcomeClosed && meaningfulIntervention) {
         try {
           const trace = await this.decisionTrace(decisionId);
           interventionReceipt = trace.trace?.intervention_receipt || null;
@@ -2018,11 +2049,12 @@ export class MarrowClient {
         }
       }
 
-      if (requireOutcomeClosure && !successOutcomeClosed) {
+      if (requireOutcomeClosure && !resultOutcomeClosed) {
         return {
           ok: false,
           blocked: false,
           result,
+          execution_succeeded: executionSucceeded,
           error: commitErrorMessage || (commit ? 'Marrow action permit did not close' : 'Marrow outcome commit did not complete'),
           failure_type: 'outcome_commit_failed',
           decision_id: decisionId,
@@ -2032,7 +2064,7 @@ export class MarrowClient {
           commit,
           value_report: valueReport,
           outcome_closure_required: true,
-          outcome_closed: successOutcomeClosed,
+          outcome_closed: resultOutcomeClosed,
           outcome_commit_error: commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error'),
           before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
           before_action_directive: beforeActionDirective,
@@ -2042,15 +2074,17 @@ export class MarrowClient {
           intervention_receipt: interventionReceipt,
           intervention_receipt_error: interventionReceiptErrorMessage,
           completion_evidence_error: completionEvidenceErrorMessage,
-          summary: `Action completed, but Marrow outcome closure failed: ${commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error')}. Do not mark complete until closure is repaired.`,
+          summary: `${executionSucceeded ? 'Action completed' : 'Action returned an unsuccessful result'}, but Marrow outcome closure failed: ${commitErrorMessage || (commit ? 'action permit closure incomplete' : 'unknown outcome commit error')}. Do not mark complete until closure is repaired.`,
         };
       }
 
       return {
-        ok: true,
+        ok: executionSucceeded,
         blocked: false,
         result,
-        failure_type: null,
+        execution_succeeded: executionSucceeded,
+        ...(executionSucceeded ? {} : { error: classifiedOutcome }),
+        failure_type: classifiedFailureType,
         decision_id: decisionId,
         brief,
         runtime,
@@ -2058,7 +2092,7 @@ export class MarrowClient {
         commit,
         value_report: valueReport,
         outcome_closure_required: requireOutcomeClosure,
-        outcome_closed: successOutcomeClosed,
+        outcome_closed: resultOutcomeClosed,
         outcome_commit_error: commitErrorMessage,
         before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
         before_action_directive: beforeActionDirective,
@@ -2068,7 +2102,11 @@ export class MarrowClient {
         intervention_receipt: interventionReceipt,
         intervention_receipt_error: interventionReceiptErrorMessage,
         completion_evidence_error: completionEvidenceErrorMessage,
-        summary: commitErrorMessage
+        summary: !executionSucceeded
+          ? resultOutcomeClosed
+            ? `Marrow guarded run returned an unsuccessful result (${classifiedFailureType}); its outcome and permit are closed.`
+            : `Marrow guarded run returned an unsuccessful result (${classifiedFailureType}); closure remains incomplete.`
+          : commitErrorMessage
           ? `Guarded action completed, but Marrow outcome commit failed: ${commitErrorMessage}`
           : beforeActionDirective?.message
           ? `Marrow before-action directive applied: ${beforeActionDirective.message}`
@@ -2268,8 +2306,18 @@ export class MarrowClient {
               checks: [`http_status_${response.status}`],
               http_ok: response.ok,
             }),
+            classifyResult: (response) => ({
+              success: response.ok,
+              outcome: response.ok
+                ? `HTTP ${response.status} ${response.statusText || 'OK'}`
+                : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
+              ...(!response.ok ? { failureType: 'http_failure' as const } : {}),
+            }),
           });
-          if (!guarded.ok || !guarded.result) {
+          if (
+            !guarded.result
+            || (!guarded.ok && !(guarded.execution_succeeded === false && guarded.outcome_closed === true))
+          ) {
             throw new Error(`Marrow governed fetch did not execute as complete: ${guarded.summary}`);
           }
           return guarded.result;
@@ -2332,6 +2380,7 @@ export class MarrowClient {
             fetchPatched: true,
             coverageScope: 'owned_node_process',
             fetchControlMode: fetchControlMode === 'governed' ? 'governed' : 'observation_only',
+            governedFetchAvailable: fetchControlMode === 'governed' && Boolean(transportFetch),
             governanceEnforced: fetchControlMode === 'governed' && Boolean(transportFetch),
           };
         }
@@ -2345,7 +2394,8 @@ export class MarrowClient {
           fetchPatched: false,
           coverageScope: 'owned_node_process',
           fetchControlMode: fetchControlMode === 'governed' ? 'governed' : 'observation_only',
-          governanceEnforced: fetchControlMode === 'governed' && Boolean(transportFetch),
+          governedFetchAvailable: fetchControlMode === 'governed' && Boolean(transportFetch),
+          governanceEnforced: false,
         };
       },
 
@@ -2643,6 +2693,9 @@ export class MarrowClient {
 
       const method = requestMethod.toUpperCase();
       const action = `${method} ${stripSensitiveUrl(rawUrl)}`;
+      const observationCorrelation = options.observationOnly
+        ? lifecycleCorrelationId(undefined)
+        : null;
       const meta: MarrowActionMeta = {
         action,
         type: 'general',
@@ -2656,14 +2709,23 @@ export class MarrowClient {
           human_directed: false,
           source_meta: { channel: 'sdk', client: defaultSourceClient(), user_intent: method === 'GET' || method === 'HEAD' ? 'research' : 'operate' },
         },
+        ...(observationCorrelation ? {
+          context: { marrow_passive_observation_correlation: observationCorrelation },
+        } : {}),
       };
 
+      let beforeObservation: Promise<boolean> | null = null;
       if (options.observationOnly) {
-        try {
+        beforeObservation = this.schedulePassiveObservation('pre-action', async () => {
+          this.captureLifecycleEvent({
+            event_type: 'pre_action_checked',
+            observed_hook: 'pre_action',
+            action,
+            correlation_id: observationCorrelation || undefined,
+            outcome_state: 'pending',
+          });
           await this.beforeAction(meta);
-        } catch (error) {
-          process.stderr.write(`[marrow] Warning: passive fetch pre-action telemetry was unavailable: ${safePublicErrorMessage(error)}\n`);
-        }
+        });
       } else {
         await this.beforeAction(meta);
       }
@@ -2680,29 +2742,49 @@ export class MarrowClient {
             })
             .catch(() => undefined);
         }
-        try {
-          await this.afterAction({
-            ...meta,
-            success: response.ok,
-            result: response.ok
-              ? `HTTP ${response.status} ${response.statusText || 'OK'}`
-              : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
-          });
-        } catch (error) {
-          if (!options.observationOnly) throw error;
-          process.stderr.write(`[marrow] Warning: passive fetch outcome telemetry was unavailable: ${safePublicErrorMessage(error)}\n`);
+        const afterMeta: MarrowActionMeta = {
+          ...meta,
+          success: response.ok,
+          result: response.ok
+            ? `HTTP ${response.status} ${response.statusText || 'OK'}`
+            : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
+        };
+        if (options.observationOnly) {
+          void beforeObservation?.then((beforeCompleted) => this.schedulePassiveObservation('outcome', async () => {
+            this.captureLifecycleEvent({
+              event_type: response.ok ? 'tool_completed' : 'tool_failed',
+              observed_hook: 'action_result',
+              action,
+              correlation_id: observationCorrelation || undefined,
+              outcome_state: 'closed',
+              success: response.ok,
+            });
+            if (beforeCompleted) await this.afterAction(afterMeta);
+          }));
+        } else {
+          await this.afterAction(afterMeta);
         }
         return response;
       } catch (error) {
-        try {
-          await this.afterAction({
+        const afterMeta: MarrowActionMeta = {
             ...meta,
-            success: false,
-            result: safeErrorMessage(error),
-          });
-        } catch (telemetryError) {
-          if (!options.observationOnly) throw telemetryError;
-          process.stderr.write(`[marrow] Warning: passive fetch failure telemetry was unavailable: ${safePublicErrorMessage(telemetryError)}\n`);
+          success: false,
+          result: safeErrorMessage(error),
+        };
+        if (options.observationOnly) {
+          void beforeObservation?.then((beforeCompleted) => this.schedulePassiveObservation('failure', async () => {
+            this.captureLifecycleEvent({
+              event_type: 'tool_failed',
+              observed_hook: 'action_result',
+              action,
+              correlation_id: observationCorrelation || undefined,
+              outcome_state: 'closed',
+              success: false,
+            });
+            if (beforeCompleted) await this.afterAction(afterMeta);
+          }));
+        } else {
+          await this.afterAction(afterMeta);
         }
         throw error;
       }
@@ -4680,6 +4762,41 @@ export class MarrowClient {
     void this.integrationEvent(input).catch((error) => {
       process.stderr.write(`[marrow] Warning: lifecycle receipt failed: ${safePublicErrorMessage(error)}\n`);
     });
+  }
+
+  private schedulePassiveObservation(
+    phase: 'pre-action' | 'outcome' | 'failure',
+    task: () => Promise<void>,
+  ): Promise<boolean> {
+    if (this.passiveObservationTasks.size >= MAX_PASSIVE_OBSERVATION_TASKS) {
+      process.stderr.write(`[marrow] Warning: passive fetch ${phase} telemetry was skipped because the bounded observation queue is full.\n`);
+      return Promise.resolve(false);
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const operation = Promise.resolve().then(task);
+    this.passiveObservationTasks.add(operation);
+    void operation.then(
+      () => this.passiveObservationTasks.delete(operation),
+      () => this.passiveObservationTasks.delete(operation),
+    );
+    const bounded = Promise.race([
+      operation.then(() => true),
+      new Promise<boolean>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`passive observation deadline exceeded after ${this.requestDeadlines.lifecycle}ms`));
+        }, this.requestDeadlines.lifecycle);
+        timeout.unref?.();
+      }),
+    ])
+      .catch((error) => {
+        process.stderr.write(`[marrow] Warning: passive fetch ${phase} telemetry was unavailable: ${safePublicErrorMessage(error)}\n`);
+        return false;
+      })
+      .finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+    return bounded;
   }
 
   private async drainEventSpool(unrefTimeout = false): Promise<void> {

@@ -5,6 +5,7 @@ import type { MarrowClientOptions, MarrowEnforceOptions, MarrowActionMeta, Marro
 export declare function classifyMarrowFailure(error: unknown): MarrowFailureType;
 interface MarrowFetchWrapOptions {
     captureModelUsage?: boolean;
+    observationOnly?: boolean;
 }
 export declare class MarrowLoopRequiredError extends Error {
     readonly code = "MARROW_LOOP_REQUIRED";
@@ -26,6 +27,8 @@ export declare class MarrowClient {
     private eventSpool;
     private eventSpoolDrainPromise;
     private eventSpoolHealthError;
+    private readonly lifecycleDeliveryResults;
+    private readonly requestDeadlines;
     private readonly readCache;
     constructor(apiKey: string, options?: MarrowClientOptions | string);
     enforce(options?: MarrowEnforceOptions): MarrowCheckResult;

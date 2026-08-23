@@ -41,6 +41,102 @@ test('lifecycle receipts retain bounded activation, correlation, and interventio
   }), /correlation_id/);
 });
 
+test('integrationEvent preserves backend authority truth and caller-forged authority grants nothing', async () => {
+  const originalFetch = globalThis.fetch;
+  let posted;
+  globalThis.fetch = async (_url, init) => {
+    posted = JSON.parse(init.body);
+    return new Response(JSON.stringify({ data: {
+      accepted: true,
+      evidence_authority: 'client_self_reported',
+      certified_coverage: true,
+      coverage_verified: true,
+      passive_live: true,
+      activation_scope: 'owned_node_process',
+      activation: {
+        coverage_verified: true,
+        passive_live: true,
+        certified_coverage: true,
+      },
+      enforcement_closeout: {
+        attempted: true,
+        matched: true,
+        closed: true,
+        reason: 'caller_claimed_closeout',
+      },
+      acceptance_receipt: { id: 'acceptance-one', durability: 'queue' },
+      lifecycle_processing: { state: 'queued', outcome_closed: false },
+      normalized_event: { event_type: 'workflow_completed' },
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  try {
+    const marrow = new MarrowClient('test-authority-key', { durableEventSpool: false });
+    const result = await marrow.integrationEvent({
+      event_id: 'authority-event',
+      event_type: 'workflow_completed',
+      action: 'record observed completion',
+      evidence_authority: 'server_attested',
+      certified_coverage: true,
+      enforcement_closeout: { closed: true },
+    });
+    assert.equal('evidence_authority' in posted, false);
+    assert.equal('certified_coverage' in posted, false);
+    assert.equal('enforcement_closeout' in posted, false);
+    assert.equal(result.evidence_authority, 'client_self_reported');
+    assert.equal(result.certified_coverage, false);
+    assert.equal(result.coverage_verified, false);
+    assert.equal(result.passive_live, false);
+    assert.equal(result.activation.coverage_verified, false);
+    assert.equal(result.activation.passive_live, false);
+    assert.equal(result.activation.certified_coverage, false);
+    assert.deepEqual(result.enforcement_closeout, {
+      attempted: false,
+      matched: false,
+      closed: false,
+      reason: 'client_self_reported_not_authoritative',
+    });
+    assert.equal(result.acceptance_receipt.id, 'acceptance-one');
+    assert.equal(result.lifecycle_processing.outcome_closed, false);
+    assert.equal(result.normalized_event.event_type, 'workflow_completed');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('durable integrationEvent returns the authority assigned to its accepted delivery', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-authority-spool-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: {
+    accepted: true,
+    evidence_authority: 'client_self_reported',
+    certified_coverage: false,
+    enforcement_closeout: {
+      attempted: false,
+      matched: false,
+      closed: false,
+      reason: 'client_self_reported_not_authoritative',
+    },
+  } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  try {
+    const marrow = new MarrowClient('test-authority-spool-key', { eventSpoolPath: spoolPath });
+    const result = await marrow.integrationEvent({
+      event_id: 'authority-spool-event',
+      event_type: 'outcome_committed',
+      action: 'record observed outcome',
+      success: true,
+    });
+    assert.equal(result.accepted, true);
+    assert.equal(result.evidence_authority, 'client_self_reported');
+    assert.equal(result.certified_coverage, false);
+    assert.equal(result.enforcement_closeout.closed, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('guarded run drains receipts queued during an active pass and hashes a privacy-rejected caller correlation', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-active-drain-'));
   const spoolPath = join(directory, 'events.json');

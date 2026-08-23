@@ -14,11 +14,93 @@ const PRE_EXIT_REMINDER = 'Before ending the session, log the outcome to Marrow 
 const REQUIRE_EXTERNAL_ERROR = 'Marrow require mode: log intent with marrow.think() before external actions.';
 const REQUIRE_COMPLETION_ERROR = 'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
-const SDK_ADAPTER_VERSION = '3.7.61';
+const SDK_ADAPTER_VERSION = '3.7.62';
 const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
 const SDK_CONFIG_FINGERPRINT = (0, node_crypto_1.createHash)('sha256')
     .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)
     .digest('hex');
+const MIN_REQUEST_DEADLINE_MS = 1_000;
+const MAX_REQUEST_DEADLINE_MS = 30_000;
+const DEFAULT_REQUEST_DEADLINES = Object.freeze({
+    request: 8_000,
+    read: 5_000,
+    runtime: 5_500,
+    highRiskRuntime: 7_500,
+    lifecycle: 5_000,
+});
+function boundedRequestDeadline(value, fallback) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric))
+        return fallback;
+    return Math.max(MIN_REQUEST_DEADLINE_MS, Math.min(MAX_REQUEST_DEADLINE_MS, Math.floor(numeric)));
+}
+function recordField(value) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+        ? { ...value }
+        : undefined;
+}
+function lifecycleControlTruth(data) {
+    const rawAuthority = typeof data.evidence_authority === 'string' ? data.evidence_authority : '';
+    const evidenceAuthority = rawAuthority === 'client_self_reported'
+        || rawAuthority === 'server_attested'
+        || rawAuthority === 'none'
+        ? rawAuthority
+        : 'unverified';
+    const serverAttested = evidenceAuthority === 'server_attested';
+    const rawCloseout = recordField(data.enforcement_closeout);
+    const enforcementCloseout = rawCloseout
+        ? {
+            ...rawCloseout,
+            attempted: serverAttested && rawCloseout.attempted === true,
+            matched: serverAttested && rawCloseout.matched === true,
+            closed: serverAttested && rawCloseout.closed === true,
+            reason: serverAttested
+                ? String(rawCloseout.reason || 'server_attested_closeout')
+                : 'client_self_reported_not_authoritative',
+        }
+        : evidenceAuthority === 'client_self_reported'
+            ? {
+                attempted: false,
+                matched: false,
+                closed: false,
+                reason: 'client_self_reported_not_authoritative',
+            }
+            : undefined;
+    const rawActivation = recordField(data.activation);
+    const activation = rawActivation
+        ? {
+            ...rawActivation,
+            ...(typeof rawActivation.coverage_verified === 'boolean'
+                ? { coverage_verified: serverAttested && rawActivation.coverage_verified === true }
+                : {}),
+            ...(typeof rawActivation.passive_live === 'boolean'
+                ? { passive_live: serverAttested && rawActivation.passive_live === true }
+                : {}),
+            ...(typeof rawActivation.certified_coverage === 'boolean'
+                ? { certified_coverage: serverAttested && rawActivation.certified_coverage === true }
+                : {}),
+        }
+        : undefined;
+    return {
+        evidence_authority: evidenceAuthority,
+        certified_coverage: serverAttested && data.certified_coverage === true,
+        ...(typeof data.coverage_verified === 'boolean'
+            ? { coverage_verified: serverAttested && data.coverage_verified === true }
+            : {}),
+        ...(typeof data.activation_scope === 'string' || data.activation_scope === null
+            ? { activation_scope: data.activation_scope }
+            : {}),
+        ...(typeof data.passive_live === 'boolean'
+            ? { passive_live: serverAttested && data.passive_live === true }
+            : {}),
+        ...(activation ? { activation } : {}),
+        ...(enforcementCloseout ? { enforcement_closeout: enforcementCloseout } : {}),
+        ...(recordField(data.acceptance_receipt) ? { acceptance_receipt: recordField(data.acceptance_receipt) } : {}),
+        ...(recordField(data.lifecycle_processing) ? { lifecycle_processing: recordField(data.lifecycle_processing) } : {}),
+        ...(recordField(data.governance_projection) ? { governance_projection: recordField(data.governance_projection) } : {}),
+        ...(recordField(data.normalized_event) ? { normalized_event: recordField(data.normalized_event) } : {}),
+    };
+}
 function lifecycleObservedHook(eventType) {
     if (eventType === 'pre_action_checked' || eventType === 'risk_gate_requested' || eventType === 'prompt_submitted')
         return 'pre_action';
@@ -537,6 +619,12 @@ function numberFrom(value) {
     const numeric = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
 }
+function finiteNumberOrNull(value) {
+    if (value === null || value === undefined || value === '')
+        return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
 function firstNumber(...values) {
     for (const value of values) {
         const numeric = numberFrom(value);
@@ -809,6 +897,8 @@ class MarrowClient {
     eventSpool;
     eventSpoolDrainPromise = null;
     eventSpoolHealthError = null;
+    lifecycleDeliveryResults = new Map();
+    requestDeadlines;
     readCache = new Map();
     constructor(apiKey, options) {
         this.apiKey = apiKey;
@@ -824,6 +914,15 @@ class MarrowClient {
             this.sessionId = options?.sessionId ?? null;
             this.agentId = options?.agentId ?? null;
         }
+        const optionObject = typeof options === 'object' ? options : undefined;
+        const runtimeDeadline = boundedRequestDeadline(optionObject?.runtimeTimeoutMs, DEFAULT_REQUEST_DEADLINES.runtime);
+        this.requestDeadlines = {
+            request: boundedRequestDeadline(optionObject?.requestTimeoutMs, DEFAULT_REQUEST_DEADLINES.request),
+            read: boundedRequestDeadline(optionObject?.readTimeoutMs, DEFAULT_REQUEST_DEADLINES.read),
+            runtime: runtimeDeadline,
+            highRiskRuntime: Math.max(runtimeDeadline, boundedRequestDeadline(optionObject?.highRiskRuntimeTimeoutMs, DEFAULT_REQUEST_DEADLINES.highRiskRuntime)),
+            lifecycle: boundedRequestDeadline(optionObject?.lifecycleTimeoutMs, DEFAULT_REQUEST_DEADLINES.lifecycle),
+        };
         this.eventSpool = typeof options === 'object' && options?.durableEventSpool === false
             ? null
             : new event_spool_1.DurableEventSpool({
@@ -1819,11 +1918,76 @@ class MarrowClient {
                 valueReportPeriod: actionOptions.valueReportPeriod ?? options.valueReportPeriod ?? '7d',
             };
         };
-        const passiveFetch = fetchFn
-            ? client.wrapFetch(fetchFn.bind(globalThis), { captureModelUsage: options.captureModelUsage })
+        const fetchControlMode = options.fetchControlMode === 'governed' ? 'governed' : 'observe';
+        const transportFetch = fetchFn ? fetchFn.bind(globalThis) : undefined;
+        const observedFetch = transportFetch
+            ? client.wrapFetch(transportFetch, {
+                captureModelUsage: options.captureModelUsage,
+                observationOnly: true,
+            })
             : (async () => {
                 throw new Error('No fetch implementation available for Marrow passive runtime');
             });
+        const passiveFetch = fetchControlMode === 'governed' && transportFetch
+            ? (async (input, init) => {
+                const method = (() => {
+                    if (init?.method)
+                        return init.method;
+                    if (typeof Request !== 'undefined' && input instanceof Request)
+                        return input.method;
+                    return 'GET';
+                })().toUpperCase();
+                if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+                    return observedFetch(input, init);
+                }
+                const rawUrl = (() => {
+                    if (typeof input === 'string')
+                        return input;
+                    if (input instanceof URL)
+                        return input.toString();
+                    if (typeof Request !== 'undefined' && input instanceof Request)
+                        return input.url;
+                    return String(input);
+                })();
+                const safeUrl = stripSensitiveUrl(rawUrl);
+                const action = `${method} ${safeUrl}`;
+                const surfaces = [...new Set(['fetch', ...inferSurfacesFromText(action)])];
+                const guarded = await client.runGuarded({
+                    ...buildGuardOptions(action, async () => {
+                        const response = await transportFetch(input, init);
+                        if (options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false') {
+                            void extractModelUsageFromResponse(rawUrl, response)
+                                .then((usage) => usage ? client.modelUsage({ ...usage, action_type: method }) : undefined)
+                                .catch(() => undefined);
+                        }
+                        return response;
+                    }, {
+                        type: inferTypeFromText(action),
+                        surfaces,
+                        riskPolicy: 'block_high',
+                        useAgentRuntime: true,
+                        useWorkflowGate: true,
+                        requireOutcomeClosure: true,
+                    }),
+                    actionTarget: safeUrl,
+                    requireActionPermit: true,
+                    riskPolicy: 'block_high',
+                    useAgentRuntime: true,
+                    useWorkflowGate: true,
+                    requireOutcomeClosure: true,
+                    completionEvidence: (response) => ({
+                        evidence_source: 'sdk_governed_fetch',
+                        evidence_state: response.ok ? 'observed_only' : 'failed',
+                        checks: [`http_status_${response.status}`],
+                        http_ok: response.ok,
+                    }),
+                });
+                if (!guarded.ok || !guarded.result) {
+                    throw new Error(`Marrow governed fetch did not execute as complete: ${guarded.summary}`);
+                }
+                return guarded.result;
+            })
+            : observedFetch;
         const drainLifecycleSafely = () => {
             void client.flushLifecycleEventsInBackground().catch((error) => {
                 client.eventSpoolHealthError = safePublicErrorMessage(error);
@@ -1868,14 +2032,24 @@ class MarrowClient {
                         process.once('beforeExit', closeOpenSession);
                         sessionEndBound = true;
                     }
-                    return { fetchPatched: true };
+                    return {
+                        fetchPatched: true,
+                        coverageScope: 'owned_node_process',
+                        fetchControlMode: fetchControlMode === 'governed' ? 'governed' : 'observation_only',
+                        governanceEnforced: fetchControlMode === 'governed' && Boolean(transportFetch),
+                    };
                 }
                 installed = true;
                 if (options.requireOutcomeClosure !== false && !sessionEndBound) {
                     process.once('beforeExit', closeOpenSession);
                     sessionEndBound = true;
                 }
-                return { fetchPatched: false };
+                return {
+                    fetchPatched: false,
+                    coverageScope: 'owned_node_process',
+                    fetchControlMode: fetchControlMode === 'governed' ? 'governed' : 'observation_only',
+                    governanceEnforced: fetchControlMode === 'governed' && Boolean(transportFetch),
+                };
             },
             restore() {
                 if (sessionEndBound) {
@@ -2129,7 +2303,17 @@ class MarrowClient {
                     source_meta: { channel: 'sdk', client: defaultSourceClient(), user_intent: method === 'GET' || method === 'HEAD' ? 'research' : 'operate' },
                 },
             };
-            await this.beforeAction(meta);
+            if (options.observationOnly) {
+                try {
+                    await this.beforeAction(meta);
+                }
+                catch (error) {
+                    process.stderr.write(`[marrow] Warning: passive fetch pre-action telemetry was unavailable: ${safePublicErrorMessage(error)}\n`);
+                }
+            }
+            else {
+                await this.beforeAction(meta);
+            }
             try {
                 const response = await fetchFn(input, init);
                 if (options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false') {
@@ -2144,21 +2328,35 @@ class MarrowClient {
                     })
                         .catch(() => undefined);
                 }
-                await this.afterAction({
-                    ...meta,
-                    success: response.ok,
-                    result: response.ok
-                        ? `HTTP ${response.status} ${response.statusText || 'OK'}`
-                        : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
-                });
+                try {
+                    await this.afterAction({
+                        ...meta,
+                        success: response.ok,
+                        result: response.ok
+                            ? `HTTP ${response.status} ${response.statusText || 'OK'}`
+                            : `HTTP ${response.status} ${response.statusText || 'Request failed'}`,
+                    });
+                }
+                catch (error) {
+                    if (!options.observationOnly)
+                        throw error;
+                    process.stderr.write(`[marrow] Warning: passive fetch outcome telemetry was unavailable: ${safePublicErrorMessage(error)}\n`);
+                }
                 return response;
             }
             catch (error) {
-                await this.afterAction({
-                    ...meta,
-                    success: false,
-                    result: safeErrorMessage(error),
-                });
+                try {
+                    await this.afterAction({
+                        ...meta,
+                        success: false,
+                        result: safeErrorMessage(error),
+                    });
+                }
+                catch (telemetryError) {
+                    if (!options.observationOnly)
+                        throw telemetryError;
+                    process.stderr.write(`[marrow] Warning: passive fetch failure telemetry was unavailable: ${safePublicErrorMessage(telemetryError)}\n`);
+                }
                 throw error;
             }
         });
@@ -2384,6 +2582,7 @@ class MarrowClient {
             .filter(Boolean)
             .join(' ');
         return {
+            ...data,
             committed: data.committed,
             successRate: data.success_rate,
             insight: data.insight,
@@ -2463,7 +2662,7 @@ class MarrowClient {
                 agent_id: this.agentId ?? undefined,
                 session_id: this.sessionId ?? undefined,
                 context: { sdk_orient: true },
-            }, 750, `orient:${task.slice(0, 120)}`);
+            }, this.requestDeadlines.runtime, `orient:${task.slice(0, 120)}`);
             if (!read.value) {
                 return this.unavailableOrient(read.errorCode || 'unavailable');
             }
@@ -2507,7 +2706,7 @@ class MarrowClient {
                 text: message || 'No current Marrow warning. Proceed and record the outcome.',
             };
         }
-        const read = await this.readWithLastKnown('GET', '/v1/agent/context', undefined, 400, 'agent-context');
+        const read = await this.readWithLastKnown('GET', '/v1/agent/context', undefined, this.requestDeadlines.read, 'agent-context');
         if (!read.value)
             return this.unavailableOrient(read.errorCode || 'unavailable');
         const data = read.value.data ?? read.value;
@@ -2595,7 +2794,7 @@ class MarrowClient {
             role: 'general',
             agent_id: this.agentId ?? undefined,
             session_id: this.sessionId ?? undefined,
-        }, 400, `ask:${query.slice(0, 120)}`);
+        }, this.requestDeadlines.read, `ask:${query.slice(0, 120)}`);
         if (!read.value) {
             return {
                 available: false,
@@ -2629,7 +2828,7 @@ class MarrowClient {
         };
     }
     async quickStatus() {
-        const read = await this.readWithLastKnown('GET', '/v1/agent/status?fast=1', undefined, 400, 'quick-status');
+        const read = await this.readWithLastKnown('GET', '/v1/agent/status', undefined, this.requestDeadlines.read, 'quick-status');
         const data = read.value ? (read.value.data ?? read.value) : {};
         const clientUpdate = data.client_update || sdkClientUpdate();
         const rawActivationCoverage = data.activation_coverage && typeof data.activation_coverage === 'object'
@@ -2695,6 +2894,7 @@ class MarrowClient {
                 },
             };
         return {
+            ...data,
             available: Boolean(read.value),
             source: read.value ? read.source : 'unavailable',
             stale: read.stale,
@@ -2708,21 +2908,21 @@ class MarrowClient {
             enabled: Boolean(data.enabled ?? data.ok),
             health: data.health || 'degraded',
             message: data.message || '',
-            hasMemory: Boolean(data.has_memory),
-            lowHistory: Boolean(data.low_history),
-            decisionCount: data.decision_count || 0,
-            outcomeEligibleDecisionCount: data.outcome_eligible_decision_count || 0,
-            outcomeCount: data.outcome_count || 0,
+            hasMemory: typeof data.has_memory === 'boolean' ? data.has_memory : null,
+            lowHistory: typeof data.low_history === 'boolean' ? data.low_history : null,
+            decisionCount: finiteNumberOrNull(data.decision_count),
+            outcomeEligibleDecisionCount: finiteNumberOrNull(data.outcome_eligible_decision_count),
+            outcomeCount: finiteNumberOrNull(data.outcome_count),
             successRate: data.success_rate ?? null,
             firstEventAt: data.first_event_at || null,
             lastEventAt: data.last_event_at || null,
-            recentDecisions24h: data.recent_decisions_24h || 0,
-            recentOutcomeEligibleDecisions24h: data.recent_outcome_eligible_decisions_24h || 0,
-            recentOutcomeCount24h: data.recent_outcome_count_24h || 0,
-            recentOutcomeCoverage24h: data.recent_outcome_coverage_24h || 0,
+            recentDecisions24h: finiteNumberOrNull(data.recent_decisions_24h),
+            recentOutcomeEligibleDecisions24h: finiteNumberOrNull(data.recent_outcome_eligible_decisions_24h),
+            recentOutcomeCount24h: finiteNumberOrNull(data.recent_outcome_count_24h),
+            recentOutcomeCoverage24h: finiteNumberOrNull(data.recent_outcome_coverage_24h),
             captureCoverage: data.capture_coverage || {
-                decisions: Boolean(data.has_memory),
-                outcomes: 0,
+                decisions: typeof data.has_memory === 'boolean' ? data.has_memory : null,
+                outcomes: null,
                 tools: 'unknown',
                 commands: 'unknown',
                 deploys: 'unknown',
@@ -3038,7 +3238,7 @@ class MarrowClient {
             ...input,
             agent_id: input.agent_id ?? this.agentId ?? undefined,
             session_id: input.session_id ?? this.sessionId ?? undefined,
-        }, 400);
+        }, this.requestDeadlines.read);
         return (res.data || res);
     }
     async workflowGate(input) {
@@ -3063,7 +3263,7 @@ class MarrowClient {
         };
         const highRisk = runtimeRequestRequiresFreshGate(requestBody);
         const cacheKey = `runtime:${boundedDeterministicHash('agent-runtime-cache:v2', requestBody)}`;
-        const read = await this.readWithLastKnown('POST', '/v1/agent/runtime', requestBody, highRisk ? 2_000 : 750, cacheKey);
+        const read = await this.readWithLastKnown('POST', '/v1/agent/runtime', requestBody, highRisk ? this.requestDeadlines.highRiskRuntime : this.requestDeadlines.runtime, cacheKey);
         if (!read.value) {
             const failure = (read.errorCode || 'unknown');
             return {
@@ -3301,10 +3501,11 @@ class MarrowClient {
         };
         const record = this.eventSpool?.enqueue(normalized) || (0, event_spool_1.sanitizeLifecycleEvent)(normalized);
         if (!this.eventSpool) {
-            const res = await this.requestOnce('POST', '/v1/agent/integrations/events', record);
+            const res = await this.requestOnce('POST', '/v1/agent/integrations/events', record, this.requestDeadlines.lifecycle);
             const data = (res.data || res);
             const accepted = data.accepted === true;
             return {
+                ...lifecycleControlTruth(data),
                 accepted,
                 queued: false,
                 failed: !accepted,
@@ -3313,13 +3514,16 @@ class MarrowClient {
                 pending_spool_events: 0,
                 failed_spool_events: 0,
                 ...(!accepted ? { failure_code: 'terminal_rejection' } : {}),
-                normalized_event: data.normalized_event,
             };
         }
         await this.drainEventSpool();
         const status = this.eventSpool.status(record.event_id);
         const deliveryState = status.record?.delivery_state || 'accepted';
+        const controlTruth = this.lifecycleDeliveryResults.get(record.event_id)
+            || lifecycleControlTruth({});
+        this.lifecycleDeliveryResults.delete(record.event_id);
         return {
+            ...controlTruth,
             accepted: deliveryState === 'accepted',
             queued: deliveryState === 'pending',
             failed: deliveryState === 'failed',
@@ -3634,7 +3838,8 @@ class MarrowClient {
         if (!options?.skipRetryDrain)
             await this.drainRetryQueue();
         try {
-            return await this.requestOnce(method, path, body, options?.timeoutMs || 0, Boolean(options?.timeoutMs));
+            const timeoutMs = options?.timeoutMs ?? this.requestDeadlines.request;
+            return await this.requestOnce(method, path, body, timeoutMs, true);
         }
         catch (error) {
             if (!options?.skipRetryDrain && this.shouldQueueRequest(method, path, error)) {
@@ -3643,7 +3848,7 @@ class MarrowClient {
             throw error;
         }
     }
-    async requestRead(method, path, body, timeoutMs = 400) {
+    async requestRead(method, path, body, timeoutMs = DEFAULT_REQUEST_DEADLINES.read) {
         return this.request(method, path, body, { skipRetryDrain: true, timeoutMs });
     }
     async readWithLastKnown(method, path, body, timeoutMs, cacheKey) {
@@ -3693,7 +3898,7 @@ class MarrowClient {
             text: 'Fresh Marrow guidance is unavailable. Retry before high-risk work.',
         };
     }
-    async requestOnce(method, path, body, timeoutMs = 0, unrefTimeout = false) {
+    async requestOnce(method, path, body, timeoutMs = DEFAULT_REQUEST_DEADLINES.request, unrefTimeout = false) {
         const url = `${this.baseUrl}${path}`;
         const headers = {
             Authorization: `Bearer ${this.apiKey}`,
@@ -3708,7 +3913,8 @@ class MarrowClient {
         headers['X-Marrow-Client'] = defaultSourceClient();
         headers['X-Marrow-Package'] = '@getmarrow/sdk';
         headers['X-Marrow-Package-Version'] = SDK_ADAPTER_VERSION;
-        const controller = timeoutMs > 0 ? new AbortController() : null;
+        const effectiveTimeoutMs = boundedRequestDeadline(timeoutMs, this.requestDeadlines.request);
+        const controller = new AbortController();
         let timeout = null;
         const registry = globalThis;
         const transportFetch = registry[GLOBAL_FETCH_PATCH_KEY]?.originalFetch || globalThis.fetch;
@@ -3719,27 +3925,25 @@ class MarrowClient {
             method,
             headers,
             body: body ? JSON.stringify(body) : undefined,
-            ...(controller ? { signal: controller.signal } : {}),
+            signal: controller.signal,
         }).catch((error) => {
             const failure = classifyMarrowFailure(error);
             throw new Error(`Marrow request failed (${failure}). ${exactFixForFailure(failure)}`);
         });
-        const res = timeoutMs > 0
-            ? await Promise.race([
-                requestPromise,
-                new Promise((_, reject) => {
-                    timeout = setTimeout(() => {
-                        controller?.abort();
-                        reject(new Error(`Marrow request timed out after ${timeoutMs}ms`));
-                    }, timeoutMs);
-                    if (unrefTimeout)
-                        timeout.unref?.();
-                }),
-            ]).finally(() => {
-                if (timeout)
-                    clearTimeout(timeout);
-            })
-            : await requestPromise;
+        const res = await Promise.race([
+            requestPromise,
+            new Promise((_, reject) => {
+                timeout = setTimeout(() => {
+                    controller.abort();
+                    reject(new Error(`Marrow request timed out after ${effectiveTimeoutMs}ms`));
+                }, effectiveTimeoutMs);
+                if (unrefTimeout)
+                    timeout.unref?.();
+            }),
+        ]).finally(() => {
+            if (timeout)
+                clearTimeout(timeout);
+        });
         if (!res.ok) {
             let errorDetail = 'Unknown error';
             try {
@@ -3824,10 +4028,16 @@ class MarrowClient {
                     break;
                 for (const record of records) {
                     try {
-                        const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record, 1_000, unrefTimeout);
+                        const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record, this.requestDeadlines.lifecycle, unrefTimeout);
                         const data = (response.data || response);
                         if (data.accepted !== true) {
                             throw new Error('Marrow lifecycle endpoint did not accept the receipt');
+                        }
+                        this.lifecycleDeliveryResults.set(record.event_id, lifecycleControlTruth(data));
+                        if (this.lifecycleDeliveryResults.size > 100) {
+                            const oldest = this.lifecycleDeliveryResults.keys().next().value;
+                            if (oldest)
+                                this.lifecycleDeliveryResults.delete(oldest);
                         }
                         spool.acknowledge([record.event_id]);
                     }
@@ -3874,7 +4084,7 @@ class MarrowClient {
             const queued = this.retryQueue.splice(0, 5);
             for (const item of queued) {
                 try {
-                    await this.requestOnce(item.method, item.path, item.body);
+                    await this.requestOnce(item.method, item.path, item.body, this.requestDeadlines.request, true);
                 }
                 catch (error) {
                     const attempts = item.attempts + 1;

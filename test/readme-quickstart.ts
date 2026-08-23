@@ -8,6 +8,7 @@ import {
   type MarrowLifecycleEventResult,
   type MarrowLifecycleEventType,
   type MarrowPassiveRuntime,
+  type MarrowPassiveInstallResult,
   type MarrowPassiveRuntimeWithLifecycle,
 } from '../src';
 
@@ -37,10 +38,14 @@ type LegacyRuntimeHasNoRequiredLifecycleMethods = Extract<
 > extends never ? true : never;
 const legacyRuntimeCompatibility: LegacyRuntimeHasNoRequiredLifecycleMethods = true;
 declare const lifecycleRuntime: MarrowPassiveRuntimeWithLifecycle;
+declare const installResult: MarrowPassiveInstallResult;
 void lifecycleRuntime.lifecycleBacklog;
 void lifecycleRuntime.flushLifecycleEvents;
 void lifecycleRuntime.recoverLifecycleEvents;
 void legacyRuntimeCompatibility;
+void installResult.coverageScope;
+void installResult.fetchControlMode;
+void installResult.governanceEnforced;
 void (null as unknown as MarrowActivationCoverage);
 void (null as unknown as MarrowDecisionTraceResult);
 void (null as unknown as MarrowIntegrationCapabilityLevel);

@@ -65,9 +65,20 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.61
+## What's New in v3.7.62
 
-v3.7.61 keeps SDK control-plane requests outside the passive global-fetch wrapper. Installing `createPassiveRuntime()` still governs application and provider fetches, but Marrow's own status, runtime, proof, and outcome requests now use the captured unwrapped transport so they cannot recursively govern themselves. The SDK adapter identity also matches the published package version.
+v3.7.62 makes the SDK control boundary explicit and preserves the repaired server proof contract:
+
+- `createPassiveRuntime().install()` covers only the owned Node process. Its default global-fetch patch is observation-only think/outcome telemetry; it is not a runtime gate, certified coverage, or a signed permit.
+- `fetchControlMode: 'governed'` routes consequential non-read fetches through `runGuarded()`, including fresh runtime and workflow gates plus an action-bound signed permit before the provider call. That mode fails closed before execution when the required control path is unavailable.
+- `integrationEvent()` exposes `evidence_authority`, `certified_coverage`, activation scope, lifecycle processing, and enforcement closeout truth. Public lifecycle submissions are `client_self_reported`; accepted delivery cannot certify coverage or close a permit.
+- status, runtime, and commit retain additive server proof fields such as coherent generation, exact receipt linkage, `runtime_gate_used`, receipt verification/use, enforcement state, and closeout status.
+- missing compact status measurements remain `null`; the SDK does not turn unavailable decision, outcome, or recent-activity counts into observed zeroes.
+- service calls use bounded configurable deadlines aligned with current cold-path behavior: 5 seconds for reads, 5.5 seconds for ordinary runtime, 7.5 seconds for high-risk runtime, 8 seconds for other requests, and 5 seconds per lifecycle delivery attempt. Every override is clamped to 1–30 seconds.
+
+## Previous: v3.7.61
+
+v3.7.61 kept SDK control-plane requests outside the passive global-fetch wrapper. The passive wrapper could observe application/provider fetches without recursively intercepting Marrow's own status, runtime, proof, and outcome requests; it did not make those observed fetches a governed execution choke point.
 
 ## Previous: v3.7.60
 
@@ -109,7 +120,7 @@ v3.7.56 makes the SDK read and runtime control path fail soft, fast, and explici
 v3.7.55 makes evidence-backed steering, completion evidence, coordination, and replay available through typed SDK surfaces:
 
 - `orient({ autoWarn: true })` now uses the canonical `/v1/agent/runtime` control path, and `ask()` uses the canonical decision brief;
-- status and guidance reads have explicit 400 ms client deadlines, while runtime governance has a separate 750 ms deadline;
+- status, guidance, and runtime reads use explicit bounded client deadlines;
 - reads do not wait for queued lifecycle writes to drain;
 - transient read failures can return a clearly labeled in-process last-known response for up to one hour;
 - authentication and permission failures never return cached guidance, and stale runtime guidance never authorizes high-risk work;
@@ -159,12 +170,12 @@ Before `execute()` runs, `runGuarded()` binds the runtime gate to the governed d
 - high-risk, review-required, proof-required, and `block_high` work fails closed if permit verification fails;
 - permits cannot be replayed across agents, sessions, actions, targets, surfaces, decisions, or runtime gates;
 - failures before execution are recorded as non-executed outcomes rather than silently bypassed;
-- action result and outcome receipts can auto-close matching permits;
-- `enforcementHeartbeat()` reports hook/configuration integrity without uploading raw configuration;
+- `runGuarded()` closes its consumed permit with the exact bounded completion evidence; ordinary lifecycle receipts cannot close permits;
+- `enforcementHeartbeat()` submits authenticated client-self-reported hook/configuration telemetry without uploading raw configuration; it does not certify hook integrity or coverage;
 - `enforcementCoverage()` reports permit completion, bypasses, sidecar freshness, and exact repair steps;
 - lower-risk advisory mode remains available, while callers can set `requireActionPermit: true` for any action.
 
-It preserves the measurable passive-governance coverage introduced in v3.7.49:
+It preserves observed passive lifecycle telemetry introduced in v3.7.49:
 
 - stable action correlation links the before/action/result/outcome lifecycle without storing raw work content;
 - passive receipts identify the adapter version, capability level, expected hook surfaces, observed hook, and one-way configuration fingerprint;
@@ -173,7 +184,7 @@ It preserves the measurable passive-governance coverage introduced in v3.7.49:
 - the durable spool retains this metadata through transient delivery failures and remains bounded, owner-only, and idempotent;
 - existing lifecycle event inputs remain compatible.
 
-It preserves typed agent-disagreement arbitration from v3.7.48 and the durable always-on lifecycle introduced in v3.7.44:
+It preserves typed agent-disagreement arbitration from v3.7.48 and the durable owned-process lifecycle adapter introduced in v3.7.44:
 
 - GitHub and npm now advertise separate signed discovery placements;
 - package metadata identifies the SDK as runtime governance and proof rather than a general memory utility;
@@ -216,6 +227,8 @@ if (result.blocked) {
 
 `runGuarded()` obtains the runtime and workflow gates, records intent, issues and verifies a permit bound to the authenticated account, key, agent, session, exact action, target, and canonical action surfaces when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome only after every exact server-required proof field is present. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration preserves the same surfaces through issue and verify and implements the same closure discipline explicitly.
 
+A successful `quickStatus()` proves authenticated status connectivity for this configured client and agent identity. It does not prove that every action is intercepted, that passive coverage is certified, or that an unwrapped harness is governed. Measured token savings remain zero until provider-observed usage counts land.
+
 ## Passive Runtime
 
 For owned Node.js processes, install the passive runtime once:
@@ -227,10 +240,24 @@ const marrow = new MarrowClient(process.env.MARROW_API_KEY!, {
   agentId: 'support-agent',
 });
 
-marrow.createPassiveRuntime().install();
+const installed = marrow.createPassiveRuntime().install();
+console.log(installed);
 ```
 
-Supported wrappers call the one-call runtime before meaningful work and close outcomes after success or failure. Policy, proof, validation, and authentication failures are surfaced explicitly rather than retried blindly.
+The default installation reports `fetchControlMode: 'observation_only'`, `governanceEnforced: false`, and `coverageScope: 'owned_node_process'`. It automatically records observed fetch think/outcome telemetry and provider token counts when the response contains usage. Calls outside this process, actions that bypass the patched fetch, and process termination before delivery remain outside that scope. Accepted lifecycle telemetry is not certified coverage or permit closure.
+
+Use explicit `runtime.tool()`, `.command()`, `.deploy()`, `.publish()`, or `runGuarded()` for consequential work. If this owned process must place all non-read global fetches on the signed control path, opt in explicitly:
+
+```ts
+const runtime = marrow.createPassiveRuntime({ fetchControlMode: 'governed' });
+const install = runtime.install();
+
+if (!install.governanceEnforced) {
+  throw new Error('The governed fetch wrapper was not installed');
+}
+```
+
+In governed fetch mode, `POST`, `PUT`, `PATCH`, `DELETE`, and other non-read methods require the same fresh runtime/workflow gates, signed action permit, and closeout used by `runGuarded()`. `GET`, `HEAD`, and `OPTIONS` remain observation-only. This is model- and harness-neutral behavior for the owned Node process, not a claim of native hooks in another agent harness.
 
 When a transient network or server error prevents delivery, the SDK can retain the compact event in an owner-only local spool and retry it with the same event ID. The default spool is bounded to 100 records, written atomically, and stored with owner-only permissions.
 
@@ -248,7 +275,9 @@ await runtime.recoverLifecycleEvents(['failed-event-id']);
 `state` is `clear`, `pending`, `attention_required`, or `disabled`, with exact pending/failed counts, oldest receipt timestamps, separate record and byte limits, and an exact fix. The legacy ambiguous `capacity` and `available` fields remain `null`; use `record_slots_available` and `bytes_available`. Authentication, policy, proof, and validation failures become explicit durable failures instead of infinite retries.
 After correcting authentication or endpoint compatibility, call `recoverLifecycleEvents()` to requeue all failed receipts, or pass exact event IDs for a bounded retry. Recovery never happens silently.
 
-Marrow reports passive coverage only from observed receipts. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect activation and `npx @getmarrow/install --repair` when configuration drift is reported.
+Marrow reports passive activity from authenticated client-self-reported receipts. Those receipts can show delivered telemetry but cannot certify interception, activation, drift-free hooks, or permit closure. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect connection and configured scope; use the governed wrapper for consequential execution.
+
+Client deadlines are configurable when constructing `MarrowClient` through `requestTimeoutMs`, `readTimeoutMs`, `runtimeTimeoutMs`, `highRiskRuntimeTimeoutMs`, and `lifecycleTimeoutMs`. Values are bounded to 1–30 seconds, and high-risk runtime never receives less time than ordinary runtime. Keep host/tool-call ceilings separate from these SDK deadlines.
 
 ## Core Control Methods
 
@@ -270,9 +299,9 @@ Marrow reports passive coverage only from observed receipts. Missing denominator
 | `issueActionPermit(input)` | Issue a short-lived permit bound to an existing runtime gate and decision |
 | `verifyActionPermit(input)` | Verify and consume the same permit immediately before execution |
 | `closeActionPermit(input)` | Close a consumed permit with evidence and the real outcome |
-| `enforcementHeartbeat(input)` | Report expected/observed hook and configuration integrity |
+| `enforcementHeartbeat(input)` | Submit client-self-reported expected/observed hook and configuration telemetry; not certification |
 | `enforcementCoverage()` | Inspect permit closure, bypass, sidecar, and hook coverage |
-| `integrationEvent(input)` | Record a compact passive lifecycle receipt through the durable local spool |
+| `integrationEvent(input)` | Record client-self-reported lifecycle telemetry and expose backend authority/closeout truth |
 | `lifecycleBacklog()` | Read aggregate local backlog health without event payloads |
 | `flushLifecycleEvents()` | Retry queued lifecycle receipts and return aggregate health |
 | `recoverLifecycleEvents(eventIds?)` | Explicitly requeue durable failed receipts and retry delivery |

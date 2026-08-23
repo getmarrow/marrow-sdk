@@ -41,6 +41,12 @@ test('npm entry point matches the product positioning contract', () => {
   assert.ok(readme.indexOf('## Quick Start') < readme.indexOf('## Context and Workflow Examples'));
   assert.match(readme, /runGuarded\(\{[\s\S]*riskPolicy: 'block_high'[\s\S]*if \(result\.blocked\)/);
   assert.doesNotMatch(readme, /runtime\.decision_id/);
+  assert.match(readme, /fetchControlMode: 'observation_only'/);
+  assert.match(readme, /fetchControlMode: 'governed'/);
+  assert.match(readme, /client-self-reported/i);
+  assert.match(readme, /Accepted lifecycle telemetry is not certified coverage or permit closure/i);
+  assert.match(readme, /bounded to 1–30 seconds/i);
+  assert.doesNotMatch(readme, /Installing `createPassiveRuntime\(\)` still governs application and provider fetches/i);
 });
 
 test('SDK package never installs another version of itself', () => {

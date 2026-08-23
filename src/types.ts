@@ -238,6 +238,18 @@ export type MarrowPassiveRuntimeSurface =
   | 'workspace'
   | string;
 
+export type MarrowPassiveFetchControlMode = 'observe' | 'governed';
+
+export interface MarrowPassiveInstallResult {
+  fetchPatched: boolean;
+  /** Scope is limited to the Node process that installed this runtime. */
+  coverageScope: 'owned_node_process';
+  /** Observation records think/outcome telemetry; governed uses runGuarded for consequential fetches. */
+  fetchControlMode: 'observation_only' | 'governed';
+  /** True only when consequential fetches are routed through fresh gates and signed permits. */
+  governanceEnforced: boolean;
+}
+
 export interface MarrowPassiveRuntimeOptions {
   mode?: MarrowEnforcementMode;
   defaultType?: string;
@@ -250,6 +262,12 @@ export interface MarrowPassiveRuntimeOptions {
   requireOutcomeClosure?: boolean;
   actionPrefix?: string;
   captureModelUsage?: boolean;
+  /**
+   * `observe` (default) records passive think/outcome telemetry but does not
+   * authorize or govern provider fetches. `governed` routes non-read fetches
+   * through runGuarded() and requires a verified action-bound permit.
+   */
+  fetchControlMode?: MarrowPassiveFetchControlMode;
   fetch?: typeof fetch | false;
   patchGlobalFetch?: boolean;
   lifecycleFlushIntervalMs?: number;
@@ -279,7 +297,7 @@ export interface MarrowPassiveActionOptions {
 export interface MarrowPassiveRuntime {
   readonly installed: boolean;
   readonly fetch: typeof fetch;
-  install(): { fetchPatched: boolean };
+  install(): MarrowPassiveInstallResult;
   restore(): void;
   tool<T>(name: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
   command<T>(command: string, execute: () => Promise<T> | T, options?: MarrowPassiveActionOptions): Promise<MarrowGuardedRunResult<T>>;
@@ -599,13 +617,47 @@ export interface MarrowThinkResult {
 }
 
 export interface MarrowCommitResult {
+  /** Exact server wire fields remain present in addition to the compatibility aliases below. */
+  [key: string]: unknown;
   committed: boolean;
+  decision_id?: string;
+  commit_handle?: string;
+  created_from_runtime_receipt?: boolean;
+  workflow_session_id?: string | null;
   successRate: number;
+  success_rate?: number;
+  success_rate_available?: boolean;
+  success_rate_source?: string;
+  success_rate_generated_at?: string;
   insight: string | null;
   narrative: Narrative;
   marrow_contributed?: CommitContribution;
   token_value_signal?: MarrowTokenValueSignal | null;
-  pre_action_gate?: { receipt_id?: string | null; decision?: string | null; enforced: boolean } | null;
+  pre_action_gate?: {
+    receipt_id?: string | null;
+    decision?: string | null;
+    receipt_present?: boolean;
+    receipt_verified?: boolean;
+    receipt_used?: boolean;
+    enforced: boolean;
+    validation_code?: string;
+    warning?: string;
+    [key: string]: unknown;
+  } | null;
+  loop_integrity?: {
+    outcome_committed?: boolean;
+    runtime_gate_used?: boolean;
+    receipt_present?: boolean;
+    receipt_verified?: boolean;
+    receipt_used?: boolean;
+    gate_enforced?: boolean;
+    gate_validation_code?: string;
+    proof_complete?: boolean;
+    status?: string;
+    exact_next_action?: string;
+    [key: string]: unknown;
+  };
+  commit_processing?: Record<string, unknown>;
   arbitration?: Pick<MarrowArbitrationReceipt, 'receipt_id' | 'status' | 'resolution' | 'final_success'> | null;
   acceptedAs: 'outcome';
   recommendedNext: MarrowLoopRecommendation;
@@ -765,6 +817,8 @@ export interface MarrowClientUpdateAdvisory {
 }
 
 export interface MarrowQuickStatusResult {
+  /** Exact compact server wire fields remain present alongside camelCase aliases. */
+  [key: string]: unknown;
   available?: boolean;
   source?: 'live' | 'last_known' | 'unavailable';
   stale?: boolean;
@@ -776,21 +830,21 @@ export interface MarrowQuickStatusResult {
   enabled: boolean;
   health: 'healthy' | 'degraded';
   message: string;
-  hasMemory: boolean;
-  lowHistory: boolean;
-  decisionCount: number;
-  outcomeEligibleDecisionCount: number;
-  outcomeCount: number;
+  hasMemory: boolean | null;
+  lowHistory: boolean | null;
+  decisionCount: number | null;
+  outcomeEligibleDecisionCount: number | null;
+  outcomeCount: number | null;
   successRate: number | null;
   firstEventAt: string | null;
   lastEventAt: string | null;
-  recentDecisions24h: number;
-  recentOutcomeEligibleDecisions24h: number;
-  recentOutcomeCount24h: number;
-  recentOutcomeCoverage24h: number;
+  recentDecisions24h: number | null;
+  recentOutcomeEligibleDecisions24h: number | null;
+  recentOutcomeCount24h: number | null;
+  recentOutcomeCoverage24h: number | null;
   captureCoverage: {
-    decisions: boolean;
-    outcomes: number;
+    decisions: boolean | null;
+    outcomes: number | null;
     recent_outcomes?: number;
     tools: 'detected' | 'unknown';
     commands: 'detected' | 'unknown';
@@ -892,6 +946,16 @@ export interface MarrowClientOptions {
   apiKeySource?: 'env' | 'env-file' | 'explicit';
   durableEventSpool?: boolean;
   eventSpoolPath?: string;
+  /** Default deadline for authenticated writes and ordinary API methods. Clamped to 1-30 seconds. */
+  requestTimeoutMs?: number;
+  /** Default deadline for status, ask, orient, and decision-brief reads. Clamped to 1-30 seconds. */
+  readTimeoutMs?: number;
+  /** Default deadline for ordinary runtime gates. Clamped to 1-30 seconds. */
+  runtimeTimeoutMs?: number;
+  /** Deadline for fresh high-risk runtime gates. Clamped to 1-30 seconds and never below runtimeTimeoutMs. */
+  highRiskRuntimeTimeoutMs?: number;
+  /** Deadline for lifecycle delivery attempts. Clamped to 1-30 seconds. */
+  lifecycleTimeoutMs?: number;
 }
 
 export type MarrowLifecycleEventType =
@@ -960,6 +1024,25 @@ export interface MarrowLifecycleEventResult {
   failed_spool_events: number;
   failure_code?: 'terminal_rejection' | 'retry_exhausted';
   normalized_event?: Record<string, unknown>;
+  /** Authority assigned by the backend; public SDK lifecycle bodies are client self-reports. */
+  evidence_authority: 'client_self_reported' | 'server_attested' | 'none' | 'unverified';
+  /** Can be true only when the backend assigns server-attested authority. */
+  certified_coverage: boolean;
+  coverage_verified?: boolean;
+  activation_scope?: string | null;
+  passive_live?: boolean;
+  activation?: Record<string, unknown> | null;
+  /** Self-reported lifecycle delivery cannot close a signed action permit. */
+  enforcement_closeout?: {
+    attempted: boolean;
+    matched: boolean;
+    closed: boolean;
+    reason: string;
+    [key: string]: unknown;
+  };
+  acceptance_receipt?: Record<string, unknown>;
+  lifecycle_processing?: Record<string, unknown>;
+  governance_projection?: Record<string, unknown>;
 }
 
 export interface MarrowLifecycleBacklog {
@@ -1765,6 +1848,8 @@ export interface MarrowBeforeActionIntervention {
 }
 
 export interface MarrowAgentRuntimeResult {
+  /** Exact server proof/governance fields remain present across additive contract revisions. */
+  [key: string]: unknown;
   ok: boolean;
   available?: boolean;
   source?: 'live' | 'last_known' | 'unavailable';

@@ -861,6 +861,9 @@ test('automatic recovery exhausts after three attempts and stays quiet', async (
     runtime.install();
     await settleBackgroundDrain();
     assert.equal(calls, 1);
+    const recovering = marrow.lifecycleBacklog();
+    assert.equal(recovering.recoverable, 1);
+    assert.match(recovering.exact_fix, /Automatic recovery .* is scheduled/);
     t.mock.timers.tick(15 * 60_000);
     await settleBackgroundDrain();
     assert.equal(calls, 2);
@@ -876,7 +879,10 @@ test('automatic recovery exhausts after three attempts and stays quiet', async (
     assert.equal(backlog.recoverable, 0);
     assert.equal(backlog.recovery_exhausted, 1);
     assert.equal(backlog.state, 'clear');
+    assert.match(backlog.exact_fix, /recovery is exhausted/);
     assert.match(backlog.exact_fix, /No action is required/);
+    assert.match(backlog.exact_fix, /recoverLifecycleEvents\(\) remains available/);
+    assert.doesNotMatch(backlog.exact_fix, /scheduled/);
     t.mock.timers.tick(15 * 60_000);
     await settleBackgroundDrain();
     assert.equal(calls, 3, 'exhausted failed receipts are not re-attempted');
@@ -953,6 +959,52 @@ test('a 409 during recovery marks the receipt server-owned without operator atte
     t.mock.timers.tick(15 * 60_000);
     await settleBackgroundDrain();
     assert.equal(calls, 1, 'server-owned evidence is never replayed');
+  } finally {
+    if (runtime) runtime.restore();
+    t.mock.timers.reset();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a legacy 409 corpse is marked server-owned without redelivery and stays stable', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-legacy-owned-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [
+    { event_id: 'legacy-409-corpse', patch: failedSeed(409) },
+    { event_id: 'drain-companion' },
+  ]);
+  const originalFetch = globalThis.fetch;
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-16T00:00:00.000Z') });
+  const calls = [];
+  globalThis.fetch = async (_url, init) => {
+    calls.push(JSON.parse(init.body).event_id);
+    return Response.json({ data: { accepted: true } });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-legacy-owned-key', { eventSpoolPath: spoolPath });
+    const before = marrow.lifecycleBacklog();
+    assert.equal(before.server_owned, 1, 'a legacy 409 corpse already classifies as server-owned');
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.deepEqual(calls, ['drain-companion'], 'the legacy corpse is marked without redelivery');
+    const marked = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(marked.length, 1);
+    assert.equal(marked[0].event_id, 'legacy-409-corpse');
+    assert.equal(marked[0].delivery_state, 'failed');
+    assert.equal(marked[0].server_owned, true, 'the interval drain durably marks the legacy corpse');
+    assert.equal(marked[0].recovery_attempts, undefined);
+    t.mock.timers.tick(15 * 60_000);
+    await settleBackgroundDrain();
+    assert.deepEqual(calls, ['drain-companion'], 'marked server-owned evidence is never replayed');
+    const stable = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.deepEqual(stable, marked, 'server-owned classification is stable across drains');
+    const backlog = marrow.lifecycleBacklog();
+    assert.equal(backlog.server_owned, 1);
+    assert.equal(backlog.failed, 0);
+    assert.equal(backlog.state, 'clear');
   } finally {
     if (runtime) runtime.restore();
     t.mock.timers.reset();

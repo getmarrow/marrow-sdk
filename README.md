@@ -282,6 +282,8 @@ Failed receipts are classified so ordinary failures heal themselves and only rea
 
 After restoring a credential, call `recoverLifecycleEvents()` to requeue auth-class and recoverable failed receipts with a fresh recovery budget, or pass exact event IDs for a bounded retry; server-owned receipts are always skipped. Recovery bookkeeping is local-only metadata and is never included in the delivery request body. Every state change — failure, automatic recovery, server-owned marking, exhaustion, and manual recovery — is a durable spool write, so recovery never happens silently.
 
+Spool files written by this version carry recovery metadata that older SDK binaries (3.7.62 or earlier) reject under their closed record allowlist: on downgrade, the older binary quarantines the new-format spool file as corrupt — the bytes are preserved, so no data is lost. Downgrades are not supported; stay on the current version or upgrade.
+
 Marrow reports passive activity from authenticated client-self-reported receipts. Those receipts can show delivered telemetry but cannot certify interception, activation, drift-free hooks, or permit closure. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect connection and configured scope; use the governed wrapper for consequential execution.
 
 Client deadlines are configurable when constructing `MarrowClient` through `requestTimeoutMs`, `readTimeoutMs`, `runtimeTimeoutMs`, `highRiskRuntimeTimeoutMs`, and `lifecycleTimeoutMs`. Values are bounded to 1–30 seconds, and high-risk runtime never receives less time than ordinary runtime. Keep host/tool-call ceilings separate from these SDK deadlines.

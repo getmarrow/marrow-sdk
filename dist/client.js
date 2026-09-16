@@ -3609,6 +3609,9 @@ class MarrowClient {
                 state: 'disabled',
                 pending: 0,
                 failed: 0,
+                recoverable: 0,
+                server_owned: 0,
+                recovery_exhausted: 0,
                 oldest_pending_at: null,
                 oldest_failed_at: null,
                 capacity: null,
@@ -3629,6 +3632,9 @@ class MarrowClient {
                 state: 'attention_required',
                 pending: 0,
                 failed: 0,
+                recoverable: 0,
+                server_owned: 0,
+                recovery_exhausted: 0,
                 oldest_pending_at: null,
                 oldest_failed_at: null,
                 capacity: null,
@@ -3653,9 +3659,12 @@ class MarrowClient {
         }
         return {
             enabled: true,
-            state: status.failed > 0 ? 'attention_required' : status.pending > 0 ? 'pending' : 'clear',
+            state: status.auth_failed > 0 ? 'attention_required' : status.pending > 0 ? 'pending' : 'clear',
             pending: status.pending,
-            failed: status.failed,
+            failed: status.auth_failed,
+            recoverable: status.recoverable,
+            server_owned: status.server_owned,
+            recovery_exhausted: status.recovery_exhausted,
             oldest_pending_at: status.oldest_pending_at,
             oldest_failed_at: status.oldest_failed_at,
             capacity: null,
@@ -3667,11 +3676,13 @@ class MarrowClient {
             bytes_available: status.bytes_available,
             measurement_available: true,
             exact: true,
-            exact_fix: status.failed > 0
-                ? 'Inspect the failed lifecycle receipts and restore authentication or endpoint compatibility before retrying them.'
-                : status.pending > 0
-                    ? 'Keep the passive runtime active so its background drain can deliver the durable receipts.'
-                    : null,
+            exact_fix: status.auth_failed > 0
+                ? 'The server rejected delivery authentication or authorization. Restore the credential and agent binding, then call recoverLifecycleEvents() to requeue the failed receipts.'
+                : status.failed > 0
+                    ? 'Automatic recovery of these failed lifecycle receipts is scheduled during background drains with bounded attempts and cooldown; the server holds durable evidence for conflicted receipts. No action is required.'
+                    : status.pending > 0
+                        ? 'Keep the passive runtime active so its background drain can deliver the durable receipts.'
+                        : null,
         };
     }
     /** Drain durable lifecycle receipts and return aggregate backlog health. */
@@ -3696,7 +3707,7 @@ class MarrowClient {
     }
     async flushLifecycleEventsInBackground() {
         try {
-            await this.drainEventSpool(true);
+            await this.drainEventSpool(true, true);
             this.eventSpoolHealthError = null;
         }
         catch (error) {
@@ -4107,15 +4118,36 @@ class MarrowClient {
         });
         return bounded;
     }
-    async drainEventSpool(unrefTimeout = false) {
-        if (!this.eventSpool || this.eventSpool.pendingSize() === 0)
+    async drainEventSpool(unrefTimeout = false, recoverFailed = false) {
+        if (!this.eventSpool)
+            return;
+        const gate = this.eventSpool.status();
+        // The pending-only early return must not skip automatic recovery: the
+        // background drain also runs when only recoverable failed receipts exist.
+        if (gate.pending === 0 && (!recoverFailed || gate.recoverable === 0))
             return;
         if (this.eventSpoolDrainPromise)
             return this.eventSpoolDrainPromise;
         const spool = this.eventSpool;
         this.eventSpoolDrainPromise = (async () => {
             let batches = 0;
-            while (spool.pendingSize() > 0 && batches < 10) {
+            let recoverySelected = false;
+            while (batches < 10) {
+                if (spool.pendingSize() === 0) {
+                    // Automatic recovery runs only in the passive-runtime interval drain;
+                    // the per-event and explicit drains keep their pending-only contract
+                    // and recoverLifecycleEvents() keeps manual authority.
+                    if (!recoverFailed || recoverySelected)
+                        break;
+                    recoverySelected = true;
+                    // One bounded selection requeues up to five recoverable failed
+                    // receipts so they deliver within this same drain pass under the
+                    // existing batch bounds.
+                    spool.requeueRecoverable();
+                    if (spool.pendingSize() === 0)
+                        break;
+                    continue;
+                }
                 batches += 1;
                 let retryLater = false;
                 const records = spool.peek(10);
@@ -4123,7 +4155,7 @@ class MarrowClient {
                     break;
                 for (const record of records) {
                     try {
-                        const response = await this.requestOnce('POST', '/v1/agent/integrations/events', record, this.requestDeadlines.lifecycle, unrefTimeout);
+                        const response = await this.requestOnce('POST', '/v1/agent/integrations/events', (0, event_spool_1.lifecycleWireRecord)(record), this.requestDeadlines.lifecycle, unrefTimeout);
                         const data = (response.data || response);
                         if (data.accepted !== true) {
                             throw new Error('Marrow lifecycle endpoint did not accept the receipt');
@@ -4137,16 +4169,22 @@ class MarrowClient {
                         spool.acknowledge([record.event_id]);
                     }
                     catch (error) {
-                        const transient = this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error);
+                        const status = error instanceof MarrowHttpError ? error.status : 0;
+                        // A 409 conflict is never transient: the server holds durable evidence.
+                        const transient = status === 409
+                            ? false
+                            : this.shouldQueueRequest('POST', '/v1/agent/integrations/events', error);
                         if (transient && record.attempts + 1 < 3) {
-                            spool.retry(record.event_id);
+                            spool.retry(record.event_id, status);
                             retryLater = true;
                             break;
                         }
-                        spool.fail(record.event_id, transient ? 'retry_exhausted' : 'terminal_rejection');
+                        spool.fail(record.event_id, transient ? 'retry_exhausted' : 'terminal_rejection', status);
                         process.stderr.write(`[marrow] Warning: lifecycle receipt moved to durable failed state: ${safePublicErrorMessage(error)}\n`);
                     }
                 }
+                // A transient retry defers the whole drain, including recovery, to the
+                // next scheduled pass; attempts/backoff semantics are unchanged.
                 if (retryLater)
                     break;
             }

@@ -51,12 +51,21 @@ export type SpoolRecord = {
   delivery_state: SpoolDeliveryState;
   failure_code?: SpoolFailureCode;
   failed_at?: string;
+  last_status?: number;
+  recovery_attempts?: number;
+  last_recovery_at?: string;
+  recovery_exhausted?: true;
+  server_owned?: true;
 };
 
 export type SpoolEventStatus = {
   record?: SpoolRecord;
   pending: number;
   failed: number;
+  auth_failed: number;
+  recoverable: number;
+  server_owned: number;
+  recovery_exhausted: number;
   oldest_pending_at: string | null;
   oldest_failed_at: string | null;
   record_capacity: number;
@@ -93,6 +102,8 @@ const CAPABILITY_LEVELS = new Set<MarrowIntegrationCapabilityLevel>(['native_hoo
 const INTERVENTION_DISPOSITIONS = new Set<MarrowInterventionDisposition>(['followed', 'ignored', 'overridden']);
 const DELIVERY_STATES = new Set<SpoolDeliveryState>(['pending', 'failed']);
 const FAILURE_CODES = new Set<SpoolFailureCode>(['terminal_rejection', 'retry_exhausted']);
+// Closed allowlist: older SDK binaries quarantine spool files carrying these
+// newer recovery keys. Downgrade is owner-forbidden; quarantine preserves bytes.
 const RECORD_KEYS = new Set([
   'event_id',
   'event_type',
@@ -118,11 +129,20 @@ const RECORD_KEYS = new Set([
   'delivery_state',
   'failure_code',
   'failed_at',
+  'last_status',
+  'recovery_attempts',
+  'last_recovery_at',
+  'recovery_exhausted',
+  'server_owned',
 ]);
 const MAX_RECORDS = 100;
 const MAX_RECORD_BYTES = 4 * 1024;
 const MAX_SPOOL_BYTES = 64 * 1024;
 const MAX_DELIVERY_ATTEMPTS = 3;
+export const RECOVERY_MAX_ATTEMPTS = 3;
+export const RECOVERY_COOLDOWN_MS = 15 * 60_000;
+export const RECOVERY_MAX_EVENTS_PER_DRAIN = 5;
+const MAX_STORED_COUNTER = 1_000_000;
 const LOCK_WAIT_MS = 2_000;
 const LOCK_STALE_MS = 30_000;
 const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
@@ -320,6 +340,22 @@ function validateStoredRecord(value: unknown): SpoolRecord {
   if (deliveryState === 'failed' ? (!failureCode || !failedAt) : (failureCode != null || failedAt != null)) {
     throw new TypeError('Invalid lifecycle failure state');
   }
+  if (raw.last_status !== undefined
+    && (!Number.isInteger(raw.last_status) || Number(raw.last_status) < 0 || Number(raw.last_status) > 599)) {
+    throw new TypeError('Invalid lifecycle last_status');
+  }
+  if (raw.recovery_attempts !== undefined
+    && (!Number.isInteger(raw.recovery_attempts) || Number(raw.recovery_attempts) < 0 || Number(raw.recovery_attempts) > MAX_STORED_COUNTER)) {
+    throw new TypeError('Invalid lifecycle recovery_attempts');
+  }
+  const lastRecoveryAt = timestamp(raw.last_recovery_at, 'last_recovery_at', true);
+  if (lastRecoveryAt !== raw.last_recovery_at && raw.last_recovery_at != null) throw new TypeError('Invalid lifecycle last_recovery_at');
+  if (raw.recovery_exhausted !== undefined && raw.recovery_exhausted !== true) {
+    throw new TypeError('Invalid lifecycle recovery_exhausted');
+  }
+  if (raw.server_owned !== undefined && raw.server_owned !== true) {
+    throw new TypeError('Invalid lifecycle server_owned');
+  }
   const record: SpoolRecord = {
     event_id: requiredId('event_id'),
     event_type: eventType,
@@ -345,9 +381,38 @@ function validateStoredRecord(value: unknown): SpoolRecord {
     delivery_state: deliveryState,
     ...(failureCode ? { failure_code: failureCode } : {}),
     ...(failedAt ? { failed_at: failedAt } : {}),
+    ...(raw.last_status !== undefined ? { last_status: Number(raw.last_status) } : {}),
+    ...(raw.recovery_attempts !== undefined ? { recovery_attempts: Number(raw.recovery_attempts) } : {}),
+    ...(lastRecoveryAt ? { last_recovery_at: lastRecoveryAt } : {}),
+    ...(raw.recovery_exhausted === true ? { recovery_exhausted: true as const } : {}),
+    ...(raw.server_owned === true ? { server_owned: true as const } : {}),
   };
   assertRecordBytes(record);
   return record;
+}
+
+export type SpoolFailureClass = 'auth' | 'server_owned' | 'recoverable';
+
+export function classifyFailedRecord(record: SpoolRecord): SpoolFailureClass {
+  // A 409 from the lifecycle route means the server already holds durable
+  // evidence for this event id; legacy corpses carry only last_status.
+  // Authentication failures always require the owner to restore the credential.
+  if (record.server_owned === true || record.last_status === 409) return 'server_owned';
+  if (record.last_status === 401 || record.last_status === 403) return 'auth';
+  return 'recoverable';
+}
+
+// Recovery bookkeeping is local-only and must never reach the request body.
+export function lifecycleWireRecord(record: SpoolRecord): SpoolRecord {
+  const {
+    last_status: _lastStatus,
+    recovery_attempts: _recoveryAttempts,
+    last_recovery_at: _lastRecoveryAt,
+    recovery_exhausted: _recoveryExhausted,
+    server_owned: _serverOwned,
+    ...wire
+  } = record;
+  return wire;
 }
 
 export class DurableEventSpool {
@@ -396,20 +461,7 @@ export class DurableEventSpool {
     });
   }
 
-  retry(eventId: string): void {
-    this.withLock(() => {
-      const records = this.readLocked();
-      let changed = false;
-      const updated = records.map((record) => {
-        if (record.event_id !== eventId || record.delivery_state !== 'pending') return record;
-        changed = true;
-        return { ...record, attempts: Math.min(MAX_DELIVERY_ATTEMPTS, record.attempts + 1) };
-      });
-      if (changed) this.writeLocked(updated);
-    });
-  }
-
-  fail(eventId: string, failureCode: SpoolFailureCode): void {
+  retry(eventId: string, status?: number): void {
     this.withLock(() => {
       const records = this.readLocked();
       let changed = false;
@@ -419,10 +471,33 @@ export class DurableEventSpool {
         return {
           ...record,
           attempts: Math.min(MAX_DELIVERY_ATTEMPTS, record.attempts + 1),
+          ...(typeof status === 'number' ? { last_status: status } : {}),
+        };
+      });
+      if (changed) this.writeLocked(updated);
+    });
+  }
+
+  fail(eventId: string, failureCode: SpoolFailureCode, status?: number): void {
+    this.withLock(() => {
+      const records = this.readLocked();
+      let changed = false;
+      const updated = records.map((record) => {
+        if (record.event_id !== eventId || record.delivery_state !== 'pending') return record;
+        changed = true;
+        const failed: SpoolRecord = {
+          ...record,
+          attempts: Math.min(MAX_DELIVERY_ATTEMPTS, record.attempts + 1),
           delivery_state: 'failed' as const,
           failure_code: failureCode,
           failed_at: new Date().toISOString(),
+          ...(typeof status === 'number' ? { last_status: status } : {}),
         };
+        // A 409 from this route means the server holds durable evidence for
+        // this event id, on a first attempt or during recovery.
+        if (status === 409) failed.server_owned = true;
+        if ((failed.recovery_attempts ?? 0) >= RECOVERY_MAX_ATTEMPTS) failed.recovery_exhausted = true;
+        return failed;
       });
       if (changed) this.writeLocked(updated);
     });
@@ -438,12 +513,72 @@ export class DurableEventSpool {
       let changed = 0;
       const updated = records.map((record) => {
         if (record.delivery_state !== 'failed' || (ids && !ids.has(record.event_id))) return record;
+        // Server-owned conflicts already have durable server evidence and are
+        // never replayed, even by an explicit manual recovery.
+        if (classifyFailedRecord(record) === 'server_owned') return record;
         changed += 1;
-        const { failure_code: _failureCode, failed_at: _failedAt, ...rest } = record;
+        const {
+          failure_code: _failureCode,
+          failed_at: _failedAt,
+          last_status: _lastStatus,
+          recovery_attempts: _recoveryAttempts,
+          last_recovery_at: _lastRecoveryAt,
+          recovery_exhausted: _recoveryExhausted,
+          ...rest
+        } = record;
+        // A manual requeue after a credential repair earns a fresh recovery budget.
         return { ...rest, attempts: 0, delivery_state: 'pending' as const };
       });
       if (changed > 0) this.writeLocked(updated);
       return changed;
+    });
+  }
+
+  requeueRecoverable(now = Date.now()): SpoolRecord[] {
+    return this.withLock(() => {
+      const records = this.readLocked();
+      let changed = false;
+      const requeued: SpoolRecord[] = [];
+      const updated = records.map((record) => {
+        if (record.delivery_state !== 'failed') return record;
+        const classification = classifyFailedRecord(record);
+        if (classification === 'server_owned') {
+          // Legacy 409 corpses carry only last_status; the server already
+          // answered definitively, so mark them without redelivery.
+          if (record.server_owned !== true) {
+            changed = true;
+            return { ...record, server_owned: true as const };
+          }
+          return record;
+        }
+        if (classification === 'auth') return record;
+        if (record.recovery_exhausted === true) return record;
+        const recoveryAttempts = record.recovery_attempts ?? 0;
+        if (recoveryAttempts >= RECOVERY_MAX_ATTEMPTS) {
+          changed = true;
+          return { ...record, recovery_exhausted: true as const };
+        }
+        if (record.last_recovery_at && now - Date.parse(record.last_recovery_at) < RECOVERY_COOLDOWN_MS) return record;
+        if (requeued.length >= RECOVERY_MAX_EVENTS_PER_DRAIN) return record;
+        changed = true;
+        const {
+          failure_code: _failureCode,
+          failed_at: _failedAt,
+          last_status: _lastStatus,
+          ...rest
+        } = record;
+        const pending: SpoolRecord = {
+          ...rest,
+          attempts: 0,
+          delivery_state: 'pending' as const,
+          recovery_attempts: recoveryAttempts + 1,
+          last_recovery_at: new Date(now).toISOString(),
+        };
+        requeued.push({ ...pending });
+        return pending;
+      });
+      if (changed) this.writeLocked(updated);
+      return requeued;
     });
   }
 
@@ -452,11 +587,22 @@ export class DurableEventSpool {
       const records = this.readLocked();
       const pending = records.filter((record) => record.delivery_state === 'pending');
       const failed = records.filter((record) => record.delivery_state === 'failed');
+      // Only auth-class failures genuinely need the operator. Server-owned
+      // conflicts hold durable server evidence, and recoverable failures
+      // self-heal through the bounded automatic recovery pass.
+      const authFailed = failed.filter((record) => classifyFailedRecord(record) === 'auth').length;
+      const serverOwned = failed.filter((record) => classifyFailedRecord(record) === 'server_owned').length;
+      const recoveryExhausted = failed.filter((record) => classifyFailedRecord(record) === 'recoverable'
+        && record.recovery_exhausted === true).length;
       const bytesUsed = Buffer.byteLength(JSON.stringify(records), 'utf8');
       return {
         ...(eventId ? { record: records.find((record) => record.event_id === eventId) } : {}),
         pending: pending.length,
         failed: failed.length,
+        auth_failed: authFailed,
+        recoverable: failed.length - authFailed - serverOwned - recoveryExhausted,
+        server_owned: serverOwned,
+        recovery_exhausted: recoveryExhausted,
         oldest_pending_at: pending.map((record) => record.occurred_at).sort()[0] || null,
         oldest_failed_at: failed.map((record) => record.failed_at || record.occurred_at).sort()[0] || null,
         record_capacity: MAX_RECORDS,

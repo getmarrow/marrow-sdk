@@ -924,7 +924,14 @@ export interface MarrowLifecycleBacklog {
     enabled: boolean;
     state: 'disabled' | 'clear' | 'pending' | 'attention_required';
     pending: number;
+    /** Failed receipts in the auth class only: the ones that genuinely need operator action. */
     failed: number;
+    /** Failed receipts the automatic recovery pass will retry with bounded attempts and cooldown. */
+    recoverable: number;
+    /** Failed receipts the server already holds durable evidence for (HTTP 409); never replayed. */
+    server_owned: number;
+    /** Recoverable receipts whose bounded automatic recovery budget is exhausted. */
+    recovery_exhausted: number;
     oldest_pending_at: string | null;
     oldest_failed_at: string | null;
     capacity: number | null;

@@ -26,11 +26,20 @@ export type SpoolRecord = {
     delivery_state: SpoolDeliveryState;
     failure_code?: SpoolFailureCode;
     failed_at?: string;
+    last_status?: number;
+    recovery_attempts?: number;
+    last_recovery_at?: string;
+    recovery_exhausted?: true;
+    server_owned?: true;
 };
 export type SpoolEventStatus = {
     record?: SpoolRecord;
     pending: number;
     failed: number;
+    auth_failed: number;
+    recoverable: number;
+    server_owned: number;
+    recovery_exhausted: number;
     oldest_pending_at: string | null;
     oldest_failed_at: string | null;
     record_capacity: number;
@@ -39,11 +48,17 @@ export type SpoolEventStatus = {
     bytes_used: number;
     bytes_available: number;
 };
+export declare const RECOVERY_MAX_ATTEMPTS = 3;
+export declare const RECOVERY_COOLDOWN_MS: number;
+export declare const RECOVERY_MAX_EVENTS_PER_DRAIN = 5;
 export declare class SpoolCorruptionError extends Error {
     constructor();
 }
 export declare function isSafeLifecycleIdentifier(value: unknown): boolean;
 export declare function sanitizeLifecycleEvent(input: MarrowLifecycleEventInput): SpoolRecord;
+export type SpoolFailureClass = 'auth' | 'server_owned' | 'recoverable';
+export declare function classifyFailedRecord(record: SpoolRecord): SpoolFailureClass;
+export declare function lifecycleWireRecord(record: SpoolRecord): SpoolRecord;
 export declare class DurableEventSpool {
     readonly path: string;
     private readonly lockPath;
@@ -56,9 +71,10 @@ export declare class DurableEventSpool {
     enqueue(input: MarrowLifecycleEventInput): SpoolRecord;
     peek(limit?: number): SpoolRecord[];
     acknowledge(eventIds: string[]): void;
-    retry(eventId: string): void;
-    fail(eventId: string, failureCode: SpoolFailureCode): void;
+    retry(eventId: string, status?: number): void;
+    fail(eventId: string, failureCode: SpoolFailureCode, status?: number): void;
     requeueFailed(eventIds?: string[]): number;
+    requeueRecoverable(now?: number): SpoolRecord[];
     status(eventId?: string): SpoolEventStatus;
     pendingSize(): number;
     failedSize(): number;

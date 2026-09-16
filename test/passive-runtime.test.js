@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const test = require('node:test');
 
 const { MarrowClient } = require('../dist/index.js');
+const { DurableEventSpool } = require('../dist/event-spool.js');
 const { version: sdkVersion } = require('../package.json');
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -2378,4 +2379,61 @@ test('think redacts direct action context provenance and previous outcome', asyn
   assert.doesNotMatch(text, new RegExp(leaked));
   assert.doesNotMatch(text, /tokensecret123|clientsecret123|signedsecret123|oauthsecret123/);
   assert.match(text, /\[REDACTED_TOKEN\]|\[redacted\]/);
+});
+
+test('interval drain auto-recovers a recoverable-only spool and keeps recovery metadata off the wire', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-auto-recovery-'));
+  const spoolPath = join(directory, 'events.json');
+  const seed = new DurableEventSpool({ apiKey: 'test-auto-recovery-seed', path: spoolPath });
+  seed.enqueue({
+    event_id: 'auto-recover-transport',
+    event_type: 'workflow_completed',
+    action: 'recovered lifecycle receipt',
+    occurred_at: '2026-09-15T00:00:00.000Z',
+  });
+  const [base] = JSON.parse(readFileSync(spoolPath, 'utf8'));
+  writeFileSync(spoolPath, JSON.stringify([{
+    ...base,
+    delivery_state: 'failed',
+    failure_code: 'retry_exhausted',
+    failed_at: '2026-09-15T00:05:00.000Z',
+    last_status: 503,
+  }]), { mode: 0o600 });
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-16T00:00:00.000Z') });
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return Response.json({ data: { accepted: true } });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-auto-recovery-key', { agentId: 'agent-one', eventSpoolPath: spoolPath });
+    const before = marrow.lifecycleBacklog();
+    assert.equal(before.pending, 0);
+    assert.equal(before.failed, 0);
+    assert.equal(before.recoverable, 1);
+    assert.equal(before.state, 'clear');
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    for (let index = 0; index < 300 && bodies.length === 0; index += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(bodies.length, 1, 'the drain gate fires on a recoverable-only spool');
+    for (let index = 0; index < 300; index += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const wire = bodies[0];
+    assert.equal(wire.event_id, 'auto-recover-transport');
+    for (const key of ['last_status', 'recovery_attempts', 'last_recovery_at', 'recovery_exhausted', 'server_owned']) {
+      assert.equal(key in wire, false, `local recovery metadata never reaches the wire: ${key}`);
+    }
+    assert.deepEqual(JSON.parse(readFileSync(spoolPath, 'utf8')), [], 'recovered receipt is removed after delivery');
+    assert.equal(runtime.lifecycleBacklog().state, 'clear');
+  } finally {
+    if (runtime) runtime.restore();
+    t.mock.timers.reset();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -149,7 +149,8 @@ It preserves the resilient passive capture introduced in v3.7.52.
 v3.7.52 makes low-risk passive capture resilient without placing network delivery on the agent's critical path:
 
 - owned Node runtimes drain the bounded, owner-only lifecycle spool on a short background interval;
-- backlog health reports exact pending, failed, record-slot, byte-usage, and oldest-receipt evidence;
+- ordinary failed receipts self-heal through that drain with bounded recovery attempts, cooldown, and per-drain caps;
+- backlog health reports exact pending, failed, recoverable, server-owned, recovery-exhausted, record-slot, byte-usage, and oldest-receipt evidence;
 - operators can request an explicit bounded drain without creating a synthetic event;
 - stable event IDs preserve idempotency across retries and process restarts;
 - policy, authentication, proof, and validation failures remain visible instead of being mislabeled as transient delivery failures.
@@ -193,11 +194,11 @@ It preserves typed agent-disagreement arbitration from v3.7.48 and the durable o
 - bounded positive and negative recommendation criteria stop agents from forcing Marrow into irrelevant workflows;
 - current evidence, integration paths, and published references are linked from one review-dated contract;
 - compact lifecycle receipts for prompts, goals, pre-action checks, tool/command results, evidence, workflows, handoffs, proof packs, and outcomes;
-- an owner-only local event spool with stable event IDs for transient delivery failures;
+- an owner-only local event spool with stable event IDs for transient delivery failures and bounded automatic recovery of ordinary failures;
 - decision traces that connect an action to its prior failure, lesson, gate, proof, workflow, and outcome;
 - `runGuarded()` lifecycle capture before execution and after success or failure.
 
-The spool never needs raw prompts, completions, command output, tool output, or credentials. Authentication, policy, proof, and validation failures are not retried as transient delivery errors.
+The spool never needs raw prompts, completions, command output, tool output, or credentials. Authentication, policy, proof, and validation failures are not retried as transient delivery errors: authentication and permission failures stay manual-only, and conflict (HTTP 409) receipts are treated as server-owned evidence that is never replayed.
 
 ## Quick Start
 
@@ -276,7 +277,10 @@ await runtime.recoverLifecycleEvents(['failed-event-id']);
 ```
 
 `state` is `clear`, `pending`, `attention_required`, or `disabled`, with exact pending/failed counts, oldest receipt timestamps, separate record and byte limits, and an exact fix. The legacy ambiguous `capacity` and `available` fields remain `null`; use `record_slots_available` and `bytes_available`. Authentication, policy, proof, and validation failures become explicit durable failures instead of infinite retries.
-After correcting authentication or endpoint compatibility, call `recoverLifecycleEvents()` to requeue all failed receipts, or pass exact event IDs for a bounded retry. Recovery never happens silently.
+
+Failed receipts are classified so ordinary failures heal themselves and only real operator problems ask for attention. The background drain automatically recovers recoverable-class failures — including older failed receipts written before this classification existed — with at most three recovery attempts, a fifteen-minute cooldown between attempts, and at most five recoveries per drain. A conflict (HTTP 409) means the server already holds durable evidence for that event ID; those receipts are marked server-owned and never replayed. Authentication and permission failures (HTTP 401/403) are never retried automatically: `failed` counts only this auth class, and only it raises `attention_required`. `recoverable`, `server_owned`, and `recovery_exhausted` counts keep the other classes visible without demanding action.
+
+After restoring a credential, call `recoverLifecycleEvents()` to requeue auth-class and recoverable failed receipts with a fresh recovery budget, or pass exact event IDs for a bounded retry; server-owned receipts are always skipped. Recovery bookkeeping is local-only metadata and is never included in the delivery request body. Every state change — failure, automatic recovery, server-owned marking, exhaustion, and manual recovery — is a durable spool write, so recovery never happens silently.
 
 Marrow reports passive activity from authenticated client-self-reported receipts. Those receipts can show delivered telemetry but cannot certify interception, activation, drift-free hooks, or permit closure. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect connection and configured scope; use the governed wrapper for consequential execution.
 
@@ -305,9 +309,9 @@ Client deadlines are configurable when constructing `MarrowClient` through `requ
 | `enforcementHeartbeat(input)` | Submit client-self-reported expected/observed hook and configuration telemetry; not certification |
 | `enforcementCoverage()` | Inspect permit closure, bypass, sidecar, and hook coverage |
 | `integrationEvent(input)` | Record client-self-reported lifecycle telemetry and expose backend authority/closeout truth |
-| `lifecycleBacklog()` | Read aggregate local backlog health without event payloads |
+| `lifecycleBacklog()` | Read aggregate local backlog health with failed-class partition and without event payloads |
 | `flushLifecycleEvents()` | Retry queued lifecycle receipts and return aggregate health |
-| `recoverLifecycleEvents(eventIds?)` | Explicitly requeue durable failed receipts and retry delivery |
+| `recoverLifecycleEvents(eventIds?)` | Explicitly requeue durable failed receipts with a fresh recovery budget, skipping server-owned receipts, and retry delivery |
 | `decisionTrace(decisionId)` | Inspect the tenant-scoped causal path behind a governed decision |
 | `workflowGate(input)` | Evaluate a workflow action against policy |
 | `completionContracts()` | List built-in completion/proof contracts |

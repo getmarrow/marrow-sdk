@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
-const { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } = require('node:fs');
+const { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const test = require('node:test');
@@ -657,6 +657,475 @@ test('default spool rejects an unsafe final directory without changing its mode'
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(statSync(spoolDirectory).mode & 0o7777, 0o1777);
     assert.deepEqual(readdirSync(spoolDirectory), []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+const settleBackgroundDrain = async () => {
+  for (let index = 0; index < 300; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+};
+
+const seedLifecycleSpool = (spoolPath, entries) => {
+  const spool = new DurableEventSpool({ apiKey: 'test-seed-key', path: spoolPath });
+  for (const entry of entries) {
+    spool.enqueue({
+      event_id: entry.event_id,
+      event_type: 'workflow_completed',
+      action: `seeded lifecycle receipt ${entry.event_id}`,
+      occurred_at: '2026-09-15T00:00:00.000Z',
+    });
+  }
+  const rows = JSON.parse(readFileSync(spoolPath, 'utf8'));
+  writeFileSync(spoolPath, JSON.stringify(rows.map((row) => {
+    const entry = entries.find((candidate) => candidate.event_id === row.event_id);
+    return entry.patch ? { ...row, ...entry.patch } : row;
+  })), { mode: 0o600 });
+};
+
+const failedSeed = (status, extra = {}) => ({
+  delivery_state: 'failed',
+  failure_code: 'terminal_rejection',
+  failed_at: '2026-09-15T00:05:00.000Z',
+  ...(status === undefined ? {} : { last_status: status }),
+  ...extra,
+});
+
+test('a 409 conflict marks the receipt server-owned at failure time and is never replayed', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-conflict-owned-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: 'conflict' }), {
+      status: 409,
+      statusText: 'Conflict',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-conflict-key', { eventSpoolPath: spoolPath });
+    const result = await marrow.integrationEvent({
+      event_id: 'conflict-event',
+      event_type: 'workflow_completed',
+      action: 'deliver conflicting receipt',
+    });
+    assert.equal(result.failed, true);
+    assert.equal(result.failure_code, 'terminal_rejection');
+    const [row] = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(row.delivery_state, 'failed');
+    assert.equal(row.last_status, 409);
+    assert.equal(row.server_owned, true);
+    const backlog = marrow.lifecycleBacklog();
+    assert.equal(backlog.failed, 0);
+    assert.equal(backlog.server_owned, 1);
+    assert.equal(backlog.state, 'clear');
+
+    globalThis.fetch = async () => {
+      calls += 1;
+      return Response.json({ data: { accepted: true } });
+    };
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 1, 'server-owned evidence is never replayed by the interval drain');
+    const manual = await marrow.recoverLifecycleEvents();
+    assert.equal(calls, 1, 'manual recovery skips server-owned receipts');
+    assert.equal(manual.server_owned, 1);
+    const [untouched] = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(untouched.delivery_state, 'failed');
+    assert.equal(untouched.server_owned, true);
+    assert.equal(untouched.recovery_attempts, undefined);
+  } finally {
+    if (runtime) runtime.restore();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('authentication failures are never auto-retried and keep attention with credential guidance', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-auth-manual-'));
+  const spoolPath = join(directory, 'events.json');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  let status = 401;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: 'rejected' }), {
+      status,
+      statusText: 'Rejected',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-auth-manual-key', { eventSpoolPath: spoolPath });
+    const first = await marrow.integrationEvent({
+      event_id: 'auth-401',
+      event_type: 'workflow_completed',
+      action: 'deliver unauthorized receipt',
+    });
+    status = 403;
+    const second = await marrow.integrationEvent({
+      event_id: 'auth-403',
+      event_type: 'workflow_completed',
+      action: 'deliver forbidden receipt',
+    });
+    assert.equal(first.failed, true);
+    assert.equal(second.failed, true);
+    assert.equal(calls, 2);
+    const rows = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.deepEqual(rows.map((row) => row.last_status), [401, 403]);
+    const attention = marrow.lifecycleBacklog();
+    assert.equal(attention.failed, 2);
+    assert.equal(attention.recoverable, 0);
+    assert.equal(attention.state, 'attention_required');
+    assert.match(attention.exact_fix, /credential/);
+    assert.match(attention.exact_fix, /recoverLifecycleEvents\(\)/);
+
+    globalThis.fetch = async () => {
+      calls += 1;
+      return Response.json({ data: { accepted: true } });
+    };
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 2, 'the auth class is manual-only and never auto-retried');
+    const untouched = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.ok(untouched.every((row) => row.delivery_state === 'failed'
+      && row.recovery_attempts === undefined && row.last_recovery_at === undefined));
+  } finally {
+    if (runtime) runtime.restore();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('automatic recovery respects the fifteen-minute cooldown boundary', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-recovery-cooldown-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [{ event_id: 'recovery-cooldown', patch: failedSeed(503) }]);
+  const originalFetch = globalThis.fetch;
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-16T00:00:00.000Z') });
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: 'validation rejected' }), { status: 400 });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-cooldown-key', { eventSpoolPath: spoolPath });
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 1);
+    const cooled = JSON.parse(readFileSync(spoolPath, 'utf8'))[0];
+    assert.equal(cooled.delivery_state, 'failed');
+    assert.equal(cooled.recovery_attempts, 1);
+    assert.equal(cooled.last_recovery_at, '2026-09-16T00:00:00.000Z');
+    assert.equal(cooled.last_status, 400);
+    t.mock.timers.tick(15 * 60_000 - 1);
+    await settleBackgroundDrain();
+    assert.equal(calls, 1, 'one millisecond early is still cooling down');
+    t.mock.timers.tick(1);
+    await settleBackgroundDrain();
+    assert.equal(calls, 2, 'recovery resumes once the cooldown elapses');
+    assert.equal(JSON.parse(readFileSync(spoolPath, 'utf8'))[0].recovery_attempts, 2);
+  } finally {
+    if (runtime) runtime.restore();
+    t.mock.timers.reset();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('automatic recovery exhausts after three attempts and stays quiet', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-recovery-exhausted-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [{ event_id: 'recovery-exhaustion', patch: failedSeed(400) }]);
+  const originalFetch = globalThis.fetch;
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-16T00:00:00.000Z') });
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: 'validation rejected' }), { status: 400 });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-exhaustion-key', { eventSpoolPath: spoolPath });
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 1);
+    t.mock.timers.tick(15 * 60_000);
+    await settleBackgroundDrain();
+    assert.equal(calls, 2);
+    t.mock.timers.tick(15 * 60_000);
+    await settleBackgroundDrain();
+    assert.equal(calls, 3);
+    const [row] = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(row.delivery_state, 'failed');
+    assert.equal(row.recovery_attempts, 3);
+    assert.equal(row.recovery_exhausted, true);
+    const backlog = marrow.lifecycleBacklog();
+    assert.equal(backlog.failed, 0);
+    assert.equal(backlog.recoverable, 0);
+    assert.equal(backlog.recovery_exhausted, 1);
+    assert.equal(backlog.state, 'clear');
+    assert.match(backlog.exact_fix, /No action is required/);
+    t.mock.timers.tick(15 * 60_000);
+    await settleBackgroundDrain();
+    assert.equal(calls, 3, 'exhausted failed receipts are not re-attempted');
+  } finally {
+    if (runtime) runtime.restore();
+    t.mock.timers.reset();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a legacy failed receipt without last_status is recovery-eligible', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-legacy-corpse-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [{ event_id: 'legacy-corpse', patch: failedSeed(undefined) }]);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ data: { accepted: true } });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-legacy-corpse-key', { eventSpoolPath: spoolPath });
+    const before = marrow.lifecycleBacklog();
+    assert.equal(before.failed, 0);
+    assert.equal(before.recoverable, 1);
+    assert.equal(before.state, 'clear');
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 1);
+    assert.deepEqual(JSON.parse(readFileSync(spoolPath, 'utf8')), []);
+    assert.equal(marrow.lifecycleBacklog().state, 'clear');
+  } finally {
+    if (runtime) runtime.restore();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a 409 during recovery marks the receipt server-owned without operator attention', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-recovery-conflict-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [{ event_id: 'recovery-conflict', patch: failedSeed(400) }]);
+  const originalFetch = globalThis.fetch;
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-16T00:00:00.000Z') });
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ error: 'conflict' }), { status: 409 });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-recovery-conflict-key', { eventSpoolPath: spoolPath });
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 1);
+    const [row] = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(row.delivery_state, 'failed');
+    assert.equal(row.server_owned, true);
+    assert.equal(row.recovery_attempts, 1);
+    assert.equal(row.last_status, 409);
+    const backlog = marrow.lifecycleBacklog();
+    assert.equal(backlog.failed, 0);
+    assert.equal(backlog.server_owned, 1);
+    assert.equal(backlog.recoverable, 0);
+    assert.equal(backlog.state, 'clear');
+    globalThis.fetch = async () => {
+      calls += 1;
+      return Response.json({ data: { accepted: true } });
+    };
+    t.mock.timers.tick(15 * 60_000);
+    await settleBackgroundDrain();
+    assert.equal(calls, 1, 'server-owned evidence is never replayed');
+  } finally {
+    if (runtime) runtime.restore();
+    t.mock.timers.reset();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('automatic recovery requeues at most five failed receipts per drain', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-recovery-cap-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, Array.from({ length: 7 }, (_, index) => ({
+    event_id: `recovery-cap-${index + 1}`,
+    patch: failedSeed(500, { failure_code: 'retry_exhausted' }),
+  })));
+  const originalFetch = globalThis.fetch;
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-16T00:00:00.000Z') });
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ data: { accepted: true } });
+  };
+  let runtime;
+  try {
+    const marrow = new MarrowClient('test-recovery-cap-key', { eventSpoolPath: spoolPath });
+    assert.equal(marrow.lifecycleBacklog().recoverable, 7);
+    runtime = marrow.createPassiveRuntime({ patchGlobalFetch: false, lifecycleFlushIntervalMs: 60_000 });
+    runtime.install();
+    await settleBackgroundDrain();
+    assert.equal(calls, 5, 'one drain recovery-delivers at most five failed receipts');
+    const remaining = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(remaining.length, 2);
+    assert.ok(remaining.every((row) => row.delivery_state === 'failed'
+      && row.last_status === 500
+      && row.recovery_attempts === undefined && row.last_recovery_at === undefined),
+    'the two receipts over the per-drain cap stay untouched failed receipts');
+    assert.equal(marrow.lifecycleBacklog().recoverable, 2);
+    t.mock.timers.tick(15 * 60_000);
+    await settleBackgroundDrain();
+    assert.equal(calls, 7, 'the next drain recovers the remainder');
+    assert.deepEqual(JSON.parse(readFileSync(spoolPath, 'utf8')), []);
+    assert.equal(marrow.lifecycleBacklog().state, 'clear');
+  } finally {
+    if (runtime) runtime.restore();
+    t.mock.timers.reset();
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('manual recovery retries auth and exhausted receipts but skips server-owned', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-manual-authority-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [
+    { event_id: 'drain-auth', patch: failedSeed(401) },
+    { event_id: 'drain-owned', patch: failedSeed(409, { server_owned: true }) },
+    { event_id: 'drain-exhausted', patch: failedSeed(400, { recovery_attempts: 3, recovery_exhausted: true }) },
+  ]);
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (_url, init) => {
+    const eventId = JSON.parse(init.body).event_id;
+    calls.push(eventId);
+    return eventId === 'drain-exhausted'
+      ? new Response(JSON.stringify({ error: 'temporarily unavailable' }), { status: 503 })
+      : Response.json({ data: { accepted: true } });
+  };
+  try {
+    const marrow = new MarrowClient('test-manual-authority-key', { eventSpoolPath: spoolPath });
+    const backlog = await marrow.recoverLifecycleEvents();
+    assert.deepEqual([...calls].sort(), ['drain-auth', 'drain-exhausted'],
+      'manual recovery retries auth and exhausted classes only');
+    const remaining = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    assert.equal(remaining.some((row) => row.event_id === 'drain-auth'), false, 'delivered auth receipt is removed');
+    const exhausted = remaining.find((row) => row.event_id === 'drain-exhausted');
+    assert.equal(exhausted.delivery_state, 'pending');
+    assert.equal(exhausted.recovery_exhausted, undefined, 'manual requeue clears exhaustion for a fresh budget');
+    assert.equal(exhausted.recovery_attempts, undefined);
+    assert.equal(exhausted.last_status, 503);
+    const owned = remaining.find((row) => row.event_id === 'drain-owned');
+    assert.equal(owned.delivery_state, 'failed');
+    assert.equal(owned.server_owned, true);
+    assert.equal(owned.recovery_attempts, undefined, 'server-owned rows are never re-attempted');
+    assert.equal(backlog.failed, 0);
+    assert.equal(backlog.server_owned, 1);
+    assert.equal(backlog.pending, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('backlog partitions failed receipts into auth, recoverable, server-owned, and exhausted classes', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-mixed-counts-'));
+  const spoolPath = join(directory, 'events.json');
+  seedLifecycleSpool(spoolPath, [
+    { event_id: 'mix-queued' },
+    { event_id: 'mix-auth', patch: failedSeed(403) },
+    { event_id: 'mix-owned', patch: failedSeed(409) },
+    { event_id: 'mix-recoverable-one', patch: failedSeed(400) },
+    { event_id: 'mix-recoverable-two', patch: failedSeed(503, { failure_code: 'retry_exhausted' }) },
+    { event_id: 'mix-exhausted', patch: failedSeed(400, { recovery_attempts: 3, recovery_exhausted: true }) },
+  ]);
+  try {
+    const marrow = new MarrowClient('test-mixed-counts-key', { eventSpoolPath: spoolPath });
+    const backlog = marrow.lifecycleBacklog();
+    assert.equal(backlog.pending, 1);
+    assert.equal(backlog.failed, 1);
+    assert.equal(backlog.server_owned, 1, 'a legacy 409 corpse counts as server-owned');
+    assert.equal(backlog.recoverable, 2);
+    assert.equal(backlog.recovery_exhausted, 1);
+    assert.equal(backlog.state, 'attention_required');
+    assert.match(backlog.exact_fix, /credential/);
+    assert.equal('records' in backlog, false);
+    assert.equal('events' in backlog, false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('recovery metadata validation preserves the closed allowlist and quarantine invariants', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-recovery-validation-'));
+  const spoolPath = join(directory, 'events.json');
+  const spool = new DurableEventSpool({ apiKey: 'test-validation-key', path: spoolPath });
+  try {
+    spool.enqueue({
+      event_id: 'metadata-base',
+      event_type: 'workflow_completed',
+      action: 'recovery metadata validation base',
+      occurred_at: '2026-09-15T00:00:00.000Z',
+    });
+    const [base] = JSON.parse(readFileSync(spoolPath, 'utf8'));
+    const failedBase = {
+      ...base,
+      delivery_state: 'failed',
+      failure_code: 'terminal_rejection',
+      failed_at: '2026-09-15T00:05:00.000Z',
+    };
+    writeFileSync(spoolPath, JSON.stringify([{
+      ...failedBase,
+      last_status: 503,
+      recovery_attempts: 2,
+      last_recovery_at: '2026-09-15T00:10:00.000Z',
+      recovery_exhausted: true,
+      server_owned: true,
+    }]), { mode: 0o600 });
+    const retained = spool.status();
+    assert.equal(retained.failed, 1);
+    assert.equal(retained.server_owned, 1);
+    assert.equal(existsSync(spoolPath), true, 'valid recovery metadata loads without quarantine');
+
+    const invalidVariants = [
+      { last_status: 600 },
+      { last_status: -1 },
+      { last_status: 1.5 },
+      { recovery_attempts: -1 },
+      { recovery_attempts: 1.5 },
+      { recovery_exhausted: false },
+      { server_owned: false },
+      { last_recovery_at: 'not-a-date' },
+      { last_recovery_at: '2026-09-15T00:10:00' },
+      { bogus_key: 1 },
+    ];
+    for (const variant of invalidVariants) {
+      writeFileSync(spoolPath, JSON.stringify([{ ...failedBase, ...variant }]), { mode: 0o600 });
+      assert.throws(() => spool.status(), /quarantined/, JSON.stringify(variant));
+      const quarantine = readdirSync(directory).filter((name) => name.startsWith('events.json.corrupt-')).sort().pop();
+      assert.ok(quarantine, `quarantine preserves bytes for ${JSON.stringify(variant)}`);
+      assert.match(readFileSync(join(directory, quarantine), 'utf8'), /metadata-base/);
+    }
+    const missingFailureState = { ...base, delivery_state: 'failed' };
+    writeFileSync(spoolPath, JSON.stringify([missingFailureState]), { mode: 0o600 });
+    assert.throws(() => spool.status(), /quarantined/, 'failed receipts still require failure_code and failed_at');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

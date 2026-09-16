@@ -4331,11 +4331,13 @@ export class MarrowClient {
       exact: true,
       exact_fix: status.auth_failed > 0
         ? 'The server rejected delivery authentication or authorization. Restore the credential and agent binding, then call recoverLifecycleEvents() to requeue the failed receipts.'
-        : status.failed > 0
-          ? 'Automatic recovery of these failed lifecycle receipts is scheduled during background drains with bounded attempts and cooldown; the server holds durable evidence for conflicted receipts. No action is required.'
-          : status.pending > 0
-            ? 'Keep the passive runtime active so its background drain can deliver the durable receipts.'
-            : null,
+        : status.pending === 0 && status.recoverable === 0 && status.recovery_exhausted > 0
+          ? 'Automatic recovery is exhausted for these failed lifecycle receipts, and the server holds durable evidence for conflicted receipts. No action is required; recoverLifecycleEvents() remains available to grant a fresh manual recovery budget.'
+          : status.failed > 0
+            ? 'Automatic recovery of these failed lifecycle receipts is scheduled during background drains with bounded attempts and cooldown; the server holds durable evidence for conflicted receipts. No action is required.'
+            : status.pending > 0
+              ? 'Keep the passive runtime active so its background drain can deliver the durable receipts.'
+              : null,
     };
   }
 

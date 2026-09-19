@@ -65,7 +65,16 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.62
+## What's New in v3.7.63
+
+v3.7.63 makes the lifecycle event spool self-healing, so ordinary delivery failures recover without operator action:
+
+- failed receipts are classified: authentication rejections (401/403) stay operator-actionable with credential-restore guidance and are never auto-retried; conflicts (409) are marked `server_owned` because the server already holds durable evidence for that event ID and are never replayed; every other failed receipt is `recoverable` and retried automatically by the passive runtime's background drain — at most 5 receipts per drain, 3 recovery attempts each, with a 15-minute cooldown between attempts;
+- `lifecycleBacklog()` gains `recoverable`, `server_owned`, and `recovery_exhausted` counts, and its `failed` count now covers only auth-class failures that genuinely need the operator;
+- `recoverLifecycleEvents()` keeps full manual authority: it retries operator-fixable failures including the auth class after credential repair, clears recovery exhaustion for a fresh budget, and skips server-owned receipts;
+- recovery bookkeeping stays local and never changes the server request; every state change is a durable spool write, so recovery never happens silently. Spool files written by 3.7.63 carry recovery metadata that older SDK binaries (3.7.62 or earlier) reject under their closed record allowlist: on downgrade the older binary quarantines the new-format spool as corrupt with bytes preserved and no data loss. Downgrades are not supported; stay on the current version or upgrade.
+
+## Previous: v3.7.62
 
 v3.7.62 makes the SDK control boundary explicit and preserves the repaired server proof contract:
 

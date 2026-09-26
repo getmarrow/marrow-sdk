@@ -576,6 +576,22 @@ export interface MarrowCommitResult {
     summary: string;
 }
 export interface MarrowModelUsageInput {
+    billing_host?: string;
+    usage_event_id?: string;
+    occurred_at?: string;
+    token_semantics?: 'input_includes_cache' | 'disjoint';
+    usage_kind?: 'delta' | 'cumulative';
+    usage_role?: 'task' | 'marrow_overhead';
+    cache_write_tokens?: number;
+    pricing_dimensions?: Record<string, string | number>;
+    billing_mode?: 'api' | 'subscription';
+    cost_source?: 'provider_response';
+    coverage_complete?: boolean;
+    overhead_complete?: boolean;
+    baseline_usage_id?: string;
+    comparison_id?: string;
+    task_fingerprint?: string;
+    constraints_fingerprint?: string;
     agent_id?: string | null;
     session_id?: string | null;
     workflow_id?: string | null;

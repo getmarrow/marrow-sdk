@@ -87,6 +87,19 @@ async function extractModelUsageFromResponse(rawUrl, response, request = Promise
     const usage = object(data.usage ?? path(data, 'response.usage') ?? path(data, 'message.usage') ?? path(data, 'meta.usage') ?? data.usageMetadata ?? data.token_usage);
     if (!Object.keys(usage).length)
         return null;
+    // Reject supplied malformed counts before alias fallback or TTL aggregation can hide them.
+    // Undefined is an absent optional bucket; null, strings and invalid numbers are not zero.
+    const tokenPaths = [
+        'input_tokens', 'prompt_tokens', 'inputTokenCount', 'promptTokenCount', 'totalInputTokens',
+        'output_tokens', 'completion_tokens', 'outputTokenCount', 'candidatesTokenCount', 'totalOutputTokens',
+        'cached_tokens', 'cache_read_input_tokens', 'prompt_tokens_details.cached_tokens',
+        'input_tokens_details.cached_tokens', 'input_token_details.cache_read', 'cachedContentTokenCount',
+        'cache_creation_input_tokens', 'input_tokens_details.cache_write_tokens',
+        'cache_creation.ephemeral_5m_input_tokens', 'cache_creation.ephemeral_1h_input_tokens',
+        'total_tokens', 'totalTokenCount', 'totalTokens',
+    ];
+    if (tokenPaths.some(key => { const value = path(usage, key); return value !== undefined && count(value) === undefined; }))
+        return null;
     const facts = await request;
     const responseModel = data.model ?? data.modelVersion ?? path(data, 'response.model') ?? path(data, 'message.model') ?? path(data, 'metadata.model');
     const model = responseModel === undefined ? facts.model : label(responseModel);
@@ -116,6 +129,8 @@ async function extractModelUsageFromResponse(rawUrl, response, request = Promise
         const creation = object(usage.cache_creation);
         const five = count(creation.ephemeral_5m_input_tokens), hour = count(creation.ephemeral_1h_input_tokens);
         if (five !== undefined && hour !== undefined) {
+            if (count(five + hour) === undefined)
+                return null;
             if (writes === undefined)
                 writes = five + hour;
             if (five + hour !== writes)
@@ -161,7 +176,9 @@ function normalizeModelUsageInput(input, sanitize) {
             body[key] = v;
     }
     for (const key of ['input_tokens', 'output_tokens', 'cached_tokens', 'cache_write_tokens', 'total_tokens', 'baseline_tokens', 'estimated_tokens_saved']) {
-        const v = count(input[key]);
+        const value = input[key], v = count(value);
+        if (value !== undefined && v === undefined)
+            throw new TypeError(`${key} must be a nonnegative safe integer`);
         if (v !== undefined)
             body[key] = v;
     }

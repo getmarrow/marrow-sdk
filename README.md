@@ -65,7 +65,11 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## What's New in v3.7.63
+## What's New in v3.7.64
+
+Observed model usage now retains the provider identity, token-bucket semantics and pricing evidence needed by the model-cost dashboard. OpenAI Chat/Responses and Anthropic JSON capture preserve cache reads/writes without double counting; unavailable observations remain explicit. See [Model-cost usage evidence](#model-cost-usage-evidence) for supported capture boundaries and streaming limitations.
+
+### Previous v3.7.63
 
 v3.7.63 makes the lifecycle event spool self-healing, so ordinary delivery failures recover without operator action:
 
@@ -489,3 +493,11 @@ MIT
 
 - [@getmarrow/install](https://www.npmjs.com/package/@getmarrow/install) - default installer, self-test, governed runner, and operator TUI
 - [@getmarrow/mcp](https://www.npmjs.com/package/@getmarrow/mcp) - MCP-native integration for compatible agent clients
+
+## Model-cost usage evidence
+
+SDK 3.7.64 preserves compact cost evidence on `modelUsage()` and `commit({ modelUsage })`: billing host, stable provider response ID, provider-reported timestamp when present, input/cache bucket semantics, cache-write counts, observed pricing dimensions, and explicit billing/coverage/baseline declarations. Unknown or malformed counts are omitted, never coerced from null into zero. Provider-reported cost remains distinct from published API valuation; subscription usage must be explicitly identified and is labeled API-equivalent by the backend.
+
+Passive JSON fetch capture recognizes exact official HTTPS model endpoints and rejects deceptive suffixes, nonstandard ports, credentials and cross-host redirects. For OpenAI Chat/Responses, input includes cached tokens; output already includes reported reasoning. For Anthropic Messages, input, cache reads and cache writes are disjoint. Single observed cache TTLs are retained; mixed TTL writes remain unresolved. Returned model identity takes precedence over the requested alias. Pricing dimensions come only from observed response metadata and text-only request/endpoint facts; omitted service tiers, unknown modalities or cache metadata stay unresolved. No raw prompts, request headers, tool arguments or provider response bodies enter the usage report.
+
+Streaming/SSE usage is not captured by this JSON path. Use an explicit usage adapter with authoritative final usage for streaming hosts. Proxies and unsupported endpoints do not acquire first-party billing proof from the response shape. Capturing one call does not prove complete account usage, Marrow overhead, baseline comparability or savings. Unknown facts may therefore leave dashboard costs partial or unavailable and savings pending.

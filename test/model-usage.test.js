@@ -184,6 +184,9 @@ test('wrapFetch passively captures model usage from provider responses', async (
   assert.equal(usageCall.body.cached_tokens, 30);
   assert.equal(usageCall.body.total_tokens, 165);
   assert.equal(usageCall.body.source, 'sdk_passive_fetch');
+  assert.equal(usageCall.body.billing_host, 'first_party');
+  assert.equal(usageCall.body.token_semantics, 'input_includes_cache');
+  assert.equal(usageCall.body.coverage_complete, undefined);
   assert.equal(usageCall.body.prompt, undefined);
   assert.equal(usageCall.body.output, undefined);
 });

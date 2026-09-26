@@ -1,10 +1,11 @@
 "use strict";
-/**
- * @getmarrow/sdk — MarrowClient Implementation
- */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MarrowClient = exports.MarrowLoopRequiredError = void 0;
 exports.classifyMarrowFailure = classifyMarrowFailure;
+const model_usage_1 = require("./model-usage");
+/**
+ * @getmarrow/sdk — MarrowClient Implementation
+ */
 const node_crypto_1 = require("node:crypto");
 const habit_loop_copy_1 = require("./habit-loop-copy");
 const event_spool_1 = require("./event-spool");
@@ -14,7 +15,7 @@ const PRE_EXIT_REMINDER = 'Before ending the session, log the outcome to Marrow 
 const REQUIRE_EXTERNAL_ERROR = 'Marrow require mode: log intent with marrow.think() before external actions.';
 const REQUIRE_COMPLETION_ERROR = 'Marrow require mode: log the outcome with marrow.commit() before completing the session.';
 const SOURCE_CLIENTS = new Set(['claude-code', 'cursor', 'windsurf', 'openclaw', 'codex', 'gemini', 'grok', 'deepseek', 'qwen', 'kimi', 'minimax', 'cline', 'opencode', 'hermes', 'glm', 'custom', 'unknown']);
-const SDK_ADAPTER_VERSION = '3.7.63';
+const SDK_ADAPTER_VERSION = '3.7.64';
 const SDK_EXPECTED_HOOKS = ['pre_action', 'action_result', 'outcome_closure'];
 const SDK_CONFIG_FINGERPRINT = (0, node_crypto_1.createHash)('sha256')
     .update(`sdk-passive-runtime:${SDK_ADAPTER_VERSION}:${SDK_EXPECTED_HOOKS.join(',')}`)
@@ -586,121 +587,11 @@ function stripSensitiveUrl(input) {
         return redactFallback(input);
     }
 }
-function inferModelUsageProvider(rawUrl) {
-    try {
-        const parsed = new URL(rawUrl);
-        const host = parsed.hostname.toLowerCase();
-        if (host.endsWith('openai.com'))
-            return 'openai';
-        if (host.endsWith('anthropic.com'))
-            return 'anthropic';
-        if (host.endsWith('generativelanguage.googleapis.com') || host.endsWith('googleapis.com'))
-            return 'google';
-        if (host.endsWith('x.ai'))
-            return 'xai';
-        if (host.endsWith('deepseek.com'))
-            return 'deepseek';
-        if (host.endsWith('groq.com'))
-            return 'groq';
-        if (host.endsWith('openrouter.ai'))
-            return 'openrouter';
-        if (host.endsWith('dashscope.aliyuncs.com') || host.endsWith('alibaba-inc.com'))
-            return 'qwen';
-        if (host.endsWith('moonshot.cn') || host.endsWith('kimi.com'))
-            return 'kimi';
-        if (host.endsWith('minimax.chat') || host.endsWith('minimaxi.com'))
-            return 'minimax';
-        return null;
-    }
-    catch {
-        return null;
-    }
-}
-function numberFrom(value) {
-    const numeric = typeof value === 'number' ? value : Number(value);
-    return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
-}
 function finiteNumberOrNull(value) {
     if (value === null || value === undefined || value === '')
         return null;
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
-}
-function firstNumber(...values) {
-    for (const value of values) {
-        const numeric = numberFrom(value);
-        if (numeric !== undefined)
-            return numeric;
-    }
-    return undefined;
-}
-function valueAtPath(source, path) {
-    return path.split('.').reduce((current, segment) => {
-        if (!current || typeof current !== 'object')
-            return undefined;
-        return current[segment];
-    }, source);
-}
-function firstValueAtPath(source, paths) {
-    for (const path of paths) {
-        const value = valueAtPath(source, path);
-        if (value !== undefined && value !== null)
-            return value;
-    }
-    return undefined;
-}
-async function extractModelUsageFromResponse(rawUrl, response) {
-    const provider = inferModelUsageProvider(rawUrl);
-    if (!provider || !response.ok)
-        return null;
-    const contentType = response.headers.get('content-type') || '';
-    if (!/\bjson\b/i.test(contentType))
-        return null;
-    let data;
-    try {
-        const parsed = await response.clone().json();
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-            return null;
-        data = parsed;
-    }
-    catch {
-        return null;
-    }
-    const usage = firstValueAtPath(data, [
-        'usage',
-        'meta.usage',
-        'response.usage',
-        'message.usage',
-        'usageMetadata',
-        'token_usage',
-    ]);
-    if (!usage || typeof usage !== 'object')
-        return null;
-    const modelValue = firstValueAtPath(data, [
-        'model',
-        'modelVersion',
-        'response.model',
-        'metadata.model',
-    ]);
-    const usageObj = usage;
-    const inputTokens = firstNumber(usageObj.input_tokens, usageObj.prompt_tokens, usageObj.inputTokenCount, usageObj.promptTokenCount, usageObj.totalInputTokens);
-    const outputTokens = firstNumber(usageObj.output_tokens, usageObj.completion_tokens, usageObj.outputTokenCount, usageObj.candidatesTokenCount, usageObj.totalOutputTokens);
-    const cachedTokens = firstNumber(usageObj.cached_tokens, usageObj.cache_read_input_tokens, valueAtPath(usageObj, 'prompt_tokens_details.cached_tokens'), valueAtPath(usageObj, 'input_token_details.cache_read'), usageObj.cachedContentTokenCount);
-    const totalTokens = firstNumber(usageObj.total_tokens, usageObj.totalTokenCount, usageObj.totalTokens) ?? ((inputTokens || outputTokens || cachedTokens)
-        ? (inputTokens || 0) + (outputTokens || 0) + (cachedTokens || 0)
-        : undefined);
-    if (!inputTokens && !outputTokens && !cachedTokens && !totalTokens)
-        return null;
-    return {
-        provider,
-        model: typeof modelValue === 'string' ? modelValue.slice(0, 180) : undefined,
-        input_tokens: inputTokens,
-        output_tokens: outputTokens,
-        cached_tokens: cachedTokens,
-        total_tokens: totalTokens,
-        source: 'sdk_passive_fetch',
-        marrow_intervention: 'passive_model_usage_capture',
-    };
 }
 const GLOBAL_FETCH_PATCH_KEY = Symbol.for('marrow.passiveRuntime.fetchPatch');
 function inferSurfacesFromText(value) {
@@ -1987,9 +1878,10 @@ class MarrowClient {
                 const surfaces = [...new Set(['fetch', ...inferSurfacesFromText(action)])];
                 const guarded = await client.runGuarded({
                     ...buildGuardOptions(action, async () => {
+                        const usageFacts = options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false' ? (0, model_usage_1.modelUsageRequestFacts)(input, init) : undefined;
                         const response = await transportFetch(input, init);
                         if (options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false') {
-                            void extractModelUsageFromResponse(rawUrl, response)
+                            void (0, model_usage_1.extractModelUsageFromResponse)(rawUrl, response, usageFacts)
                                 .then((usage) => usage ? client.modelUsage({ ...usage, action_type: method }) : undefined)
                                 .catch(() => undefined);
                         }
@@ -2368,9 +2260,10 @@ class MarrowClient {
                 await this.beforeAction(meta);
             }
             try {
+                const usageFacts = options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false' ? (0, model_usage_1.modelUsageRequestFacts)(input, init) : undefined;
                 const response = await fetchFn(input, init);
                 if (options.captureModelUsage !== false && process.env.MARROW_PASSIVE_TOKEN_USAGE !== 'false') {
-                    void extractModelUsageFromResponse(rawUrl, response)
+                    void (0, model_usage_1.extractModelUsageFromResponse)(rawUrl, response, usageFacts)
                         .then((usage) => {
                         if (!usage)
                             return;
@@ -4041,40 +3934,7 @@ class MarrowClient {
         return res.json();
     }
     normalizeModelUsage(input) {
-        const body = {};
-        const copyString = (from, to = from) => {
-            const value = input[from];
-            if (typeof value === 'string' && value.trim())
-                body[String(to)] = redactSensitiveText(value).slice(0, 180);
-        };
-        const copyNumber = (from, to = from) => {
-            const value = Number(input[from]);
-            if (Number.isFinite(value) && value >= 0)
-                body[String(to)] = value;
-        };
-        copyString('agent_id');
-        copyString('session_id');
-        copyString('workflow_id');
-        copyString('decision_id');
-        copyString('provider');
-        copyString('model');
-        copyString('task_type');
-        copyString('action_type');
-        copyString('source');
-        copyString('marrow_intervention');
-        copyNumber('input_tokens');
-        copyNumber('output_tokens');
-        copyNumber('cached_tokens');
-        copyNumber('total_tokens');
-        copyNumber('cost_usd');
-        copyNumber('latency_ms');
-        copyNumber('baseline_tokens');
-        copyNumber('estimated_tokens_saved');
-        copyNumber('estimated_cost_saved_usd');
-        copyNumber('estimated_minutes_saved');
-        if (typeof input.success === 'boolean')
-            body.success = input.success;
-        return body;
+        return (0, model_usage_1.normalizeModelUsageInput)(input, redactSensitiveText);
     }
     shouldQueueRequest(method, path, error) {
         if (method.toUpperCase() !== 'POST')

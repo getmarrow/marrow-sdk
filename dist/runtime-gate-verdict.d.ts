@@ -7,11 +7,13 @@ export declare function readRuntimeGateVerdict(runtime: MarrowAgentRuntimeResult
 /** Owner-approval guidance the server published for a held gate receipt, never caller-written. */
 export declare function ownerApprovalHoldFromRuntime(runtime: MarrowAgentRuntimeResult | null | undefined, verdict: MarrowRuntimeGateVerdict): MarrowOwnerApprovalHold;
 /**
- * Typed error for an enforced runtime gate block. runGuarded() returns it on
+ * Typed error for a runtime gate stop: an enforced block (`MARROW_RUNTIME_GATE_BLOCKED`)
+ * or a verdict the SDK does not recognise on a plan that enforces the gate
+ * (`MARROW_RUNTIME_GATE_UNRECOGNIZED`). runGuarded() returns it on
  * `result.gate_error` (it does not throw), so callers can `throw result.gate_error`.
  */
 export declare class MarrowRuntimeGateBlockedError extends Error {
-    readonly code: "MARROW_RUNTIME_GATE_BLOCKED";
+    readonly code: 'MARROW_RUNTIME_GATE_BLOCKED' | 'MARROW_RUNTIME_GATE_UNRECOGNIZED';
     readonly gateReceiptId: string | null;
     readonly decisionId: string | null;
     readonly reason: string;

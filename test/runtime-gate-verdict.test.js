@@ -69,7 +69,13 @@ async function guardedRun(item, shape, overrides = {}) {
     return true;
   };
   try {
-    const marrow = overrides.client || new MarrowClient(dummyKey(), { agentId: 'sdk-guard-agent', durableEventSpool: false });
+    // Default: a registered agent with a session. `quickstart: true` is the README
+    // quickstart client (`new MarrowClient(key, { agentId })`, no sessionId).
+    const marrow = overrides.client || new MarrowClient(dummyKey(), {
+      agentId: 'sdk-guard-agent',
+      ...(overrides.quickstart ? {} : { sessionId: 'sdk-guard-session' }),
+      durableEventSpool: false,
+    });
     marrow.workflowGate = async () => {
       order.push('workflow_gate');
       if (item.workflow_gate.http_status) throw new Error(`Marrow API error ${item.workflow_gate.http_status}: ${item.workflow_gate.error}`);
@@ -88,6 +94,10 @@ async function guardedRun(item, shape, overrides = {}) {
       order.push('permit_issue');
       issued.push(input);
       if (overrides.permitUnavailable) throw new Error('Marrow request failed (timeout).');
+      // The backend refuses a permit without a session (400) or for an agent id
+      // that is not registered on an account-wide key (409).
+      if (!marrow.sessionId) throw new Error('Marrow API error 400: Invalid enforcement request');
+      if (overrides.agentRegistered === false) throw new Error('Marrow API error 409: AGENT_NOT_REGISTERED');
       const refusal = permitRefusal(item, input.owner_approval_receipt_id);
       if (refusal) throw new Error(`Marrow API error 403: ${refusal}`);
       return { permit_id: 'permit-guarded-run', permit: 'signed-permit', decision: 'allow' };
@@ -106,7 +116,10 @@ async function guardedRun(item, shape, overrides = {}) {
     };
     marrow.integrationEvent = async () => ({ accepted: true, queued: false, event_id: 'event-guarded-run', pending_spool_events: 0 });
     marrow.decisionTrace = async () => ({ trace: { intervention_receipt: null } });
-    const { runtimeBody: _runtimeBody, runtimeUnavailable: _unavailable, permitUnavailable: _permit, client: _client, ...runOptions } = overrides;
+    const {
+      runtimeBody: _runtimeBody, runtimeUnavailable: _unavailable, permitUnavailable: _permit, client: _client,
+      quickstart: _quickstart, agentRegistered: _registered, ...runOptions
+    } = overrides;
     const result = await marrow.runGuarded({
       action: item.request.action,
       type: item.request.type,
@@ -320,7 +333,8 @@ const DEGRADED_STOPS = [
   ['business', 'degraded_protected_hold', 'owner_approval_required', true],
   ['business', 'degraded_protected_block', 'block', true],
   ['business', 'gate_authority_unavailable', 'owner_approval_required', false],
-  ['team', 'degraded_protected_hold', 'owner_approval_required', true],
+  // Advisory plan: no owner approval to wait for, so retry when Marrow recovers.
+  ['team', 'degraded_protected_hold', 'owner_approval_required', false],
 ];
 
 for (const [plan, scenario, kind, approvable] of DEGRADED_STOPS) {
@@ -343,7 +357,8 @@ for (const [plan, scenario, kind, approvable] of DEGRADED_STOPS) {
         assert.match(run.result.owner_approval.reason, /not a policy denial/);
         if (!approvable) {
           assert.equal(run.result.owner_approval.approval_endpoint, null);
-          assert.match(run.result.owner_approval.exact_next_action, /Retry the guarded run/);
+          assert.equal(run.result.owner_approval.approval_status_endpoint, null);
+          assert.match(run.result.owner_approval.exact_next_action, /Retry the guarded run when Marrow recovers/);
         }
       }
     });
@@ -465,8 +480,199 @@ test('README documents runtime gate verdicts on both shapes without promising mo
   const readme = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'README.md'), 'utf8');
   assert.match(readme, /^### Runtime gate verdicts$/m);
   assert.match(readme, /slim shape this SDK receives by default/);
-  assert.match(readme, /The SDK never writes, infers or fabricates an owner approval\./);
+  assert.match(readme, /The SDK never writes, infers or fabricates an owner approval/);
+  assert.match(readme, /cannot yet be resumed through `runGuarded\(\)`/);
+  assert.doesNotMatch(readme, /pass a server-issued `ownerApprovalReceiptId`/);
+  assert.match(readme, /Action permits are required exactly as in 3\.7\.64/);
   assert.match(readme, /An owner approval never unlocks a `block`\./);
   assert.match(readme, /^## Unreleased$/m);
   assert.doesNotMatch(readme, /runtime\.decision_id/);
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1.
+// ---------------------------------------------------------------------------
+
+// F1: the permit requirement for work the gate lets through stays 3.7.64's. These
+// assertions use only fields 3.7.64 returned, so they pass on 3.7.64 as well.
+for (const plan of ['business', 'team']) {
+  for (const [setup, overrides] of [
+    ['README quickstart client without sessionId', { quickstart: true }],
+    ['unregistered agentId on an account-wide key', { agentRegistered: false }],
+  ]) {
+    test(`F1: ${plan} warn/high/proof_required work runs exactly as 3.7.64 (${setup})`, async () => {
+      const item = capture(PROD, plan, 'update_high');
+      assert.equal(item.slim.decision, 'warn');
+      assert.equal(item.slim.risk_level, 'high');
+      assert.equal(item.slim.proof_required, true);
+      assert.equal(item.decision_brief.risk.level, 'medium');
+
+      const slim = await guardedRun(item, 'slim', overrides);
+      assert.equal(slim.executed, true, 'slim warn/high/proof_required work must run when no permit can be issued');
+      assert.equal(slim.result.ok, true);
+      assert.equal(slim.result.blocked, false);
+      assert.equal(slim.result.permit_verified, false);
+      assert.deepEqual(slim.order, ['runtime', 'workflow_gate', 'decision_brief', 'think', 'permit_issue', 'execute', 'commit']);
+      assert.match(slim.stderr.join(''), /advisory action permit unavailable/);
+
+      // 3.7.64 already required a permit on the expanded shape (risk_gate.risk_level high).
+      const expanded = await guardedRun(item, 'expanded', overrides);
+      assert.equal(expanded.executed, false);
+      assert.equal(expanded.result.blocked, true);
+      assert.match(expanded.result.summary, /required Marrow action permit was not verified/);
+    });
+  }
+}
+
+// F2: a stopped result never relays the server's next-step text.
+const STOP_CAPTURES = [
+  [PROD, 'business', 'update_block'],
+  [PROD, 'business', 'update_hold'],
+  [PROD, 'business', 'protected_hold'],
+  [PROD, 'business', 'protected_block'],
+  [PROD, 'evaluation', 'update_block'],
+  [PROD, 'business', 'degraded_protected_hold'],
+  [PROD, 'business', 'degraded_protected_block'],
+  [PROD, 'business', 'gate_authority_unavailable'],
+  [PROD, 'team', 'degraded_protected_hold'],
+  [NEXT, 'business', 'update_block'],
+  [NEXT, 'business', 'update_hold'],
+  [NEXT, 'business', 'protected_block'],
+];
+
+test('F2: the captured backend next-step texts this guards against', () => {
+  assert.match(capture(PROD, 'business', 'update_block').slim.exact_next_action, /^Continue this exact governed action, then commit/);
+  assert.match(capture(PROD, 'business', 'update_block').expanded.intervention.exact_next_action, /^Continue this exact governed action/);
+  assert.match(capture(PROD, 'business', 'protected_hold').slim.exact_next_action, /proof\.owner_approval = \{ approved_by: "owner"/);
+  assert.match(capture(PROD, 'business', 'protected_block').expanded.exact_next_action, /proof\.owner_approval = \{ approved_by: "owner"/);
+});
+
+for (const [backend, plan, scenario] of STOP_CAPTURES) {
+  for (const shape of SHAPES) {
+    test(`F2: stopped result carries the SDK's own next step (${plan} ${scenario}, ${backend}, ${shape})`, async () => {
+      const item = capture(backend, plan, scenario);
+      const run = await guardedRun(item, shape);
+      assert.equal(run.executed, false);
+      assert.equal(run.result.blocked, true);
+      const directive = run.result.before_action_directive;
+      assert.ok(directive, 'the stop keeps a before-action directive');
+      const next = directive.exact_next_action;
+      assert.doesNotMatch(next, /continue/i);
+      assert.doesNotMatch(next, /proof\.owner_approval|approved_by|approved-release-bundle/);
+      assert.match(next, /^Do not run this action/);
+      if (run.result.owner_approval) assert.equal(next, run.result.owner_approval.exact_next_action);
+      else assert.equal(next, `Do not run this action. ${run.result.gate_error.message}`);
+      assert.doesNotMatch(run.result.summary, /continue|proof\.owner_approval/i);
+    });
+  }
+}
+
+test('F2: owner-approval next step waits on the published status endpoint', async () => {
+  const item = capture(NEXT, 'business', 'update_hold');
+  const run = await guardedRun(item, 'slim');
+  const hold = run.result.owner_approval;
+  assert.match(hold.exact_next_action, new RegExp(`read GET ${hold.approval_status_endpoint.replace(/[/.]/g, '\\$&')} every 5s and follow the next step it reports`));
+  const prod = await guardedRun(capture(PROD, 'business', 'update_hold'), 'slim');
+  assert.match(prod.result.owner_approval.exact_next_action, /publishes no owner-approval endpoint for it\. A caller-written approval is not an approval/);
+});
+
+// F3: a present risk_gate without a boolean allow is not an allow.
+test('F3: risk_gate without a boolean allow reads as allow:false and block_high stops as 3.7.64 did', async () => {
+  for (const allow of [undefined, 'true', 1, null]) {
+    const gate = { decision: 'warn', enforcement_decision: 'warn', enforced: true, risk_level: 'medium' };
+    if (allow !== undefined) gate.allow = allow;
+    assert.equal(sdk.readRuntimeGateVerdict({ risk_gate: gate }).allow, false, `allow=${JSON.stringify(allow)}`);
+  }
+  const item = capture(PROD, 'business', 'update_allow');
+  const { allow: _allow, ...gateWithoutAllow } = item.expanded.risk_gate;
+  const runtimeBody = { ...item.expanded, risk_gate: gateWithoutAllow };
+  const strict = await guardedRun(item, 'expanded', { riskPolicy: 'block_high', runtimeBody });
+  assert.equal(strict.executed, false);
+  assert.equal(strict.result.blocked, true);
+  const warn = await guardedRun(item, 'expanded', { riskPolicy: 'warn', runtimeBody });
+  assert.equal(warn.executed, true);
+});
+
+// F4: arbitration resolutions and unrecognised verdicts.
+test('F4: accepted arbitration resolutions read as allow', () => {
+  for (const resolution of ['selected', 'synthesized']) {
+    const slim = sdk.readRuntimeGateVerdict({ decision: 'proceed', enforcement_decision: resolution, risk_gate_enforced: true });
+    assert.equal(slim.decision, 'allow', resolution);
+    assert.equal(slim.allow, true, resolution);
+    const expanded = sdk.readRuntimeGateVerdict({ risk_gate: { allow: true, decision: 'proceed', enforcement_decision: resolution, enforced: true } });
+    assert.equal(expanded.decision, 'allow', resolution);
+  }
+  assert.equal(sdk.readRuntimeGateVerdict({ decision: 'review_required', enforcement_decision: 'review_required', risk_gate_enforced: true }).decision, 'owner_approval_required');
+  assert.equal(sdk.readRuntimeGateVerdict({ decision: 'block', enforcement_decision: 'blocked', risk_gate_enforced: true }).decision, 'block');
+});
+
+for (const shape of SHAPES) {
+  test(`F4: an unrecognised verdict stops where the plan enforces the gate and runs where it is advisory (${shape})`, async () => {
+    for (const value of ['escalate', 42, '']) {
+      const enforcedItem = capture(PROD, 'business', 'update_allow');
+      const enforcedBody = structuredClone(enforcedItem[shape]);
+      if (shape === 'slim') { enforcedBody.decision = value; enforcedBody.enforcement_decision = value; }
+      else { enforcedBody.risk_gate.decision = value; enforcedBody.risk_gate.enforcement_decision = value; }
+      const enforced = await guardedRun(enforcedItem, shape, { runtimeBody: enforcedBody });
+      assert.equal(enforced.executed, false, `enforced ${JSON.stringify(value)}`);
+      assert.equal(enforced.result.gate_error.code, 'MARROW_RUNTIME_GATE_UNRECOGNIZED');
+      assert.ok(enforced.result.gate_error instanceof sdk.MarrowRuntimeGateBlockedError);
+      assert.deepEqual(enforced.order, ['runtime']);
+
+      const advisoryItem = capture(PROD, 'team', 'update_allow');
+      const advisoryBody = structuredClone(advisoryItem[shape]);
+      if (shape === 'slim') advisoryBody.decision = value;
+      else advisoryBody.risk_gate.decision = value;
+      const advisory = await guardedRun(advisoryItem, shape, { runtimeBody: advisoryBody });
+      assert.equal(advisory.executed, true, `advisory ${JSON.stringify(value)}`);
+    }
+    // No verdict at all and no enforcement signal: unchanged, the run continues.
+    const bare = capture(PROD, 'business', 'update_allow');
+    const run = await guardedRun(bare, shape, { runtimeBody: { ok: true, action: bare.request.action } });
+    assert.equal(run.executed, true);
+  });
+}
+
+// (b): orient({ autoWarn: true }) reads the slim verdict too.
+async function orientWith(body) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /\/v1\/agent\/runtime\?response=slim$/);
+    return Response.json({ data: structuredClone(body) });
+  };
+  try {
+    const marrow = new MarrowClient(dummyKey(), { agentId: 'sdk-guard-agent', sessionId: 'sdk-guard-session', durableEventSpool: false });
+    return await marrow.orient({ taskType: 'update the weekly customer newsletter', autoWarn: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+for (const shape of SHAPES) {
+  test(`orient autoWarn pauses on enforced blocks and holds (${shape})`, async () => {
+    for (const [plan, scenario, pauses] of [
+      ['business', 'update_block', true],
+      ['business', 'update_hold', true],
+      ['business', 'protected_block', true],
+      ['business', 'protected_hold', true],
+      ['evaluation', 'update_block', true],
+      ['business', 'gate_authority_unavailable', true],
+      ['business', 'update_allow', false],
+      ['business', 'low', false],
+      ['team', 'update_allow', false],
+    ]) {
+      const result = await orientWith(capture(PROD, plan, scenario)[shape]);
+      assert.equal(result.shouldPause, pauses, `${plan} ${scenario} ${shape}`);
+      if (pauses) {
+        assert.ok(result.serverWarnings.some((warning) => warning.severity === 'HIGH'), `${plan} ${scenario} ${shape}`);
+        if (shape === 'slim') assert.doesNotMatch(result.text, /continue|proof\.owner_approval/i);
+      }
+    }
+  });
+}
+
+test('orient autoWarn keeps advisory behaviour per shape unchanged (Team hold)', async () => {
+  const item = capture(PROD, 'team', 'update_hold');
+  assert.equal((await orientWith(item.slim)).shouldPause, false);
+  assert.equal((await orientWith(item.expanded)).shouldPause, true);
 });

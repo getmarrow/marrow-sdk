@@ -521,6 +521,7 @@ function isHighRiskPassiveAction(action, surfaces = []) {
  * - an owner-approval hold stops unless the plan is advisory, or the caller
  *   supplied a server-issued owner approval receipt that the permit must verify;
  * - a degraded verdict stops a high-risk action (a block stays a block);
+ * - a verdict the SDK does not recognise stops where the plan enforces the gate;
  * - riskPolicy 'block_high' keeps stopping on expanded risk_gate.allow === false
  *   and on the same condition derived from slim fields.
  * Advisory verdicts, allow, proceed and warn continue unchanged.
@@ -539,6 +540,8 @@ function runtimeVerdictStop(verdict, riskPolicy, ownerApprovalSupplied) {
         && !(ownerApprovalSupplied && !verdict.authority_unavailable)) {
         return 'owner_approval_required';
     }
+    if (verdict.decision === 'unknown' && verdict.enforced === true)
+        return 'block';
     if (riskPolicy === 'block_high' && verdict.allow === false) {
         return verdict.decision === 'block'
             ? 'block'
@@ -1231,14 +1234,24 @@ class MarrowClient {
                 const gateError = stop === 'block' ? new runtime_gate_verdict_1.MarrowRuntimeGateBlockedError(verdict) : null;
                 const ownerApproval = stop === 'owner_approval_required' ? (0, runtime_gate_verdict_1.ownerApprovalHoldFromRuntime)(runtime, verdict) : null;
                 const receipt = verdict.gate_receipt_id ? ` Gate receipt ${verdict.gate_receipt_id}.` : '';
+                const stopError = gateError
+                    ? gateError.message
+                    : ownerApproval
+                        ? `${ownerApproval.reason}${receipt} The action did not run.`
+                        : `Marrow runtime verdict ${verdict.server_decision || verdict.decision} does not allow this action under riskPolicy block_high.${receipt}`;
+                // The server's next-step text is not relayed on a stop: on a block it can
+                // read "Continue this exact governed action", and on production holds it
+                // tells the agent to write its own approval.
+                const stopDirective = beforeActionDirective
+                    ? {
+                        ...beforeActionDirective,
+                        exact_next_action: ownerApproval ? ownerApproval.exact_next_action : `Do not run this action. ${stopError}`,
+                    }
+                    : beforeActionDirective;
                 return {
                     ok: false,
                     blocked: true,
-                    error: gateError
-                        ? gateError.message
-                        : ownerApproval
-                            ? `${ownerApproval.reason}${receipt} The action did not run.`
-                            : `Marrow runtime verdict ${verdict.server_decision || verdict.decision} does not allow this action under riskPolicy block_high.${receipt}`,
+                    error: stopError,
                     failure_type: 'policy_block',
                     decision_id: null,
                     brief,
@@ -1250,7 +1263,7 @@ class MarrowClient {
                     outcome_closed: false,
                     outcome_commit_error: null,
                     before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
-                    before_action_directive: beforeActionDirective,
+                    before_action_directive: stopDirective,
                     action_permit: null,
                     permit_verified: false,
                     permit_closed: false,
@@ -1449,11 +1462,14 @@ class MarrowClient {
             const ownerApprovalResume = Boolean(options.ownerApprovalReceiptId)
                 && gateVerdict?.decision === 'owner_approval_required'
                 && gateVerdict.enforced !== false;
+            // Permit requirement for work the gate lets through is 3.7.64's: the
+            // expanded risk_gate risk level and proof pack, a high-risk brief, high-risk
+            // action text, or requireActionPermit. The slim risk level and proof flag
+            // do not add a permit requirement in this release.
             const permitRequired = ownerApprovalResume || (options.requireActionPermit
-                ?? (gateVerdict?.risk_level === 'high'
+                ?? (runtime?.risk_gate?.risk_level === 'high'
                     || gateVerdict?.decision === 'block'
                     || (gateVerdict?.decision === 'owner_approval_required' && gateVerdict.enforced !== false)
-                    || gateVerdict?.proof_required === true
                     || runtime?.proof_pack?.required === true
                     || brief?.risk.level === 'high'
                     || isHighRiskPassiveAction(safeAction, options.surfaces)));
@@ -2699,14 +2715,26 @@ class MarrowClient {
             const intervention = data.intervention && typeof data.intervention === 'object' ? data.intervention : {};
             const riskGate = data.risk_gate && typeof data.risk_gate === 'object' ? data.risk_gate : {};
             const gateReceipt = data.gate_receipt && typeof data.gate_receipt === 'object' ? data.gate_receipt : {};
-            const decision = String(intervention.decision || riskGate.decision || gateReceipt.decision || 'proceed');
+            // This read asks for the slim shape, which carries no risk_gate or
+            // intervention: pause wherever runGuarded() would stop on the verdict.
+            const verdict = (0, runtime_gate_verdict_1.readRuntimeGateVerdict)(data);
+            const verdictStop = runtimeVerdictStop(verdict, 'warn', false);
+            const verdictMessage = verdictStop === 'owner_approval_required'
+                ? (0, runtime_gate_verdict_1.ownerApprovalHoldFromRuntime)(data, verdict).exact_next_action
+                : verdictStop
+                    ? `Do not run this action. ${new runtime_gate_verdict_1.MarrowRuntimeGateBlockedError(verdict).message}`
+                    : '';
+            const decision = String(intervention.decision || riskGate.decision || gateReceipt.decision
+                || (verdictStop ? verdict.server_decision || verdict.enforcement_decision || verdict.decision : '')
+                || 'proceed');
             const shouldPause = read.stale || intervention.allow === false || riskGate.allow === false
-                || ['block', 'deny', 'denied', 'review_required', 'owner_approval_required'].includes(decision);
+                || ['block', 'deny', 'denied', 'review_required', 'owner_approval_required'].includes(decision)
+                || verdictStop !== null;
             const reason = Array.isArray(riskGate.reasons) && riskGate.reasons[0] && typeof riskGate.reasons[0] === 'object'
                 ? String(riskGate.reasons[0].message || '')
                 : '';
             const message = String(intervention.before_action || intervention.exact_next_action || intervention.headline
-                || gateReceipt.exact_fix || reason || data.before_you_act
+                || gateReceipt.exact_fix || reason || verdictMessage || data.before_you_act
                 || (read.stale ? 'Fresh Marrow guidance is unavailable; cached guidance cannot authorize this action.' : ''));
             const severity = shouldPause ? 'HIGH' : decision === 'warn' ? 'MEDIUM' : 'LOW';
             const serverWarnings = message ? [{ severity, message, pattern: `runtime_${decision}` }] : [];

@@ -354,7 +354,7 @@ export interface MarrowGuardedRunResult<T> {
      * Null when the guarded run did not consult the agent runtime.
      */
     gate_verdict?: MarrowRuntimeGateVerdict | null;
-    /** Set when a runtime gate block stopped the action before execute(). */
+    /** Set when a runtime gate block, or an unrecognised verdict on a plan that enforces the gate, stopped the action before execute(). */
     gate_error?: MarrowRuntimeGateBlockedError | null;
     /** Set when the runtime gate requires owner approval before execute() may run. */
     owner_approval?: MarrowOwnerApprovalHold | null;

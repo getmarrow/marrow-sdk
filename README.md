@@ -67,7 +67,20 @@ Detection and notification are automatic. Package and configuration changes rema
 
 ## Unreleased
 
-`runGuarded()` (and the passive runtime's `tool()`, `command()`, `deploy()`, `publish()` and governed fetch, which use it) now reads the runtime gate verdict from the slim runtime response that Marrow serves to this SDK by default, not only from the expanded `risk_gate` object. In 3.7.64 an enforced `block` or owner-approval hold on the slim response did not stop the action unless another check (workflow gate, high-risk brief, or a required action permit) happened to stop it. On plans that enforce the gate (Business and above, and the evaluation period), an enforced block now returns a typed `MarrowRuntimeGateBlockedError` on `result.gate_error`, an owner-approval hold returns `result.owner_approval` with the gate receipt, and neither runs `execute()`. Advisory verdicts, `allow`, `proceed` and healthy `warn` run as before. See [Runtime gate verdicts](#runtime-gate-verdicts).
+- Guarded runs now enforce the runtime gate verdict from the slim runtime response Marrow serves this SDK by default. On plans that enforce the gate (Business and above, and the evaluation period):
+  - an enforced block stops before `execute()` and returns `gate_error` (`MarrowRuntimeGateBlockedError`, code `MARROW_RUNTIME_GATE_BLOCKED`);
+  - an owner-approval hold stops and returns `owner_approval`: the gate receipt, the created decision, and the approval and status endpoints when the server publishes them;
+  - a verdict this SDK does not recognise stops with `gate_error.code` `MARROW_RUNTIME_GATE_UNRECOGNIZED` instead of running.
+  - In 3.7.64 the block and the hold could run. This applies to `runGuarded()` and to `tool()`, `command()`, `deploy()`, `publish()` and governed fetch.
+- New, all additive: `readRuntimeGateVerdict()`, `MarrowRuntimeGateBlockedError`, and the optional result fields `gate_verdict`, `gate_error` and `owner_approval`. Existing code compiles unchanged.
+- Action permits are required exactly as in 3.7.64 for work the gate lets through (a high-risk decision brief, high-risk action text, an expanded high-risk or proof-required gate, or `requireActionPermit`). This release adds no permit requirement for routine work.
+- A degraded verdict that holds, blocks or rates the action high-risk no longer runs on any plan; a block stays a block. Retry once Marrow recovers. On advisory plans (Team, Free) such a degraded hold returns `owner_approval` with `approvable: false`, because there is no owner approval to wait for.
+- Enforced holds and blocks now stop even with `requireActionPermit: false`, or with `riskPolicy: 'off'` plus `useAgentRuntime: true`.
+- Advisory plans (Team, Free) run and report the verdict on `gate_verdict`, on both response shapes. Old servers or proxies returning the expanded shape previously failed closed on advisory holds.
+- Stopped results carry the SDK's own next step in `before_action_directive.exact_next_action`, not the server's text.
+- `orient({ autoWarn: true })` sets `shouldPause` for enforced blocks and holds on the slim shape too.
+- The SDK never writes an owner approval; a server-issued `ownerApprovalReceiptId` is only sent to the server for verification. A held action cannot yet be resumed through `runGuarded()`.
+- Summary text for runtime stops changed. Match on `gate_error.code` or `owner_approval.state`, not on summary strings.
 
 ## What's New in v3.7.64
 
@@ -254,11 +267,14 @@ When an API returns a value for an unsuccessful application outcome, use the typ
 
 | Runtime verdict | `execute()` | Result |
 | --- | --- | --- |
-| `block` where the plan enforces the gate | does not run | `blocked: true`, `failure_type: 'policy_block'`, `gate_error` (`MarrowRuntimeGateBlockedError` with `gateReceiptId` and `reason`) |
+| `block` where the plan enforces the gate | does not run | `blocked: true`, `failure_type: 'policy_block'`, `gate_error` (`MarrowRuntimeGateBlockedError`, code `MARROW_RUNTIME_GATE_BLOCKED`, with `gateReceiptId` and `reason`) |
 | `review_required` / `owner_approval_required` where the plan enforces the gate | does not run | `blocked: true`, `owner_approval` with the gate receipt, the decision Marrow created, and the approval and status endpoints when the server publishes them |
-| advisory verdict (`risk_gate_enforced: false`, for example the Team plan) | runs; the verdict is reported, not enforced | `gate_verdict.enforced: false`; high-risk or proof-required work still needs a verified action permit |
+| a verdict the SDK does not recognise, where the plan enforces the gate | does not run | `gate_error` with code `MARROW_RUNTIME_GATE_UNRECOGNIZED` |
+| advisory verdict (`risk_gate_enforced: false`, for example the Team plan) | runs; the verdict is reported, not enforced | `gate_verdict.enforced: false` |
 | `allow`, `proceed`, healthy `warn` | runs as before | unchanged |
-| degraded verdict for high-risk work, the SDK's high-risk unavailable fallback, or a stale cached verdict | does not run | a block stays a block; otherwise `owner_approval` with `approvable: false` when no durable receipt exists, so retry the guarded run |
+| degraded verdict for high-risk work, the SDK's high-risk unavailable fallback, or a stale cached verdict | does not run | a block stays a block; otherwise `owner_approval` with `approvable: false` when no durable receipt exists or the plan is advisory, so retry when Marrow recovers |
+
+Action permits for work the gate lets through are required exactly as in 3.7.64: a high-risk decision brief, high-risk action text, an expanded `risk_gate` that is high-risk or proof-required, or `requireActionPermit: true`.
 
 ```ts
 const result = await marrow.runGuarded({
@@ -269,12 +285,12 @@ const result = await marrow.runGuarded({
 
 if (result.gate_error) throw result.gate_error;
 if (result.owner_approval) {
-  // The account owner approves the held gate receipt from an authenticated Marrow dashboard session.
-  console.log(result.owner_approval.gate_receipt_id, result.owner_approval.approval_status_endpoint);
+  // Not done: the account owner must approve the held gate receipt from an authenticated Marrow dashboard session.
+  console.log(result.owner_approval.gate_receipt_id, result.owner_approval.exact_next_action);
 }
 ```
 
-The SDK never writes, infers or fabricates an owner approval. Run a held action only after the account owner approves that gate receipt: either run the approved action and commit the held decision with the same gate receipt ID, or pass a server-issued `ownerApprovalReceiptId`, which `runGuarded()` sends only to the server for verification through the action permit. An owner approval never unlocks a `block`. With `riskPolicy: 'block_high'`, an expanded `risk_gate.allow: false` (or the same condition read from slim fields) still stops the action as before.
+The SDK never writes, infers or fabricates an owner approval, and a stopped result's `before_action_directive.exact_next_action` is the SDK's own next step, never the server's. A held run cannot yet be resumed through `runGuarded()`: each guarded run asks the runtime gate again and receives a new gate receipt, and current servers verify an `ownerApprovalReceiptId` only for arbitration approvals. Treat a held action as not done and follow `owner_approval.exact_next_action`; when the server publishes `approval_status_endpoint`, that endpoint reports whether the owner approved, declined, or let the receipt expire. An owner approval never unlocks a `block`. With `riskPolicy: 'block_high'`, an expanded `risk_gate.allow` that is not `true` (or the same condition read from slim fields) still stops the action as before.
 
 A successful `quickStatus()` proves authenticated status connectivity for this configured client and agent identity. It does not prove that every action is intercepted, that passive coverage is certified, or that an unwrapped harness is governed. Measured token savings remain zero until provider-observed usage counts land.
 

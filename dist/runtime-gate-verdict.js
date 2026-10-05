@@ -16,7 +16,9 @@ exports.ownerApprovalHoldFromRuntime = ownerApprovalHoldFromRuntime;
 const BLOCK_DECISIONS = new Set(['block', 'blocked', 'deny', 'denied']);
 const HOLD_DECISIONS = new Set(['review_required', 'owner_approval_required']);
 const WARN_DECISIONS = new Set(['warn']);
-const ALLOW_DECISIONS = new Set(['allow', 'proceed', 'owner_approved']);
+// `selected` and `synthesized` are accepted arbitration resolutions; the
+// backend reports them in enforcement_decision.
+const ALLOW_DECISIONS = new Set(['allow', 'proceed', 'owner_approved', 'selected', 'synthesized']);
 // `advisory` is the enforcement_decision of a plan without production
 // enforcement. It describes the plan, not the verdict.
 const NON_VERDICT_DECISIONS = new Set(['advisory']);
@@ -39,11 +41,17 @@ function text(value, maximum = 500) {
     return trimmed ? trimmed.slice(0, maximum) : null;
 }
 function classifyDecision(value) {
+    // An absent field says nothing; a present field the SDK cannot read is an
+    // unrecognised verdict, never an allow.
+    if (value === undefined || value === null)
+        return null;
     if (typeof value !== 'string')
-        return null;
+        return 'unknown';
     const normalized = value.trim().toLowerCase();
-    if (!normalized || NON_VERDICT_DECISIONS.has(normalized))
+    if (NON_VERDICT_DECISIONS.has(normalized))
         return null;
+    if (!normalized)
+        return 'unknown';
     if (BLOCK_DECISIONS.has(normalized))
         return 'block';
     if (HOLD_DECISIONS.has(normalized))
@@ -117,8 +125,10 @@ function readRuntimeGateVerdict(runtime) {
     // value derived from slim fields. An owner-approval hold is "not blocked"
     // (allow: true) on the expanded shape, so it stays true here too.
     const expandedAllow = riskGate?.allow;
-    const allow = typeof expandedAllow === 'boolean'
-        ? expandedAllow
+    // A present risk_gate without a boolean allow is not an allow (3.7.64 read
+    // `!risk_gate.allow` the same way).
+    const allow = riskGate
+        ? expandedAllow === true
         : decision === null
             ? null
             : !(resolved === 'block'
@@ -163,13 +173,22 @@ function ownerApprovalHoldFromRuntime(runtime, verdict) {
         const candidate = text(value, 240);
         return candidate && SERVER_ENDPOINT.test(candidate) ? candidate : null;
     };
+    // Advisory plans have no owner approval to wait for; a degraded advisory
+    // hold clears only when Marrow recovers and a fresh verdict allows the action.
+    const advisoryDegraded = verdict.degraded && verdict.enforced === false;
     const approvable = !verdict.authority_unavailable
+        && !advisoryDegraded
         && Boolean(verdict.gate_receipt_id)
         && authorization?.durable !== false;
     const pollAfter = guidance?.approval_status_poll_after_ms;
     const receiptField = text(guidance?.receipt_field, 64);
     const approvalEndpoint = approvable ? endpoint(guidance?.approval_endpoint) : null;
     const statusEndpoint = approvable ? endpoint(guidance?.approval_status_endpoint) : null;
+    const statusPollMs = statusEndpoint && typeof pollAfter === 'number' && Number.isInteger(pollAfter) && pollAfter > 0
+        ? pollAfter
+        : null;
+    const receipt = verdict.gate_receipt_id;
+    const decision = verdict.decision_id ? `decision ${verdict.decision_id}` : 'the held decision';
     return {
         state: 'owner_approval_required',
         gate_receipt_id: verdict.gate_receipt_id,
@@ -181,28 +200,34 @@ function ownerApprovalHoldFromRuntime(runtime, verdict) {
         approval_endpoint: approvalEndpoint,
         approval_authority: approvable ? text(guidance?.approval_authority, 64) : null,
         approval_status_endpoint: statusEndpoint,
-        approval_status_poll_after_ms: statusEndpoint && typeof pollAfter === 'number' && Number.isInteger(pollAfter) && pollAfter > 0
-            ? pollAfter
-            : null,
+        approval_status_poll_after_ms: statusPollMs,
         trusted_completion_receipt_required: approvable && guidance?.trusted_completion_receipt_required === true,
         reason: verdict.degraded
             ? 'Marrow could not establish full gate authority for this action. This is not a policy denial, but a high-risk action does not run on a degraded verdict.'
             : verdict.enforced === false
                 ? 'Marrow returned an owner-approval verdict for this action.'
                 : 'Marrow returned an enforced owner-approval verdict for this action.',
+        // SDK-authored next step. It never relays server text that tells an agent
+        // to carry on or to write its own approval.
         exact_next_action: !approvable
-            ? 'Do not run this action yet. Retry the guarded run to obtain a fresh, durable runtime gate verdict; this response authorizes nothing.'
-            : approvalEndpoint
-                ? `Do not run this action yet. The account owner approves gate receipt ${verdict.gate_receipt_id} from an authenticated Marrow dashboard session (POST ${approvalEndpoint}).${statusEndpoint ? ` Wait by polling GET ${statusEndpoint} until it reports the approval.` : ''} Only then run the approved action and commit the same decision with this gate_receipt_id.`
-                : `Do not run this action yet. It needs explicit approval from the account owner for gate receipt ${verdict.gate_receipt_id}. A caller-written approval is not an approval.`,
+            ? advisoryDegraded
+                ? 'Do not run this action yet. Marrow could not establish full gate authority, and this plan has no owner approval to wait for. Retry the guarded run when Marrow recovers.'
+                : 'Do not run this action yet. This response authorizes nothing and cannot be approved. Retry the guarded run when Marrow recovers to get a fresh, durable runtime gate verdict.'
+            : approvalEndpoint && statusEndpoint
+                ? `Do not run this action yet. Wait for the account owner to approve gate receipt ${receipt} from an authenticated Marrow dashboard session (POST ${approvalEndpoint}): read GET ${statusEndpoint}${statusPollMs ? ` every ${Math.ceil(statusPollMs / 1000)}s` : ''} and follow the next step it reports (approved, declined or expired).`
+                : approvalEndpoint
+                    ? `Do not run this action yet. Wait for the account owner to approve gate receipt ${receipt} from an authenticated Marrow dashboard session (POST ${approvalEndpoint}). Only after that approval, run only the approved action and commit ${decision} with this gate_receipt_id.`
+                    : `Do not run this action yet. It needs explicit approval from the account owner for gate receipt ${receipt}, and this Marrow API publishes no owner-approval endpoint for it. A caller-written approval is not an approval; treat the action as not done.`,
     };
 }
 /**
- * Typed error for an enforced runtime gate block. runGuarded() returns it on
+ * Typed error for a runtime gate stop: an enforced block (`MARROW_RUNTIME_GATE_BLOCKED`)
+ * or a verdict the SDK does not recognise on a plan that enforces the gate
+ * (`MARROW_RUNTIME_GATE_UNRECOGNIZED`). runGuarded() returns it on
  * `result.gate_error` (it does not throw), so callers can `throw result.gate_error`.
  */
 class MarrowRuntimeGateBlockedError extends Error {
-    code = 'MARROW_RUNTIME_GATE_BLOCKED';
+    code;
     gateReceiptId;
     decisionId;
     reason;
@@ -210,13 +235,17 @@ class MarrowRuntimeGateBlockedError extends Error {
     degraded;
     verdict;
     constructor(verdict) {
-        const reason = verdict.degraded
-            ? 'Marrow returned a block verdict while its gate authority was degraded; a block stays a block.'
-            : verdict.enforced === false
-                ? 'Marrow returned a block verdict for this action.'
-                : 'Marrow returned an enforced block verdict for this action.';
+        const unrecognized = verdict.decision === 'unknown';
+        const reason = unrecognized
+            ? `Marrow returned a runtime gate verdict this SDK does not recognise (${verdict.server_decision || verdict.enforcement_decision || 'missing or unreadable'}) on a plan that enforces the gate; it is not treated as an allow.`
+            : verdict.degraded
+                ? 'Marrow returned a block verdict while its gate authority was degraded; a block stays a block.'
+                : verdict.enforced === false
+                    ? 'Marrow returned a block verdict for this action.'
+                    : 'Marrow returned an enforced block verdict for this action.';
         super(`${reason}${verdict.gate_receipt_id ? ` Gate receipt ${verdict.gate_receipt_id}.` : ''} The action did not run.`);
         this.name = 'MarrowRuntimeGateBlockedError';
+        this.code = unrecognized ? 'MARROW_RUNTIME_GATE_UNRECOGNIZED' : 'MARROW_RUNTIME_GATE_BLOCKED';
         this.gateReceiptId = verdict.gate_receipt_id;
         this.decisionId = verdict.decision_id;
         this.reason = reason;

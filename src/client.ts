@@ -741,22 +741,29 @@ function runtimeVerdictStop(
 }
 
 /**
- * A stopped guarded run never relays the server's next-step text: on a block it
- * can read "Continue this exact governed action", on production holds it tells
- * the agent to write its own approval, and on a workflow-gate, brief or permit
- * stop it describes the action the SDK just refused to run.
+ * A stopped guarded run never relays the server's agent-facing text in its
+ * directive: on a block the server's next step (and the intervention copy that
+ * quotes it) can read "Continue this exact governed action", on production holds
+ * it tells the agent to write its own approval, and on a workflow-gate, brief or
+ * permit stop it describes the action the SDK just refused to run. Both the
+ * directive's message and its next step become the SDK's own stop text.
  */
 function withSdkStopDirective<T>(result: MarrowGuardedRunResult<T>): MarrowGuardedRunResult<T> {
   const directive = result.before_action_directive;
   if (!result.blocked || !directive) return result;
+  const message = result.owner_approval
+    ? `${result.owner_approval.reason} The action did not run.`
+    : result.gate_error
+    ? result.gate_error.message
+    : result.summary;
   const next = result.owner_approval
     ? result.owner_approval.exact_next_action
     : result.gate_error
     ? `Do not run this action. ${result.gate_error.message}`
     : `Do not run this action. ${result.summary}`;
-  return directive.exact_next_action === next
+  return directive.exact_next_action === next && directive.message === message
     ? result
-    : { ...result, before_action_directive: { ...directive, exact_next_action: next } };
+    : { ...result, before_action_directive: { ...directive, message, exact_next_action: next } };
 }
 
 function riskToleranceForPolicy(policy: MarrowGuardedRiskPolicy | undefined): 'low' | 'medium' | 'high' {

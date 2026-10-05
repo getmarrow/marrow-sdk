@@ -699,3 +699,72 @@ test('F2: every stopped guarded run carries the SDK next step, including permit 
   assert.equal(ran.executed, true);
   assert.equal(ran.result.before_action_directive.exact_next_action, capture(PROD, 'business', 'update_allow').slim.exact_next_action);
 });
+
+// F2b: no agent-facing string of a stopped result relays the server's
+// "Continue this exact governed action" or self-written approval text. The
+// expanded intervention.agent_copy carries both phrases in these captures.
+const FORBIDDEN = /continue this exact|proof\.owner_approval|approved-release-bundle/i;
+
+function agentFacingStrings(result) {
+  const strings = [];
+  const walk = (value, path) => {
+    if (typeof value === 'string') strings.push([path, value]);
+    else if (Array.isArray(value)) value.forEach((item, index) => walk(item, `${path}[${index}]`));
+    else if (value && typeof value === 'object') for (const [key, item] of Object.entries(value)) walk(item, `${path}.${key}`);
+  };
+  walk(result.summary, 'summary');
+  walk(result.error ?? null, 'error');
+  walk(result.before_action_directive ?? null, 'before_action_directive');
+  walk(result.owner_approval ?? null, 'owner_approval');
+  if (result.gate_error) walk({ message: result.gate_error.message, reason: result.gate_error.reason, code: result.gate_error.code }, 'gate_error');
+  return strings;
+}
+
+test('F2b: the expanded intervention.agent_copy texts this guards against', () => {
+  assert.match(capture(PROD, 'business', 'update_block').expanded.intervention.agent_copy, /^BLOCK: Marrow blocked this action before execution\. Do this instead: Continue this exact governed action/);
+  assert.match(capture(PROD, 'business', 'update_hold').expanded.intervention.agent_copy, /Do this instead: Obtain explicit owner approval, then commit the existing decision with proof\.owner_approval = \{ approved_by: "owner"/);
+  assert.match(capture(PROD, 'business', 'protected_block').expanded.intervention.agent_copy, /proof\.owner_approval/);
+  assert.match(capture(PROD, 'team', 'protected_hold').expanded.intervention.agent_copy, /Continue this exact governed action/);
+});
+
+const F2B_STOPS = [
+  ...STOP_CAPTURES.map(([backend, plan, scenario]) => [backend, plan, scenario, {}]),
+  [PROD, 'team', 'protected_hold', {}],
+  [PROD, 'business', 'update_high', { riskPolicy: 'block_high' }],
+  [PROD, 'business', 'update_high', { quickstart: true }],
+  [PROD, 'team', 'update_high', { agentRegistered: false }],
+];
+
+for (const shape of SHAPES) {
+  test(`F2b: no agent-facing field of a stopped result relays forbidden server text (${shape})`, async () => {
+    let stopped = 0;
+    for (const [backend, plan, scenario, options] of F2B_STOPS) {
+      const item = capture(backend, plan, scenario);
+      const run = await guardedRun(item, shape, options);
+      if (!run.result.blocked) continue;
+      stopped += 1;
+      assert.equal(run.executed, false);
+      const label = `${backend} ${plan} ${scenario} ${shape} ${JSON.stringify(options)}`;
+      for (const [path, value] of agentFacingStrings(run.result)) {
+        assert.doesNotMatch(value, FORBIDDEN, `${label}: ${path}`);
+      }
+      const directive = run.result.before_action_directive;
+      assert.ok(directive, label);
+      const expectedMessage = run.result.owner_approval
+        ? `${run.result.owner_approval.reason} The action did not run.`
+        : run.result.gate_error
+        ? run.result.gate_error.message
+        : run.result.summary;
+      assert.equal(directive.message, expectedMessage, label);
+    }
+    // On slim the three update_high cases run (F1: no permit requirement from the slim risk level).
+    assert.equal(stopped, shape === 'slim' ? F2B_STOPS.length - 3 : F2B_STOPS.length, `stopped cases on ${shape}`);
+  });
+}
+
+test('F2b: a run that is not stopped keeps the server directive message', async () => {
+  const item = capture(PROD, 'business', 'update_allow');
+  const run = await guardedRun(item, 'expanded');
+  assert.equal(run.executed, true);
+  assert.equal(run.result.before_action_directive.message, item.expanded.intervention.agent_copy);
+});

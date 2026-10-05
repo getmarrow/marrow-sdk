@@ -676,3 +676,26 @@ test('orient autoWarn keeps advisory behaviour per shape unchanged (Team hold)',
   assert.equal((await orientWith(item.slim)).shouldPause, false);
   assert.equal((await orientWith(item.expanded)).shouldPause, true);
 });
+
+test('F2: every stopped guarded run carries the SDK next step, including permit and brief stops', async () => {
+  const cases = [
+    // [capture, shape, options, expected summary]
+    [capture(PROD, 'team', 'protected_hold'), 'slim', {}, /^Blocked before execution because the required Marrow action permit was not verified/],
+    [capture(PROD, 'team', 'protected_hold'), 'expanded', {}, /^Blocked before execution because the required Marrow action permit was not verified/],
+    [capture(PROD, 'business', 'update_high'), 'expanded', { riskPolicy: 'block_high' }, /^Blocked high-risk action before execution/],
+    [capture(PROD, 'business', 'update_high'), 'expanded', { quickstart: true }, /^Blocked before execution because the required Marrow action permit was not verified/],
+  ];
+  for (const [item, shape, options, summary] of cases) {
+    const run = await guardedRun(item, shape, options);
+    assert.equal(run.executed, false);
+    assert.equal(run.result.blocked, true);
+    assert.match(run.result.summary, summary);
+    const next = run.result.before_action_directive.exact_next_action;
+    assert.equal(next, `Do not run this action. ${run.result.summary}`);
+    assert.doesNotMatch(next, /continue|proof\.owner_approval/i);
+  }
+  // Runs that were not stopped keep the server's directive text unchanged.
+  const ran = await guardedRun(capture(PROD, 'business', 'update_allow'), 'slim');
+  assert.equal(ran.executed, true);
+  assert.equal(ran.result.before_action_directive.exact_next_action, capture(PROD, 'business', 'update_allow').slim.exact_next_action);
+});

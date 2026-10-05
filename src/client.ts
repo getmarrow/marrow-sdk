@@ -740,6 +740,25 @@ function runtimeVerdictStop(
   return null;
 }
 
+/**
+ * A stopped guarded run never relays the server's next-step text: on a block it
+ * can read "Continue this exact governed action", on production holds it tells
+ * the agent to write its own approval, and on a workflow-gate, brief or permit
+ * stop it describes the action the SDK just refused to run.
+ */
+function withSdkStopDirective<T>(result: MarrowGuardedRunResult<T>): MarrowGuardedRunResult<T> {
+  const directive = result.before_action_directive;
+  if (!result.blocked || !directive) return result;
+  const next = result.owner_approval
+    ? result.owner_approval.exact_next_action
+    : result.gate_error
+    ? `Do not run this action. ${result.gate_error.message}`
+    : `Do not run this action. ${result.summary}`;
+  return directive.exact_next_action === next
+    ? result
+    : { ...result, before_action_directive: { ...directive, exact_next_action: next } };
+}
+
 function riskToleranceForPolicy(policy: MarrowGuardedRiskPolicy | undefined): 'low' | 'medium' | 'high' {
   if (policy === 'block_high') return 'medium';
   if (policy === 'off') return 'high';
@@ -1372,7 +1391,7 @@ export class MarrowClient {
   async runGuarded<T>(options: MarrowGuardedRunOptions<T>): Promise<MarrowGuardedRunResult<T>> {
     const verdict: { current: MarrowRuntimeGateVerdict | null } = { current: null };
     const result = await this.runGuardedWithVerdict(options, verdict);
-    return result.gate_verdict !== undefined ? result : { ...result, gate_verdict: verdict.current };
+    return withSdkStopDirective(result.gate_verdict !== undefined ? result : { ...result, gate_verdict: verdict.current });
   }
 
   private async runGuardedWithVerdict<T>(
@@ -1521,15 +1540,6 @@ export class MarrowClient {
           : ownerApproval
           ? `${ownerApproval.reason}${receipt} The action did not run.`
           : `Marrow runtime verdict ${verdict.server_decision || verdict.decision} does not allow this action under riskPolicy block_high.${receipt}`;
-        // The server's next-step text is not relayed on a stop: on a block it can
-        // read "Continue this exact governed action", and on production holds it
-        // tells the agent to write its own approval.
-        const stopDirective = beforeActionDirective
-          ? {
-              ...beforeActionDirective,
-              exact_next_action: ownerApproval ? ownerApproval.exact_next_action : `Do not run this action. ${stopError}`,
-            }
-          : beforeActionDirective;
         return {
           ok: false,
           blocked: true,
@@ -1545,7 +1555,7 @@ export class MarrowClient {
           outcome_closed: false,
           outcome_commit_error: null,
           before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
-          before_action_directive: stopDirective,
+          before_action_directive: beforeActionDirective,
           action_permit: null,
           permit_verified: false,
           permit_closed: false,

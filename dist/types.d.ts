@@ -1,6 +1,7 @@
 /**
  * @getmarrow/sdk — Type Definitions
  */
+import type { MarrowRuntimeGateBlockedError } from './runtime-gate-verdict';
 export type MarrowDecisionType = 'implementation' | 'security' | 'architecture' | 'process' | 'general';
 export type MarrowEnforcementMode = 'off' | 'warn' | 'require' | 'auto';
 export type MarrowDecisionSourceKind = 'human_directed' | 'agent_autonomous' | 'scheduled' | 'integration' | 'system' | 'unknown';
@@ -348,7 +349,73 @@ export interface MarrowGuardedRunResult<T> {
     intervention_receipt?: MarrowInterventionReceipt | null;
     intervention_receipt_error?: string | null;
     completion_evidence_error?: string | null;
+    /**
+     * Runtime gate verdict read from the slim or expanded runtime response.
+     * Null when the guarded run did not consult the agent runtime.
+     */
+    gate_verdict?: MarrowRuntimeGateVerdict | null;
+    /** Set when a runtime gate block stopped the action before execute(). */
+    gate_error?: MarrowRuntimeGateBlockedError | null;
+    /** Set when the runtime gate requires owner approval before execute() may run. */
+    owner_approval?: MarrowOwnerApprovalHold | null;
     summary: string;
+}
+/** Normalized runtime gate verdict: block > owner_approval_required > unknown > warn > allow. */
+export type MarrowRuntimeGateVerdictDecision = 'allow' | 'warn' | 'owner_approval_required' | 'block' | 'unknown';
+export interface MarrowRuntimeGateVerdict {
+    /** Which response shape the verdict was read from; `sdk_fallback` is the SDK's own unavailable/stale answer. */
+    shape: 'expanded' | 'slim' | 'sdk_fallback' | 'none';
+    /** Strictest verdict across risk_gate.decision/enforcement_decision and the slim decision/enforcement_decision. */
+    decision: MarrowRuntimeGateVerdictDecision;
+    /** Raw server decision field, unmodified. */
+    server_decision: string | null;
+    /** Raw server enforcement_decision field (for example `owner_approval_required` or `advisory`), unmodified. */
+    enforcement_decision: string | null;
+    /** true when the plan enforces the verdict, false when it is advisory, null when the response does not say. */
+    enforced: boolean | null;
+    /**
+     * Expanded risk_gate.allow when present, otherwise the same value derived from slim fields.
+     * An owner-approval hold keeps allow: true ("not blocked") as on the expanded shape; read `decision`.
+     */
+    allow: boolean | null;
+    /** Marrow could not establish full status or gate authority for this verdict, or the SDK served a fallback. */
+    degraded: boolean;
+    /** The response authorizes nothing (no durable gate receipt), so no owner can approve it; retry the runtime gate. */
+    authority_unavailable: boolean;
+    risk_level: 'low' | 'medium' | 'high' | null;
+    gate_receipt_id: string | null;
+    /** Decision the runtime created, when it created one. */
+    decision_id: string | null;
+    proof_required: boolean;
+    /** Expanded risk_gate.reasons (the slim shape carries none). */
+    server_reasons: Array<{
+        code: string;
+        severity: string;
+        message: string;
+    }>;
+}
+/** A guarded run held for owner approval. The SDK never writes or fabricates an approval. */
+export interface MarrowOwnerApprovalHold {
+    state: 'owner_approval_required';
+    gate_receipt_id: string | null;
+    /** Decision the runtime created for the held action; commit it with the same gate_receipt_id after approval. */
+    decision_id: string | null;
+    enforced: boolean | null;
+    degraded: boolean;
+    /** false when the response holds no durable receipt an owner could approve; retry the guarded run instead. */
+    approvable: boolean;
+    /** Commit field for a server-issued owner approval receipt, when the server names one. */
+    receipt_field: string | null;
+    /** Server endpoint the account owner uses to approve, when the server publishes one. */
+    approval_endpoint: string | null;
+    approval_authority: string | null;
+    /** Agent-readable endpoint that reports the approval state, when the server publishes one. */
+    approval_status_endpoint: string | null;
+    approval_status_poll_after_ms: number | null;
+    /** The commit closes trusted only with the server-issued approval receipt. */
+    trusted_completion_receipt_required: boolean;
+    reason: string;
+    exact_next_action: string;
 }
 export type MarrowEnforcementOperation = 'issue' | 'verify' | 'close' | 'heartbeat';
 export interface MarrowActionPermitIssueInput {
@@ -1812,7 +1879,21 @@ export interface MarrowAgentRuntimeResult {
     session_id: string | null;
     status: Record<string, unknown>;
     decision_brief: MarrowDecisionBriefResult;
+    /**
+     * Expanded-shape gate verdict. The slim runtime shape (the default for this
+     * SDK) carries no risk_gate; its verdict is in `decision`,
+     * `enforcement_decision` and `risk_gate_enforced`. Use
+     * readRuntimeGateVerdict(runtime) to read either shape.
+     */
     risk_gate: MarrowWorkflowGateResult;
+    /** Slim shape: the runtime gate decision (risk_gate.decision on the expanded shape). */
+    decision?: string;
+    /** Slim shape: risk_gate.enforcement_decision, for example `owner_approval_required`, `block` or `advisory`. */
+    enforcement_decision?: string | null;
+    /** Slim shape: risk_gate.enforced (true where the plan enforces the gate, false where it is advisory). */
+    risk_gate_enforced?: boolean | null;
+    /** `slim` when the server returned the slim runtime shape. */
+    response_mode?: string;
     relevant_lessons: MarrowFleetLesson[];
     deployment_playbooks: MarrowDeploymentMemory[];
     template_suggestion: Record<string, unknown>;

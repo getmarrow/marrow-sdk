@@ -109,8 +109,10 @@ import type {
   MarrowActionPermitCloseResult,
   MarrowEnforcementHeartbeatInput,
   MarrowEnforcementCoverageResult,
+  MarrowRuntimeGateVerdict,
 } from './types';
 import { DurableEventSpool, isSafeLifecycleIdentifier, lifecycleWireRecord, sanitizeLifecycleEvent } from './event-spool';
+import { MarrowRuntimeGateBlockedError, ownerApprovalHoldFromRuntime, readRuntimeGateVerdict } from './runtime-gate-verdict';
 
 const DEFAULT_HINT =
   'Tip: log plans, decisions, and outcomes to Marrow so your agent improves over time.';
@@ -695,6 +697,45 @@ function summarizeCommand(command: string): string {
 function isHighRiskPassiveAction(action: string, surfaces: string[] = []): boolean {
   const haystack = `${action} ${surfaces.join(' ')}`.toLowerCase();
   return /\b(?:deploy|deployment|publish|release|merge|push|migration|migrate|rollback|production|prod|cloudflare|worker|npm|github|secret|token|credential|key|permission|database|db|delete|destroy|revoke|rotate)\b/.test(haystack);
+}
+
+/**
+ * Whether a runtime gate verdict stops a guarded run before execute():
+ * - a block stops unless the plan is advisory (enforced: false);
+ * - an owner-approval hold stops unless the plan is advisory, or the caller
+ *   supplied a server-issued owner approval receipt that the permit must verify;
+ * - a degraded verdict stops a high-risk action (a block stays a block);
+ * - riskPolicy 'block_high' keeps stopping on expanded risk_gate.allow === false
+ *   and on the same condition derived from slim fields.
+ * Advisory verdicts, allow, proceed and warn continue unchanged.
+ */
+function runtimeVerdictStop(
+  verdict: MarrowRuntimeGateVerdict,
+  riskPolicy: MarrowGuardedRiskPolicy,
+  ownerApprovalSupplied: boolean,
+): 'block' | 'owner_approval_required' | 'policy' | null {
+  const enforcedOrUnstated = verdict.enforced !== false;
+  if (verdict.degraded && (
+    verdict.decision === 'block'
+    || verdict.decision === 'owner_approval_required'
+    || verdict.decision === 'unknown'
+    || verdict.risk_level === 'high'
+  )) {
+    return verdict.decision === 'block' ? 'block' : 'owner_approval_required';
+  }
+  if (verdict.decision === 'block' && enforcedOrUnstated) return 'block';
+  if (verdict.decision === 'owner_approval_required' && enforcedOrUnstated
+    && !(ownerApprovalSupplied && !verdict.authority_unavailable)) {
+    return 'owner_approval_required';
+  }
+  if (riskPolicy === 'block_high' && verdict.allow === false) {
+    return verdict.decision === 'block'
+      ? 'block'
+      : verdict.decision === 'owner_approval_required'
+      ? 'owner_approval_required'
+      : 'policy';
+  }
+  return null;
 }
 
 function riskToleranceForPolicy(policy: MarrowGuardedRiskPolicy | undefined): 'low' | 'medium' | 'high' {
@@ -1327,6 +1368,15 @@ export class MarrowClient {
   }
 
   async runGuarded<T>(options: MarrowGuardedRunOptions<T>): Promise<MarrowGuardedRunResult<T>> {
+    const verdict: { current: MarrowRuntimeGateVerdict | null } = { current: null };
+    const result = await this.runGuardedWithVerdict(options, verdict);
+    return result.gate_verdict !== undefined ? result : { ...result, gate_verdict: verdict.current };
+  }
+
+  private async runGuardedWithVerdict<T>(
+    options: MarrowGuardedRunOptions<T>,
+    verdictSink: { current: MarrowRuntimeGateVerdict | null },
+  ): Promise<MarrowGuardedRunResult<T>> {
     const riskPolicy = options.riskPolicy ?? 'warn';
     const useAgentRuntime = options.useAgentRuntime ?? riskPolicy !== 'off';
     const useWorkflowGate = options.useWorkflowGate ?? riskPolicy !== 'off';
@@ -1444,21 +1494,34 @@ export class MarrowClient {
         }
       }
 
-      if (runtime?.risk_gate && !runtime.risk_gate.allow && riskPolicy === 'block_high') {
+      // The runtime verdict is read from fields both wire shapes carry: the
+      // slim shape (this SDK's default) has no risk_gate object.
+      const verdict = runtime ? readRuntimeGateVerdict(runtime) : null;
+      verdictSink.current = verdict;
+      const stop = verdict ? runtimeVerdictStop(verdict, riskPolicy, Boolean(options.ownerApprovalReceiptId)) : null;
+      if (runtime && verdict && stop) {
         this.captureLifecycleEvent({
           ...lifecycleBase,
           event_type: 'pre_action_checked',
           observed_hook: 'pre_action',
           action: safeAction,
-          risk_level: runtime.risk_gate.risk_level,
+          risk_level: verdict.risk_level || undefined,
           outcome_state: 'closed',
           success: false,
           intervention_disposition: 'followed',
           action_changed: true,
         });
+        const gateError = stop === 'block' ? new MarrowRuntimeGateBlockedError(verdict) : null;
+        const ownerApproval = stop === 'owner_approval_required' ? ownerApprovalHoldFromRuntime(runtime, verdict) : null;
+        const receipt = verdict.gate_receipt_id ? ` Gate receipt ${verdict.gate_receipt_id}.` : '';
         return {
           ok: false,
           blocked: true,
+          error: gateError
+            ? gateError.message
+            : ownerApproval
+            ? `${ownerApproval.reason}${receipt} The action did not run.`
+            : `Marrow runtime verdict ${verdict.server_decision || verdict.decision} does not allow this action under riskPolicy block_high.${receipt}`,
           failure_type: 'policy_block',
           decision_id: null,
           brief,
@@ -1471,7 +1534,17 @@ export class MarrowClient {
           outcome_commit_error: null,
           before_action_enforced: Boolean(beforeActionDirective?.must_use_before_action),
           before_action_directive: beforeActionDirective,
-          summary: runtime.exact_next_action || `Blocked by Marrow agent runtime: ${runtime.risk_gate.decision} (${runtime.risk_gate.risk_level}).`,
+          action_permit: null,
+          permit_verified: false,
+          permit_closed: false,
+          gate_verdict: verdict,
+          gate_error: gateError,
+          owner_approval: ownerApproval,
+          summary: gateError
+            ? `Blocked by the Marrow runtime gate: ${gateError.message}`
+            : ownerApproval
+            ? `Held by the Marrow runtime gate for owner approval.${receipt} The action did not run. ${ownerApproval.exact_next_action}`
+            : `Blocked by Marrow agent runtime: ${verdict.server_decision || verdict.decision} (${verdict.risk_level || 'unknown'}).`,
         };
       }
     }
@@ -1653,17 +1726,24 @@ export class MarrowClient {
         observed_hook: 'pre_action',
         action: safeAction,
         decision_id: decisionId,
-        risk_level: runtime?.risk_gate?.risk_level,
+        risk_level: runtime?.risk_gate?.risk_level ?? verdictSink.current?.risk_level ?? undefined,
         outcome_state: 'pending',
       });
 
-      const permitRequired = options.requireActionPermit
-        ?? (runtime?.risk_gate?.risk_level === 'high'
-        || runtime?.risk_gate?.decision === 'review_required'
-        || runtime?.risk_gate?.decision === 'block'
+      const gateVerdict = verdictSink.current;
+      // An enforced hold reaches this point only with a caller-supplied owner
+      // approval receipt; the server must verify it through the permit.
+      const ownerApprovalResume = Boolean(options.ownerApprovalReceiptId)
+        && gateVerdict?.decision === 'owner_approval_required'
+        && gateVerdict.enforced !== false;
+      const permitRequired = ownerApprovalResume || (options.requireActionPermit
+        ?? (gateVerdict?.risk_level === 'high'
+        || gateVerdict?.decision === 'block'
+        || (gateVerdict?.decision === 'owner_approval_required' && gateVerdict.enforced !== false)
+        || gateVerdict?.proof_required === true
         || runtime?.proof_pack?.required === true
         || brief?.risk.level === 'high'
-        || isHighRiskPassiveAction(safeAction, options.surfaces));
+        || isHighRiskPassiveAction(safeAction, options.surfaces)));
       if (riskPolicy !== 'off' || permitRequired) {
         try {
           actionPermit = await this.issueActionPermit({
@@ -1743,7 +1823,7 @@ export class MarrowClient {
           observed_hook: 'action_result',
           action: safeAction,
           decision_id: decisionId || undefined,
-          risk_level: runtime?.risk_gate?.risk_level,
+          risk_level: runtime?.risk_gate?.risk_level ?? verdictSink.current?.risk_level ?? undefined,
           outcome_state: 'pending',
           success: false,
         });
@@ -1784,7 +1864,7 @@ export class MarrowClient {
           observed_hook: failureOutcomeClosed ? 'outcome_closure' : 'action_result',
           action: safeAction,
           decision_id: decisionId || undefined,
-          risk_level: runtime?.risk_gate?.risk_level,
+          risk_level: runtime?.risk_gate?.risk_level ?? verdictSink.current?.risk_level ?? undefined,
           outcome_state: failureOutcomeClosed ? 'closed' : 'pending',
           success: false,
           ...(options.interventionDisposition ? {
@@ -1853,7 +1933,7 @@ export class MarrowClient {
         observed_hook: 'action_result',
         action: safeAction,
         decision_id: decisionId || undefined,
-        risk_level: runtime?.risk_gate?.risk_level,
+        risk_level: runtime?.risk_gate?.risk_level ?? verdictSink.current?.risk_level ?? undefined,
         outcome_state: 'pending',
         success: executionSucceeded,
       });
@@ -1895,7 +1975,7 @@ export class MarrowClient {
         observed_hook: resultOutcomeClosed ? 'outcome_closure' : 'action_result',
         action: safeAction,
         decision_id: decisionId || undefined,
-        risk_level: runtime?.risk_gate?.risk_level,
+        risk_level: runtime?.risk_gate?.risk_level ?? verdictSink.current?.risk_level ?? undefined,
         outcome_state: resultOutcomeClosed ? 'closed' : 'pending',
         success: executionSucceeded,
         ...(options.interventionDisposition ? {

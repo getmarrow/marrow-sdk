@@ -36,6 +36,7 @@ export declare class MarrowClient {
         context?: Record<string, unknown>;
     }): Promise<T>;
     runGuarded<T>(options: MarrowGuardedRunOptions<T>): Promise<MarrowGuardedRunResult<T>>;
+    private runGuardedWithVerdict;
     /**
      * Create a passive runtime shim for agents that own their process.
      *

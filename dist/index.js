@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.marrowEvidence = exports.resolveMarrowEnv = exports.marrowFromEnv = exports.createMarrowClient = exports.formatHabitLoopCopy = exports.classifyMarrowFailure = exports.MarrowLoopRequiredError = exports.MarrowClient = void 0;
+exports.readRuntimeGateVerdict = exports.MarrowRuntimeGateBlockedError = exports.marrowEvidence = exports.resolveMarrowEnv = exports.marrowFromEnv = exports.createMarrowClient = exports.formatHabitLoopCopy = exports.classifyMarrowFailure = exports.MarrowLoopRequiredError = exports.MarrowClient = void 0;
 const client_1 = require("./client");
 var client_2 = require("./client");
 Object.defineProperty(exports, "MarrowClient", { enumerable: true, get: function () { return client_2.MarrowClient; } });
@@ -20,5 +20,8 @@ var env_1 = require("./env");
 Object.defineProperty(exports, "resolveMarrowEnv", { enumerable: true, get: function () { return env_1.resolveMarrowEnv; } });
 var evidence_adapters_1 = require("./evidence-adapters");
 Object.defineProperty(exports, "marrowEvidence", { enumerable: true, get: function () { return evidence_adapters_1.marrowEvidence; } });
+var runtime_gate_verdict_1 = require("./runtime-gate-verdict");
+Object.defineProperty(exports, "MarrowRuntimeGateBlockedError", { enumerable: true, get: function () { return runtime_gate_verdict_1.MarrowRuntimeGateBlockedError; } });
+Object.defineProperty(exports, "readRuntimeGateVerdict", { enumerable: true, get: function () { return runtime_gate_verdict_1.readRuntimeGateVerdict; } });
 exports.default = client_1.MarrowClient;
 //# sourceMappingURL=index.js.map

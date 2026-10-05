@@ -12,6 +12,7 @@ export type { MarrowHabitLoopCopy } from './habit-loop-copy';
 export { createMarrowClient, marrowFromEnv } from './factory';
 export { resolveMarrowEnv } from './env';
 export { marrowEvidence } from './evidence-adapters';
+export { MarrowRuntimeGateBlockedError, readRuntimeGateVerdict } from './runtime-gate-verdict';
 export type { MarrowResolvedEnv, MarrowResolveEnvOptions } from './env';
 
 export type {
@@ -69,6 +70,9 @@ export type {
   MarrowGuardedRiskPolicy,
   MarrowGuardedRunOptions,
   MarrowGuardedRunResult,
+  MarrowRuntimeGateVerdict,
+  MarrowRuntimeGateVerdictDecision,
+  MarrowOwnerApprovalHold,
   MarrowGuardedResultClassification,
   MarrowCompletionEvidence,
   MarrowActionPermitIssueInput,

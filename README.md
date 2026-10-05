@@ -65,6 +65,10 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
+## Unreleased
+
+`runGuarded()` (and the passive runtime's `tool()`, `command()`, `deploy()`, `publish()` and governed fetch, which use it) now reads the runtime gate verdict from the slim runtime response that Marrow serves to this SDK by default, not only from the expanded `risk_gate` object. In 3.7.64 an enforced `block` or owner-approval hold on the slim response did not stop the action unless another check (workflow gate, high-risk brief, or a required action permit) happened to stop it. On plans that enforce the gate (Business and above, and the evaluation period), an enforced block now returns a typed `MarrowRuntimeGateBlockedError` on `result.gate_error`, an owner-approval hold returns `result.owner_approval` with the gate receipt, and neither runs `execute()`. Advisory verdicts, `allow`, `proceed` and healthy `warn` run as before. See [Runtime gate verdicts](#runtime-gate-verdicts).
+
 ## What's New in v3.7.64
 
 Observed model usage now retains the provider identity, token-bucket semantics and pricing evidence needed by the model-cost dashboard. OpenAI Chat/Responses and Anthropic JSON capture preserve cache reads/writes without double counting; unavailable observations remain explicit. See [Model-cost usage evidence](#model-cost-usage-evidence) for supported capture boundaries and streaming limitations.
@@ -243,6 +247,34 @@ if (result.blocked) {
 `runGuarded()` obtains the runtime and workflow gates, records intent, issues and verifies a permit bound to the authenticated account, key, agent, session, exact action, target, and canonical action surfaces when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome only after every exact server-required proof field is present. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration preserves the same surfaces through issue and verify and implements the same closure discipline explicitly.
 
 When an API returns a value for an unsuccessful application outcome, use the typed `classifyResult(result)` option. A classification with `success: false` preserves the returned value while committing and closing failure truth; the governed fetch adapter uses this for normal HTTP 4xx/5xx `Response` objects.
+
+### Runtime gate verdicts
+
+`runGuarded()` reads the runtime gate verdict from fields both runtime response shapes carry: the top-level `decision`, `enforcement_decision` and `risk_gate_enforced` of the slim shape this SDK receives by default, or `risk_gate` on the expanded shape. The strictest of those fields wins, and both shapes reach the same verdict. The verdict is on `result.gate_verdict`; `readRuntimeGateVerdict(runtime)` reads it from a direct `agentRuntime()` call.
+
+| Runtime verdict | `execute()` | Result |
+| --- | --- | --- |
+| `block` where the plan enforces the gate | does not run | `blocked: true`, `failure_type: 'policy_block'`, `gate_error` (`MarrowRuntimeGateBlockedError` with `gateReceiptId` and `reason`) |
+| `review_required` / `owner_approval_required` where the plan enforces the gate | does not run | `blocked: true`, `owner_approval` with the gate receipt, the decision Marrow created, and the approval and status endpoints when the server publishes them |
+| advisory verdict (`risk_gate_enforced: false`, for example the Team plan) | runs; the verdict is reported, not enforced | `gate_verdict.enforced: false`; high-risk or proof-required work still needs a verified action permit |
+| `allow`, `proceed`, healthy `warn` | runs as before | unchanged |
+| degraded verdict for high-risk work, the SDK's high-risk unavailable fallback, or a stale cached verdict | does not run | a block stays a block; otherwise `owner_approval` with `approvable: false` when no durable receipt exists, so retry the guarded run |
+
+```ts
+const result = await marrow.runGuarded({
+  action: 'update the weekly customer newsletter',
+  type: 'update',
+  execute: async () => sendNewsletter(),
+});
+
+if (result.gate_error) throw result.gate_error;
+if (result.owner_approval) {
+  // The account owner approves the held gate receipt from an authenticated Marrow dashboard session.
+  console.log(result.owner_approval.gate_receipt_id, result.owner_approval.approval_status_endpoint);
+}
+```
+
+The SDK never writes, infers or fabricates an owner approval. Run a held action only after the account owner approves that gate receipt: either run the approved action and commit the held decision with the same gate receipt ID, or pass a server-issued `ownerApprovalReceiptId`, which `runGuarded()` sends only to the server for verification through the action permit. An owner approval never unlocks a `block`. With `riskPolicy: 'block_high'`, an expanded `risk_gate.allow: false` (or the same condition read from slim fields) still stops the action as before.
 
 A successful `quickStatus()` proves authenticated status connectivity for this configured client and agent identity. It does not prove that every action is intercepted, that passive coverage is certified, or that an unwrapped harness is governed. Measured token savings remain zero until provider-observed usage counts land.
 

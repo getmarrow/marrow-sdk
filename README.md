@@ -65,7 +65,7 @@ npx -y @getmarrow/install@latest doctor
 
 Detection and notification are automatic. Package and configuration changes remain explicit and subject to the operator's normal change policy.
 
-## Unreleased
+## What's New in v3.7.65
 
 - Guarded runs now enforce the runtime gate verdict from the slim runtime response Marrow serves this SDK by default. On plans that enforce the gate (Business and above, and the evaluation period):
   - an enforced block stops before `execute()` and returns `gate_error` (`MarrowRuntimeGateBlockedError`, code `MARROW_RUNTIME_GATE_BLOCKED`);
@@ -77,12 +77,12 @@ Detection and notification are automatic. Package and configuration changes rema
 - A degraded verdict that holds, blocks or rates the action high-risk no longer runs on any plan; a block stays a block. Retry once Marrow recovers. On advisory plans (Team, Free) such a degraded hold returns `owner_approval` with `approvable: false`, because there is no owner approval to wait for.
 - Enforced holds and blocks now stop even with `requireActionPermit: false`, or with `riskPolicy: 'off'` plus `useAgentRuntime: true`.
 - Advisory plans (Team, Free) run and report the verdict on `gate_verdict`, on both response shapes. Old servers or proxies returning the expanded shape previously failed closed on advisory holds.
-- Stopped results carry the SDK's own next step in `before_action_directive.exact_next_action`, not the server's text.
+- Stopped results carry the SDK's own text in `before_action_directive.message` and `before_action_directive.exact_next_action`, never the server's. Runs that were not stopped keep the server's directive.
 - `orient({ autoWarn: true })` sets `shouldPause` for enforced blocks and holds on the slim shape too.
 - The SDK never writes an owner approval; a server-issued `ownerApprovalReceiptId` is only sent to the server for verification. A held action cannot yet be resumed through `runGuarded()`.
 - Summary text for runtime stops changed. Match on `gate_error.code` or `owner_approval.state`, not on summary strings.
 
-## What's New in v3.7.64
+### Previous v3.7.64
 
 Observed model usage now retains the provider identity, token-bucket semantics and pricing evidence needed by the model-cost dashboard. OpenAI Chat/Responses and Anthropic JSON capture preserve cache reads/writes without double counting; unavailable observations remain explicit. See [Model-cost usage evidence](#model-cost-usage-evidence) for supported capture boundaries and streaming limitations.
 
@@ -290,7 +290,7 @@ if (result.owner_approval) {
 }
 ```
 
-The SDK never writes, infers or fabricates an owner approval, and a stopped result's `before_action_directive.exact_next_action` is the SDK's own next step, never the server's. A held run cannot yet be resumed through `runGuarded()`: each guarded run asks the runtime gate again and receives a new gate receipt, and current servers verify an `ownerApprovalReceiptId` only for arbitration approvals. Treat a held action as not done and follow `owner_approval.exact_next_action`; when the server publishes `approval_status_endpoint`, that endpoint reports whether the owner approved, declined, or let the receipt expire. An owner approval never unlocks a `block`. With `riskPolicy: 'block_high'`, an expanded `risk_gate.allow` that is not `true` (or the same condition read from slim fields) still stops the action as before.
+The SDK never writes, infers or fabricates an owner approval, and a stopped result's `before_action_directive.message` and `before_action_directive.exact_next_action` are the SDK's own text, never the server's. A held run cannot yet be resumed through `runGuarded()`: each guarded run asks the runtime gate again and receives a new gate receipt, and current servers verify an `ownerApprovalReceiptId` only for arbitration approvals. Treat a held action as not done and follow `owner_approval.exact_next_action`; when the server publishes `approval_status_endpoint`, that endpoint reports whether the owner approved, declined, or let the receipt expire. An owner approval never unlocks a `block`. With `riskPolicy: 'block_high'`, an expanded `risk_gate.allow` that is not `true` (or the same condition read from slim fields) still stops the action as before.
 
 A successful `quickStatus()` proves authenticated status connectivity for this configured client and agent identity. It does not prove that every action is intercepted, that passive coverage is certified, or that an unwrapped harness is governed. Measured token savings remain zero until provider-observed usage counts land.
 

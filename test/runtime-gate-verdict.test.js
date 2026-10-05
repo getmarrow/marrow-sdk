@@ -485,7 +485,7 @@ test('README documents runtime gate verdicts on both shapes without promising mo
   assert.doesNotMatch(readme, /pass a server-issued `ownerApprovalReceiptId`/);
   assert.match(readme, /Action permits are required exactly as in 3\.7\.64/);
   assert.match(readme, /An owner approval never unlocks a `block`\./);
-  assert.match(readme, /^## Unreleased$/m);
+  assert.match(readme, /^## What's New in v3\.7\.65$/m);
   assert.doesNotMatch(readme, /runtime\.decision_id/);
 });
 

@@ -4,7 +4,7 @@
 
 Marrow is the runtime control and proof layer for teams running AI agents. `@getmarrow/sdk` is the Node.js and TypeScript client for that layer: use it when you own the agent process and need pre-action policy gates, owner approvals, proof-backed completion, passive outcome capture, and tenant-scoped fleet learning in code.
 
-**Current version: 3.7.65.** See [What's New in v3.7.65](#whats-new-in-v3765). Older release notes are in [CHANGELOG.md](./CHANGELOG.md).
+**Current version: 3.7.65.** See [What's New in v3.7.65](#whats-new-in-v3765). Older release notes are in the [changelog](https://github.com/getmarrow/marrow-sdk/blob/main/CHANGELOG.md).
 
 ## Contents
 
@@ -46,7 +46,7 @@ For automatic environment detection and setup, use the universal installer:
 npx @getmarrow/install activate
 ```
 
-The SDK uses the Node.js global `fetch`. Put your key in `MARROW_API_KEY` or in a `.marrow/env` file with owner-only permissions; see [Environment](#environment).
+The SDK uses the Node.js global `fetch`. Put your key in `MARROW_API_KEY`. With `marrowFromEnv()` it can also come from an owner-only env file; see [Environment](#environment).
 
 ## Quick Start
 
@@ -83,20 +83,24 @@ A successful `quickStatus()` proves authenticated status connectivity for this c
 
 `runGuarded()` is the main control surface. It obtains the runtime and workflow gates, records intent, issues and verifies a permit bound to the authenticated account, key, agent, session, exact action, target, and canonical action surfaces when required, prevents execution when strict policy or permit verification blocks it, and closes the success or failure outcome only after every exact server-required proof field is present. Use the lower-level `agentRuntime()`, `think()`, permit, and `commit()` methods only when your integration preserves the same surfaces through issue and verify and implements the same closure discipline explicitly.
 
-Options on `runGuarded()`:
+Options on `runGuarded()` (only `action` and `execute` are required):
 
-| Option | Purpose |
-| --- | --- |
-| `action`, `type`, `role`, `surfaces`, `context`, `project`, `harness` | Describe the action. `role` is one of `deploy`, `audit`, `patch`, `review`, `general`. |
-| `useWorkflowGate`, `riskTolerance`, `requiresApproval` | Also evaluate the workflow gate and set its tolerance (`low`, `medium`, `high`). |
-| `correlationId`, `interventionDisposition`, `actionChanged` | Link lifecycle receipts and report, with evidence, whether guidance was `followed`, `ignored`, or `overridden`. |
-| `riskPolicy` | `'off'`, `'warn'`, or `'block_high'`. With `'block_high'`, a gate that does not allow the action stops it. |
-| `useAgentRuntime` | Consult the agent runtime gate (the default guarded path). |
-| `requireActionPermit` | Force a signed action permit for this action even when the gate does not require one. |
-| `execute` | The callback that performs the work. It never runs when the gate blocks or holds. |
-| `completionEvidence` | Evidence attached to the outcome commit; see [Completion evidence](#completion-evidence). |
-| `classifyResult` | Decide success or failure from the returned value; see below. |
-| `modelUsage` | Compact token and cost counts to attach to the commit. |
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `action`, `type`, `role`, `surfaces`, `context`, `project`, `harness` | | Describe the action. `role` is one of `deploy`, `audit`, `patch`, `review`, `general`. |
+| `actionTarget` | | Protected resource the permit is bound to, for example `repository:environment`. |
+| `riskPolicy` | `'warn'` | `'off'`, `'warn'`, or `'block_high'`. With `'block_high'`, a gate that does not allow the action stops it. |
+| `useAgentRuntime`, `useWorkflowGate` | `riskPolicy !== 'off'` | Consult the agent runtime gate and the workflow gate. |
+| `riskTolerance`, `requiresApproval` | | Workflow gate tolerance (`low`, `medium`, `high`) and approval flag. |
+| `requireActionPermit` | | Force a signed action permit for this action even when the gate does not require one. |
+| `ownerApprovalReceiptId` | | A server-issued owner approval receipt, sent to the server for verification only. |
+| `correlationId`, `interventionDisposition`, `actionChanged` | | Link lifecycle receipts and report, with evidence, whether guidance was `followed`, `ignored`, or `overridden`. |
+| `provenance`, `modelUsage` | | Decision provenance, and compact token and cost counts to attach to the commit. |
+| `execute` | | The callback that performs the work. It never runs when the gate blocks or holds. |
+| `completionEvidence` | | Evidence attached to the outcome commit; see [Completion evidence](#completion-evidence). |
+| `classifyResult` | | Decide success or failure from the returned value; see below. |
+| `requireOutcomeClosure` | `true` | Close the success or failure outcome. |
+| `includeValueReport`, `valueReportPeriod` | | Also fetch a value report after the run. |
 
 When an API returns a value for an unsuccessful application outcome, use the typed `classifyResult(result)` option. A classification with `success: false` preserves the returned value while committing and closing failure truth; the governed fetch adapter uses this for normal HTTP 4xx/5xx `Response` objects.
 
@@ -115,7 +119,7 @@ Result fields worth checking: `ok`, `blocked`, `result`, `failure_type`, `decisi
 | `allow`, `proceed`, healthy `warn` | runs as before | unchanged |
 | degraded verdict for high-risk work, the SDK's high-risk unavailable fallback, or a stale cached verdict | does not run | a block stays a block; otherwise `owner_approval` with `approvable: false` when no durable receipt exists or the plan is advisory, so retry when Marrow recovers |
 
-Action permits are required exactly as in 3.7.64: a high-risk decision brief, high-risk action text, an expanded `risk_gate` that is high-risk or proof-required, or `requireActionPermit: true`.
+Permit requirements are under [Action permits](#action-permits).
 
 ```ts
 const result = await marrow.runGuarded({
@@ -138,12 +142,12 @@ With `riskPolicy: 'block_high'`, an expanded `risk_gate.allow` that is not `true
 Some actions are held for the account owner instead of being allowed or blocked outright. A hold is returned, never resolved, by the SDK:
 
 - `runGuarded()` returns `owner_approval` with `state: 'owner_approval_required'`, the `gate_receipt_id`, the `decision_id` Marrow created, `approvable`, `reason`, `exact_next_action`, and the `approval_endpoint` and `approval_status_endpoint` when the server publishes them.
-- The owner approves or declines in their own tool: the chat or terminal session where Marrow is installed. The Marrow dashboard shows receipts and history; it is not where approvals are made.
-- Treat a held action as not done and follow `owner_approval.exact_next_action`. When the server publishes `approval_status_endpoint`, that endpoint reports whether the owner approved, declined, or let the receipt expire; `approval_status_poll_after_ms` suggests how often to check.
+- The owner approves or declines in their own tool: the chat or terminal session where the Marrow MCP server or installer is set up. The SDK has no approve call, so this needs one of them. The Marrow dashboard shows receipts and history; it is not where approvals are made.
+- Treat a held action as not done. `exact_next_action` is SDK-authored text; for an approvable hold it still refers to the approval endpoint and an authenticated dashboard session, which does not match the chat-or-terminal flow above. Use it for the gate receipt and decision ids and the status check, and make the approval in the owner's own tool. When the server publishes `approval_status_endpoint`, that endpoint reports whether the owner approved, declined, or let the receipt expire; `approval_status_poll_after_ms` suggests how often to check.
 - A held run cannot yet be resumed through `runGuarded()`: each guarded run asks the runtime gate again and receives a new gate receipt. Current servers verify an `ownerApprovalReceiptId` only for arbitration approvals (see [Agent Disagreement Arbitration](#agent-disagreement-arbitration)).
 - On advisory plans, or when Marrow's gate authority is degraded and no durable receipt exists, the hold carries `approvable: false` because there is no owner approval to wait for. Retry once Marrow recovers.
 
-The SDK never writes, infers or fabricates an owner approval. A server-issued approval receipt is only sent back to the server for verification; caller-written approval flags are not accepted as owner authorization. An owner approval never unlocks a `block`. A stopped result's `before_action_directive.message` and `before_action_directive.exact_next_action` are the SDK's own text, never the server's.
+The SDK never writes, infers or fabricates an owner approval. A server-issued approval receipt is only sent back to the server for verification; caller-written approval flags are not accepted as owner authorization. An owner approval never unlocks a `block`. A stopped result's `before_action_directive.message` and `before_action_directive.exact_next_action` are the SDK's own text, never the server's. Runs that were not stopped keep the server's directive.
 
 ### Action permits
 
@@ -154,6 +158,8 @@ Before `execute()` runs, `runGuarded()` binds the runtime gate to the governed d
 - failures before execution are recorded as non-executed outcomes rather than silently bypassed;
 - `runGuarded()` closes its consumed permit with the exact bounded completion evidence; ordinary lifecycle receipts cannot close permits;
 - lower-risk advisory mode remains available, while callers can set `requireActionPermit: true` for any action.
+
+Action permits are required exactly as in 3.7.64: for a high-risk decision brief, high-risk action text, an expanded `risk_gate` that is high-risk or proof-required, or `requireActionPermit: true`. The 3.7.65 gate verdicts add no permit requirement for routine work.
 
 `issueActionPermit()`, `verifyActionPermit()`, and `closeActionPermit()` expose the same three steps for integrations that cannot use `runGuarded()`. `enforcementHeartbeat()` submits authenticated client-self-reported hook/configuration telemetry without uploading raw configuration; it does not certify hook integrity or coverage. `enforcementCoverage()` reports permit completion, bypasses, sidecar freshness, and exact repair steps.
 
@@ -232,11 +238,11 @@ Failed receipts are classified so ordinary failures heal themselves and only rea
 
 - **Recoverable** failures are retried by the background drain with at most three recovery attempts, a fifteen-minute cooldown between attempts, and at most five recoveries per drain. Older failed receipts written before this classification existed are included.
 - **Server-owned** receipts (HTTP 409) mean the server already holds durable evidence for that event ID; they are never replayed.
-- **Auth-class** failures (HTTP 401/403) are never retried automatically. `failed` counts only this class, and only it raises `attention_required`.
+- **Auth-class** failures (HTTP 401/403) are never retried automatically. `failed` counts only this class. Among delivery failures only this class raises `attention_required`; a spool health error (the spool cannot be read or drained) also does, with the fix in `exact_fix`.
 
 `recoverable`, `server_owned`, and `recovery_exhausted` counts keep the other classes visible without demanding action. After restoring a credential, call `recoverLifecycleEvents()` to requeue auth-class and recoverable failed receipts with a fresh recovery budget, or pass exact event IDs for a bounded retry; server-owned receipts are always skipped. Recovery bookkeeping is local-only metadata and is never included in the delivery request body. Every state change is a durable spool write, so recovery never happens silently.
 
-Marrow reports passive activity from authenticated client-self-reported receipts. Those receipts can show delivered telemetry but cannot certify interception, activation, drift-free hooks, or permit closure. Missing denominators return insufficient data rather than a made-up percentage. Run `npx @getmarrow/install doctor` to inspect connection and configured scope; use the governed wrapper for consequential execution.
+Marrow reports passive activity from authenticated client-self-reported receipts. Those receipts can show delivered telemetry but cannot certify interception, activation, drift-free hooks, or permit closure. Missing denominators return insufficient data rather than a made-up percentage. Use the governed wrapper for consequential execution.
 
 ## Lifecycle Receipts and Decision Traces
 
@@ -270,7 +276,7 @@ Event types cover prompts, goals, pre-action checks, risk gates, tool and comman
 
 The result reports `delivery_state` (`accepted`, `pending`, or `failed`), `evidence_authority` (`client_self_reported` for public submissions), `certified_coverage`, activation scope, lifecycle processing, and enforcement closeout truth. Accepted delivery cannot certify coverage or close a permit.
 
-Tool or workflow completion keeps an outcome pending until Marrow receives explicit success/failure closure. That distinction prevents a successful command exit from being mistaken for a successful business outcome. `commit()` accepts `identifiedWorkflowId` and `reusedIdentifiedWorkflow` so a caller can close an identified workflow without rediscovering it; the commit then records `reused_identified_workflow` so token savings stay evidence-backed.
+Tool or workflow completion keeps an outcome pending until Marrow receives explicit success/failure closure. That distinction prevents a successful command exit from being mistaken for a successful business outcome. `commit()` accepts `identifiedWorkflowId` (or `identified_workflow_id`) and `reusedIdentifiedWorkflow` so a caller can close an identified workflow without rediscovering it; the commit then records `reused_identified_workflow` so token savings stay evidence-backed. Status, runtime, and commit responses keep additive server proof fields such as `runtime_gate_used`. Guarded runs send a compact action-result receipt before outcome closure.
 
 `trace.intervention_receipt` is the owner-readable proof for one governed moment. It reports what Marrow blocked, warned about, or held for review; the required workflow; permit follow-through; proof status; and the recorded outcome. It never includes raw context, raw outcomes, proof values, credentials, or another tenant's data. Relay one factual receipt summary after a meaningful intervention; stay quiet for routine low-risk work. Guarded results carry the same receipt on `intervention_receipt` without making its retrieval part of action success.
 
@@ -362,7 +368,7 @@ The read and runtime control path fails soft, fast, and explicitly:
 
 ### Keeping the SDK current
 
-Marrow's hosted API, website, and dashboard update automatically; your project's SDK dependency and generated passive runtime do not silently rewrite themselves. Keeping them current delivers new client-side features, compatibility improvements, and any published security fixes. Supported clients report their package version during authenticated status/runtime activity, and Marrow returns a `client_update` notice with the exact action when the version is behind or unknown.
+Marrow's hosted API, website, and dashboard update automatically; your project's SDK dependency and generated passive runtime do not silently rewrite themselves. Supported clients report their package version during authenticated status/runtime activity, and Marrow returns a `client_update` notice with the exact action when the version is behind or unknown.
 
 ```bash
 npm install @getmarrow/sdk@latest
@@ -382,22 +388,13 @@ Streaming/SSE usage is not captured by this JSON path. Use an explicit usage ada
 
 ## What's New in v3.7.65
 
-- Guarded runs now enforce the runtime gate verdict from the slim runtime response Marrow serves this SDK by default. On plans that enforce the gate (Business and above, and the evaluation period):
-  - an enforced block stops before `execute()` and returns `gate_error` (`MarrowRuntimeGateBlockedError`, code `MARROW_RUNTIME_GATE_BLOCKED`);
-  - an owner-approval hold stops and returns `owner_approval`: the gate receipt, the created decision, and the approval and status endpoints when the server publishes them;
-  - a verdict this SDK does not recognise stops with `gate_error.code` `MARROW_RUNTIME_GATE_UNRECOGNIZED` instead of running.
-  - In 3.7.64 the block and the hold could run. This applies to `runGuarded()` and to `tool()`, `command()`, `deploy()`, `publish()` and governed fetch.
+- Guarded runs now enforce the runtime gate verdict from the slim runtime response Marrow serves this SDK by default. In 3.7.64 an enforced block and an owner-approval hold could still run. See [Runtime gate verdicts](#runtime-gate-verdicts) for the outcomes and [Approvals](#approvals) for holds.
+- This applies to `runGuarded()` and to the passive runtime's `tool()`, `command()`, `deploy()`, `publish()` and governed fetch, and holds and blocks stop even with `requireActionPermit: false`.
 - New, all additive: `readRuntimeGateVerdict()`, `MarrowRuntimeGateBlockedError`, and the optional result fields `gate_verdict`, `gate_error` and `owner_approval`. Existing code compiles unchanged.
-- Action permits are required exactly as in 3.7.64 for work the gate lets through (a high-risk decision brief, high-risk action text, an expanded high-risk or proof-required gate, or `requireActionPermit`). This release adds no permit requirement for routine work.
-- A degraded verdict that holds, blocks or rates the action high-risk no longer runs on any plan; a block stays a block. Retry once Marrow recovers. On advisory plans (Team, Free) such a degraded hold returns `owner_approval` with `approvable: false`, because there is no owner approval to wait for.
-- Enforced holds and blocks now stop even with `requireActionPermit: false`, or with `riskPolicy: 'off'` plus `useAgentRuntime: true`.
-- Advisory plans (Team, Free) run and report the verdict on `gate_verdict`, on both response shapes. Old servers or proxies returning the expanded shape previously failed closed on advisory holds.
-- Stopped results carry the SDK's own text in `before_action_directive.message` and `before_action_directive.exact_next_action`, never the server's. Runs that were not stopped keep the server's directive.
-- `orient({ autoWarn: true })` sets `shouldPause` for enforced blocks and holds on the slim shape too.
-- The SDK never writes an owner approval; a server-issued `ownerApprovalReceiptId` is only sent to the server for verification. A held action cannot yet be resumed through `runGuarded()`.
+- A degraded verdict that holds, blocks or rates the action high-risk no longer runs on any plan; a block stays a block.
 - Summary text for runtime stops changed. Match on `gate_error.code` or `owner_approval.state`, not on summary strings.
 
-Older release notes: [CHANGELOG.md](./CHANGELOG.md).
+Older release notes: [changelog](https://github.com/getmarrow/marrow-sdk/blob/main/CHANGELOG.md).
 
 ## Configuration
 
@@ -407,10 +404,10 @@ Older release notes: [CHANGELOG.md](./CHANGELOG.md).
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `baseUrl` | Marrow API | API base override |
-| `agentId` | from env | Agent identity sent with every request |
-| `sessionId` | from env | Session identity for correlation |
-| `mode` | | Loop enforcement mode: `off`, `warn`, `require`, or `auto` |
+| `baseUrl` | `https://api.getmarrow.ai` | API base override |
+| `agentId` | none | Agent identity sent with every request (`marrowFromEnv()` fills it from `MARROW_FLEET_AGENT_ID`) |
+| `sessionId` | none | Session identity for correlation (`marrowFromEnv()` fills it from `MARROW_SESSION_ID`) |
+| `mode` | `'warn'` | Loop enforcement mode: `off`, `warn`, `require`, or `auto` |
 | `durableEventSpool` | `true` | Keep the owner-only local lifecycle spool |
 | `eventSpoolPath` | `~/.marrow/spool/sdk-<namespace>.json` | Spool location |
 | `requestTimeoutMs` | 8,000 | Deadline for ordinary requests |
@@ -423,20 +420,20 @@ Deadline values are bounded to 1–30 seconds, and high-risk runtime never recei
 
 ### Passive runtime options
 
-`createPassiveRuntime(options)` accepts `fetchControlMode` (`'observation_only'` or `'governed'`), `patchGlobalFetch`, `fetch` (a custom fetch, or `false`), `captureModelUsage`, `lifecycleFlushIntervalMs`, `requireOutcomeClosure`, `useAgentRuntime`, `useWorkflowGate`, `defaultType`, `defaultRole`, `defaultRiskPolicy`, `actionPrefix`, `includeValueReport`, and `valueReportPeriod`. The install result reports `coverageScope`, `fetchControlMode`, `governedFetchAvailable`, and `governanceEnforced`.
+`createPassiveRuntime(options)` accepts `fetchControlMode` (`'observe'`, the default, or `'governed'`), `patchGlobalFetch`, `fetch` (a custom fetch, or `false`), `captureModelUsage`, `lifecycleFlushIntervalMs`, `requireOutcomeClosure`, `useAgentRuntime`, `useWorkflowGate`, `defaultType`, `defaultRole`, `defaultRiskPolicy`, `actionPrefix`, `includeValueReport`, and `valueReportPeriod`. The install result reports `coverageScope`, `fetchControlMode` (`'observation_only'` or `'governed'`), `governedFetchAvailable`, and `governanceEnforced`.
 
 ### Environment
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `MARROW_API_KEY` | Yes | Account or agent-bound API key (`MARROW_KEY` is accepted as a fallback) |
-| `MARROW_BASE_URL` | No | API base override |
-| `MARROW_FLEET_AGENT_ID` | No | Default agent identity (`MARROW_AGENT_ID` is accepted as a fallback) |
-| `MARROW_SESSION_ID` | No | Default session identity |
+| `MARROW_BASE_URL` | No | API base override (read by `marrowFromEnv()` and `resolveMarrowEnv()`) |
+| `MARROW_FLEET_AGENT_ID` | No | Agent identity for `marrowFromEnv()` (`MARROW_AGENT_ID` is accepted as a fallback) |
+| `MARROW_SESSION_ID` | No | Session identity for `marrowFromEnv()` |
 | `MARROW_CLIENT` | No | Source client label for provenance (`MARROW_HARNESS` and `MARROW_AGENT_CLIENT` are accepted as fallbacks) |
 | `MARROW_PASSIVE_TOKEN_USAGE` | No | Set to `false` to stop passive token-usage capture |
 
-`marrowFromEnv()` and `resolveMarrowEnv()` use the shared Marrow key resolver that the installer and MCP integrations also use. When the key is not in the process environment, the resolver walks up to eight directories from the working directory looking for `.marrow/env`, `.marrow/env.local`, `.env`, and `.env.local`, then falls back to `~/.marrow/env` and `~/.marrow/env.local`. Use the host's secret manager first; the env-file fallback exists for owned development environments. Keep env files owner-only (`chmod 600`).
+`new MarrowClient(key)` reads none of these except through its own options; `marrowFromEnv()` and `resolveMarrowEnv()` use the shared Marrow key resolver that the installer and MCP integrations also use. When the key is not in the process environment, the resolver walks up to eight directories from the working directory looking for `.marrow/env`, `.marrow/env.local`, `.env`, and `.env.local`, then falls back to `~/.marrow/env` and `~/.marrow/env.local`. Use the host's secret manager first; the env-file fallback exists for owned development environments. Keep env files owner-only (`chmod 600`).
 
 ## API Reference
 
@@ -481,7 +478,7 @@ Deadline values are bounded to 1–30 seconds, and high-risk runtime never recei
 | `modelUsage(input)` | Record compact token, cost, and latency counts exposed by the harness |
 | `endSession(autoCommitOpen)` | End the session, optionally auto-committing open decisions |
 
-Exported helpers: `MarrowClient`, `createMarrowClient`, `marrowFromEnv`, `resolveMarrowEnv`, `marrowEvidence`, `readRuntimeGateVerdict`, `classifyMarrowFailure`, `formatHabitLoopCopy`, `MarrowRuntimeGateBlockedError`, and `MarrowLoopRequiredError`. All public types are exported from the package root.
+Exported helpers: `MarrowClient`, `createMarrowClient`, `marrowFromEnv`, `resolveMarrowEnv`, `marrowEvidence`, `readRuntimeGateVerdict`, `classifyMarrowFailure`, `formatHabitLoopCopy`, `MarrowRuntimeGateBlockedError`, and `MarrowLoopRequiredError`. Most public types are exported from the package root. The runtime and workflow-gate request and result types (`MarrowAgentRuntimeRequest`/`Result`, `MarrowWorkflowGateRequest`/`Result`) and the lease, coordination proof packet, and replay comparison types are not; derive them with `Parameters<>` and `Awaited<ReturnType<>>`.
 
 ## Context and Workflow Examples
 
@@ -533,7 +530,7 @@ Verify current claims through the [public evidence manifest](https://getmarrow.a
 - Sanitized aggregate contribution is optional and never means sharing raw prompts, code, secrets, proof packs, account identifiers, agent identifiers, or customer identities.
 - Token value proof stores compact usage counts and labels when supplied by the harness; it does not require raw prompt or completion text.
 - Lifecycle receipts, completion evidence, usage reports, and the local spool never need raw prompts, completions, command output, tool output, or credentials. Arbitration evidence references are opaque identifiers; URLs, paths, and raw evidence are not accepted.
-- The local spool and lock files are created with owner-only permissions. Spool files written by this version carry recovery metadata that older SDK binaries (3.7.62 or earlier) reject under their closed record allowlist: on downgrade, the older binary quarantines the new-format spool file as corrupt with the bytes preserved, so no data is lost. Downgrades are not supported; stay on the current version or upgrade.
+- Spool files written by this version carry recovery metadata that older SDK binaries (3.7.62 or earlier) reject under their closed record allowlist: on downgrade, the older binary quarantines the new-format spool file as corrupt with the bytes preserved, so no data is lost. Downgrades are not supported; stay on the current version or upgrade.
 - Marrow returns guidance and policy data. Do not execute returned text as shell input.
 - Approvals are made by the account owner in their own tool; the SDK never writes an approval and the dashboard only shows receipts and history.
 
@@ -543,12 +540,12 @@ See the [Trust Center](https://getmarrow.ai/trust/) for implemented controls, cu
 
 - **`quickStatus()` reports `available: false` or `source: 'last_known'`.** Marrow is unreachable or slow. Read `error_code` and `exact_fix`; low-risk reads continue with a warning, high-risk gates fail closed until a fresh gate is available.
 - **Authentication or permission failure.** Restore `MARROW_API_KEY` from your secret store and restart the agent process. Then call `recoverLifecycleEvents()` to requeue auth-class receipts that were held in the spool.
-- **`lifecycleBacklog().state` is `attention_required`.** Only auth-class delivery failures raise this. Fix the credential, then recover as above; recoverable and server-owned receipts need no action.
-- **A guarded run returned `owner_approval`.** The action is not done. Follow `exact_next_action`; the owner approves in their own tool, and the status endpoint reports the result. Rerun the action afterwards. If `approvable` is `false`, retry once Marrow recovers.
+- **`lifecycleBacklog().state` is `attention_required`.** Auth-class delivery failures or a spool health error raise this; read `exact_fix`. For auth failures, fix the credential and recover as above; recoverable and server-owned receipts need no action.
+- **A guarded run returned `owner_approval`.** The action is not done. Do not run it. The owner approves in their own tool (chat or terminal, via the MCP server or installer); the status endpoint reports the result. A held run cannot be resumed through `runGuarded()`, so rerun the action afterwards. If `approvable` is `false`, retry once Marrow recovers.
 - **A guarded run returned `gate_error`.** `MARROW_RUNTIME_GATE_BLOCKED` is a policy block; an owner approval never unlocks it. `MARROW_RUNTIME_GATE_UNRECOGNIZED` means the server sent a verdict this SDK does not know; update the SDK.
 - **A `client_update` advisory appears on status or runtime responses.** Follow its `update_command` and `verification_command`, or run the commands in [Keeping the SDK current](#keeping-the-sdk-current).
 - **Passive install reports `governanceEnforced: false`.** Only governed mode with the global fetch patch enforces interception. Observation mode and `patchGlobalFetch: false` are reported truthfully; use `runGuarded()` or `runtime.fetch()` for consequential work.
-- **Connection or scope questions.** Run `npx @getmarrow/install doctor`.
+- **Connection or scope questions.** Run `npx @getmarrow/install doctor` to inspect connection and configured scope.
 
 ## Documentation
 
@@ -556,7 +553,7 @@ See the [Trust Center](https://getmarrow.ai/trust/) for implemented controls, cu
 - [Trust Center](https://getmarrow.ai/trust/)
 - [Status](https://getmarrow.ai/status/)
 - [GitHub](https://github.com/getmarrow/marrow-sdk)
-- [Changelog](./CHANGELOG.md)
+- [Changelog](https://github.com/getmarrow/marrow-sdk/blob/main/CHANGELOG.md)
 
 ### Related Packages
 

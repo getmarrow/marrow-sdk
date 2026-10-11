@@ -2,6 +2,13 @@
 
 Release notes for `@getmarrow/sdk`, newest first. The README documents only the current version; older notes live here. Feature documentation that still applies to the current code has been promoted into the README's permanent sections.
 
+## Unreleased
+
+Documentation only; no code change.
+
+- README corrected against the code: `runGuarded()` option defaults and the options it had omitted, the `fetchControlMode` input values (`'observe'` or `'governed'`), client option defaults, which environment settings apply only through `marrowFromEnv()`, the spool health-error cause of `attention_required`, and which public types are exported.
+- README now notes that the SDK-authored `exact_next_action` for an approvable hold still points at an authenticated dashboard session; the code text is unchanged and awaits an owner decision.
+
 ## v3.7.65
 
 - Guarded runs now enforce the runtime gate verdict from the slim runtime response Marrow serves this SDK by default. On plans that enforce the gate (Business and above, and the evaluation period):

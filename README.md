@@ -76,7 +76,7 @@ const result = await marrow.runGuarded({
   classifyResult: (r) => ({ success: r.deployed && r.smokePassed }),
 });
 
-if (result.blocked) {
+if (result.blocked || !result.ok) {
   throw new Error(result.summary);
 }
 ```
@@ -106,7 +106,7 @@ Options on `runGuarded()` (only `action` and `execute` are required):
 | `ownerApprovalReceiptId` | | A server-issued owner approval receipt. When set on an enforced hold, the SDK skips its own hold stop, requires an action permit, and sends the receipt id with the permit request; the server must verify it. The SDK does not check the receipt itself. A degraded verdict, unavailable gate authority, or `riskPolicy: 'block_high'` with an `allow: false` verdict can still stop the run. |
 | `correlationId`, `interventionDisposition`, `actionChanged` | | Link lifecycle receipts and report, with evidence, whether guidance was `followed`, `ignored`, or `overridden`. |
 | `provenance`, `modelUsage` | | Decision provenance, and compact token and cost counts to attach to the commit. |
-| `execute` | | The callback that performs the work. It does not run when an enforced runtime gate verdict blocks or holds (a hold is skipped when `ownerApprovalReceiptId` is set and the permit issues and verifies; see that option), or when the workflow gate blocks or holds under a `riskPolicy` other than `'off'`. Advisory (non-enforced) verdicts run it, and `riskPolicy: 'off'` skips the gates unless `useAgentRuntime` or `useWorkflowGate` is set; even then, under `'off'` only an enforced runtime verdict stops the run. |
+| `execute` | | The callback that performs the work. It does not run when an enforced runtime gate verdict blocks or holds (a hold is skipped when `ownerApprovalReceiptId` is set and the permit issues and verifies; see that option), or when the workflow gate blocks or holds under a `riskPolicy` other than `'off'`. Advisory (non-enforced) verdicts run it, and `riskPolicy: 'off'` skips the gates unless `useAgentRuntime` or `useWorkflowGate` is set; even then, under `'off'` an enforced runtime verdict, a degraded high-risk or unknown verdict, or a required action permit that fails to issue or verify still stops the run. |
 | `completionEvidence` | | Evidence attached to the outcome commit; see [Completion evidence](#completion-evidence). |
 | `classifyResult` | | Decide success or failure from the returned value; see below. |
 | `requireOutcomeClosure` | `true` | Close the success or failure outcome. |

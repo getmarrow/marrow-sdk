@@ -6,7 +6,7 @@ Release notes for `@getmarrow/sdk`, newest first. The README documents only the 
 
 Documentation only; no code change.
 
-- README corrected against the code: `runGuarded()` option defaults and the options it had omitted, the `fetchControlMode` input values (`'observe'` or `'governed'`), client option defaults, which environment settings apply only through `marrowFromEnv()`, the spool health-error cause of `attention_required`, and which public types are exported.
+- README corrected against the code: `runGuarded()` option defaults and the options it had omitted, the `fetchControlMode` input values (`'observe'` or `'governed'`), client option defaults, which environment settings `new MarrowClient()` itself reads (`MARROW_CLIENT` and its fallbacks, and `MARROW_PASSIVE_TOKEN_USAGE`) versus those only `marrowFromEnv()` resolves, the quick-start completion evidence now derived from the `execute` result, the `execute` and `ownerApprovalReceiptId` option descriptions, that `runtime.fetch()` gates only in governed mode, and the changelog links (`master`, not `main`), the spool health-error cause of `attention_required`, and which public types are exported.
 - README now notes that the SDK-authored `exact_next_action` for an approvable hold still points at an authenticated dashboard session; the code text is unchanged and awaits an owner decision.
 
 ## v3.7.65
@@ -23,7 +23,7 @@ Documentation only; no code change.
 - Advisory plans (Team, Free) run and report the verdict on `gate_verdict`, on both response shapes. Old servers or proxies returning the expanded shape previously failed closed on advisory holds.
 - Stopped results carry the SDK's own text in `before_action_directive.message` and `before_action_directive.exact_next_action`, never the server's. Runs that were not stopped keep the server's directive.
 - `orient({ autoWarn: true })` sets `shouldPause` for enforced blocks and holds on the slim shape too.
-- The SDK never writes an owner approval; a server-issued `ownerApprovalReceiptId` is only sent to the server for verification. A held action cannot yet be resumed through `runGuarded()`.
+- The SDK never writes an owner approval. A caller-supplied `ownerApprovalReceiptId` makes the SDK skip its own stop for an enforced hold and require an action permit carrying the receipt id; the SDK does not verify the receipt, the server must. A held action cannot yet be resumed through `runGuarded()`.
 - Summary text for runtime stops changed. Match on `gate_error.code` or `owner_approval.state`, not on summary strings.
 
 ## v3.7.64

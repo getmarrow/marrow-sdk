@@ -39,7 +39,7 @@ test('npm entry point matches the product positioning contract', () => {
   assert.match(pkg.marrow.discovery.npm, /\/placements\/plc_[a-f0-9]{24}$/);
   assert.match(readme, /Public diagnostic privacy/);
   assert.ok(readme.indexOf('## Quick Start') < readme.indexOf('## Context and Workflow Examples'));
-  assert.match(readme, /runGuarded\(\{[\s\S]*riskPolicy: 'block_high'[\s\S]*if \(result\.blocked\)/);
+  assert.match(readme, /runGuarded\(\{[\s\S]*riskPolicy: 'block_high'[\s\S]*if \(result\.blocked \|\| !result\.ok\)/);
   assert.doesNotMatch(readme, /runtime\.decision_id/);
   assert.match(readme, /fetchControlMode: 'observation_only'/);
   assert.match(readme, /fetchControlMode: 'governed'/);

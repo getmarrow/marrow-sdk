@@ -7,6 +7,8 @@ export interface MarrowResolvedEnv {
     loadedFiles: string[];
     missing: boolean;
     exactFix: string;
+    /** Set when a base URL in an env file was ignored. Names the file only, never a value. */
+    baseUrlNotice?: string;
 }
 export interface MarrowResolveEnvOptions {
     cwd?: string;

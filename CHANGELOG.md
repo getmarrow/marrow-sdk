@@ -4,7 +4,9 @@ Release notes for `@getmarrow/sdk`, newest first. The README documents only the 
 
 ## Unreleased
 
-Documentation only; no code change.
+- Security: a project env file can no longer move the SDK to another server. `marrowFromEnv()` and `resolveMarrowEnv()` still read `MARROW_API_KEY` (or `MARROW_KEY`) from project `.env`, `.env.local`, `.marrow/env` and `.marrow/env.local` files and their parent folders, but a `MARROW_BASE_URL` there is used only when it is exactly the official origin `https://api.getmarrow.ai`. Any other value is ignored with one warning that names the file and says how to set an override; the warning never contains the key or the value. Endpoint overrides are honoured from the process environment, the `baseUrl` constructor option, and owner-only `~/.marrow/env` / `~/.marrow/env.local` files (same owner and mode rule as `@getmarrow/mcp`). `MarrowResolvedEnv` gains an optional `baseUrlNotice`. Staging or self-hosted users who set the endpoint in a project `.env` must move it to one of those places.
+
+Documentation:
 
 - README corrected against the code: `runGuarded()` option defaults and the options it had omitted, the `fetchControlMode` input values (`'observe'` or `'governed'`), client option defaults, which environment settings `new MarrowClient()` itself reads (`MARROW_CLIENT` and its fallbacks, and `MARROW_PASSIVE_TOKEN_USAGE`) versus those only `marrowFromEnv()` resolves, the quick-start completion evidence now derived from the `execute` result, the `execute` and `ownerApprovalReceiptId` option descriptions, that `runtime.fetch()` gates only in governed mode, the changelog links (`master`, not `main`), the spool health-error cause of `attention_required`, the default hardcoded-key check and its `apiKeySource: 'env-file'` exemption, the quick start's `classifyResult`, and which public types are exported.
 - README now notes that the SDK-authored `exact_next_action` for an approvable hold still points at an authenticated dashboard session; the code text is unchanged and awaits an owner decision.

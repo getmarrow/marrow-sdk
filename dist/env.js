@@ -56,11 +56,98 @@ function stripQuotes(value) {
     }
     return trimmed;
 }
+// A base URL from a project env file (or a ~/.marrow file that is not owner-only)
+// is used only when it is exactly the official endpoint. Strict URL parse, exact
+// origin match (https, host, default port), no credentials, path, query or fragment.
+function isOfficialBaseUrl(value) {
+    if (!value || /[\s\p{Cc}\p{Cf}]/u.test(value))
+        return false;
+    try {
+        const url = new URL(value);
+        const official = new URL(DEFAULT_BASE_URL);
+        return url.protocol === official.protocol
+            && url.hostname === official.hostname
+            && url.port === ''
+            && url.origin === official.origin
+            && url.username === ''
+            && url.password === ''
+            && (url.pathname === '/' || url.pathname === '')
+            && url.search === ''
+            && url.hash === ''
+            && !/[?#@]/.test(value);
+    }
+    catch {
+        return false;
+    }
+}
+// File paths come from the working directory; keep notices on one printable line.
+const MAX_PRINTED_PATH = 200;
+function printablePath(filePath) {
+    const clean = filePath.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '?');
+    const chars = Array.from(clean);
+    return chars.length > MAX_PRINTED_PATH ? `${chars.slice(0, MAX_PRINTED_PATH - 3).join('')}...` : clean;
+}
+const BASE_URL_FIX = 'to use another endpoint, set MARROW_BASE_URL in your environment, pass baseUrl to new MarrowClient(), or put it in ~/.marrow/env with owner-only permissions (chmod 700 ~/.marrow && chmod 600 ~/.marrow/env)';
+function baseUrlNotice(filePath, ownerPath) {
+    const reason = ownerPath
+        ? 'the file is not owner-only (a symlink, readable or writable by others, owned by another user, or in a directory others can write)'
+        : `project env files may only set the official endpoint ${DEFAULT_BASE_URL}`;
+    return `Marrow base URL in ${printablePath(filePath)} ignored: ${reason}. Fix: ${BASE_URL_FIX}.`;
+}
+// The same owner-only rule as @getmarrow/mcp for ~/.marrow files: opened without
+// following a symlink, type, owner and mode from fstat on that descriptor, and an
+// lstat of the path after the read must name the same inode. The file must be the
+// owner's and private; home and ~/.marrow must be the owner's real directories, not
+// writable by others. Returns the values read from those bytes, or null.
+function readTrustedOwnerEnvFile(filePath, home) {
+    const resolvedHome = path.resolve(home);
+    const resolvedFile = path.resolve(filePath);
+    const flags = fs.constants.O_RDONLY
+        | (fs.constants.O_NONBLOCK || 0)
+        | (fs.constants.O_NOFOLLOW || 0);
+    let fd;
+    try {
+        fd = fs.openSync(resolvedFile, flags);
+    }
+    catch {
+        return null;
+    }
+    try {
+        // Windows reports no owner-only mode bits, so owner files never pass there.
+        if (process.platform === 'win32')
+            return null;
+        const stat = fs.fstatSync(fd);
+        if (!stat.isFile())
+            return null;
+        const raw = fs.readFileSync(fd, 'utf8');
+        const parent = path.dirname(resolvedFile);
+        const homeStat = fs.lstatSync(resolvedHome);
+        const parentStat = fs.lstatSync(parent);
+        const pathStat = fs.lstatSync(resolvedFile);
+        const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+        const owned = (s) => uid === null || s.uid === uid;
+        const safeDir = (s, dir) => s.isDirectory() && !s.isSymbolicLink()
+            && fs.realpathSync(dir) === dir && owned(s) && (s.mode & 0o022) === 0;
+        const trusted = resolvedFile.startsWith(`${resolvedHome}${path.sep}`)
+            && safeDir(homeStat, resolvedHome) && safeDir(parentStat, parent)
+            && owned(stat) && (stat.mode & 0o077) === 0
+            && pathStat.isFile() && pathStat.dev === stat.dev && pathStat.ino === stat.ino;
+        return trusted ? parseEnvText(raw) : null;
+    }
+    catch {
+        return null;
+    }
+    finally {
+        fs.closeSync(fd);
+    }
+}
 function parseEnvFile(filePath) {
     if (!fs.existsSync(filePath))
         return {};
+    return parseEnvText(fs.readFileSync(filePath, 'utf8'));
+}
+function parseEnvText(raw) {
     const values = {};
-    const raw = fs.readFileSync(filePath, 'utf8');
     for (const line of raw.split(/\r?\n/)) {
         const match = line.match(/^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
         if (!match)
@@ -118,21 +205,47 @@ function resolveMarrowEnv(options = {}) {
             exactFix: 'Marrow key is loaded from the process environment.',
         };
     }
+    const ownerFiles = new Set([
+        path.resolve(home, '.marrow', 'env'),
+        path.resolve(home, '.marrow', 'env.local'),
+    ]);
     for (const filePath of candidateEnvFiles(cwd, home)) {
-        const parsed = parseEnvFile(filePath);
-        const found = pickAgentKey(parsed);
+        let parsed = parseEnvFile(filePath);
+        let found = pickAgentKey(parsed);
         if (!found.key)
             continue;
         loadedFiles.push(filePath);
+        // The key is read from any of these files, as before. The base URL is honoured
+        // from an owner-only ~/.marrow file; from any other file only when it is exactly
+        // the official endpoint. Otherwise it is ignored with one notice.
+        const ownerPath = ownerFiles.has(path.resolve(filePath));
+        const ownerValues = ownerPath ? readTrustedOwnerEnvFile(filePath, home) : null;
+        const trusted = ownerValues !== null && Boolean(pickAgentKey(ownerValues).key);
+        if (trusted && ownerValues) {
+            parsed = ownerValues;
+            found = pickAgentKey(ownerValues);
+        }
+        let fileBaseUrl = parsed.MARROW_BASE_URL || '';
+        let notice;
+        if (fileBaseUrl && !trusted) {
+            if (isOfficialBaseUrl(fileBaseUrl)) {
+                fileBaseUrl = DEFAULT_BASE_URL;
+            }
+            else {
+                fileBaseUrl = '';
+                notice = baseUrlNotice(filePath, ownerPath);
+            }
+        }
         return {
             apiKey: found.key,
-            baseUrl: parsed.MARROW_BASE_URL || env.MARROW_BASE_URL || DEFAULT_BASE_URL,
+            baseUrl: fileBaseUrl || env.MARROW_BASE_URL || DEFAULT_BASE_URL,
             agentId: parsed.MARROW_FLEET_AGENT_ID || parsed.MARROW_AGENT_ID || env.MARROW_FLEET_AGENT_ID || env.MARROW_AGENT_ID,
             sessionId: parsed.MARROW_SESSION_ID || env.MARROW_SESSION_ID,
             source: `${filePath}:${found.source}`,
             loadedFiles,
             missing: false,
             exactFix: `Marrow key was found in ${filePath}. Keep this file private and run npx @getmarrow/install doctor to verify.`,
+            ...(notice ? { baseUrlNotice: notice } : {}),
         };
     }
     return {

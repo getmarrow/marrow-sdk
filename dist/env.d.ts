@@ -9,6 +9,8 @@ export interface MarrowResolvedEnv {
     exactFix: string;
     /** Set when a base URL in an env file was ignored. Names the file only, never a value. */
     baseUrlNotice?: string;
+    /** Set when the key came from a project file (no owner key exists). Names the file only, never the key. */
+    keyNotice?: string;
 }
 export interface MarrowResolveEnvOptions {
     cwd?: string;

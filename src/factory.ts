@@ -6,8 +6,8 @@ import { MarrowClient } from './client';
 import type { MarrowClientOptions, MarrowEnforcementMode } from './types';
 import { resolveMarrowEnv } from './env';
 
-// One warning per ignored base URL notice per process.
-const warnedBaseUrlNotices = new Set<string>();
+// One warning per notice (project-file key, ignored base URL) per process.
+const warnedNotices = new Set<string>();
 
 /**
  * Create a MarrowClient with explicit API key and options.
@@ -22,10 +22,12 @@ export function createMarrowClient(
 /**
  * Create a MarrowClient from environment variables.
  * Reads MARROW_API_KEY or MARROW_KEY from the process environment.
- * If missing, also checks .marrow/env, .env, and ~/.marrow/env so agent
- * runtimes can keep Marrow active without brittle shell setup. A base URL from
- * a project env file is used only if it is the official endpoint; overrides come
- * from the process environment, the baseUrl option, or an owner-only ~/.marrow file.
+ * If missing, uses an owner-only ~/.marrow/env, then project files (.marrow/env,
+ * .env and parent folders) so agent runtimes can keep Marrow active without brittle
+ * shell setup. A project-file key is used only when no owner key exists, with one
+ * warning naming the file. A base URL from a project env file is used only if it is
+ * the official endpoint; overrides come from the process environment, the baseUrl
+ * option, or an owner-only ~/.marrow file.
  */
 export function marrowFromEnv(options?: {
   sessionId?: string;
@@ -37,9 +39,11 @@ export function marrowFromEnv(options?: {
   if (!resolved.apiKey) {
     throw new Error(`MARROW_API_KEY is required. ${resolved.exactFix}`);
   }
-  if (resolved.baseUrlNotice && !warnedBaseUrlNotices.has(resolved.baseUrlNotice)) {
-    warnedBaseUrlNotices.add(resolved.baseUrlNotice);
-    console.warn(`[marrow] ${resolved.baseUrlNotice}`);
+  for (const notice of [resolved.keyNotice, resolved.baseUrlNotice]) {
+    if (notice && !warnedNotices.has(notice)) {
+      warnedNotices.add(notice);
+      console.warn(`[marrow] ${notice}`);
+    }
   }
 
   return new MarrowClient(resolved.apiKey, {

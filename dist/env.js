@@ -187,6 +187,16 @@ function pickAgentKey(env) {
         return { key: env.MARROW_KEY, source: 'MARROW_KEY' };
     return { key: '', source: null };
 }
+function agentIdFrom(values) {
+    return values.MARROW_FLEET_AGENT_ID || values.MARROW_AGENT_ID || undefined;
+}
+function projectKeyNotice(filePath, ownerPath) {
+    const where = ownerPath ? 'which is not owner-only' : 'a project file';
+    return `Marrow API key loaded from ${printablePath(filePath)}, ${where}. Your own key overrides it: set MARROW_API_KEY in your environment or put it in an owner-only ~/.marrow/env (chmod 700 ~/.marrow && chmod 600 ~/.marrow/env).`;
+}
+// Key precedence: the process environment, then an owner-only ~/.marrow file, then
+// project files (the walk, plus a ~/.marrow file that is not owner-only). A project
+// file key is used only when neither owner source has a key, and then with a notice.
 function resolveMarrowEnv(options = {}) {
     const env = options.env || process.env;
     const cwd = options.cwd || process.cwd();
@@ -205,29 +215,46 @@ function resolveMarrowEnv(options = {}) {
             exactFix: 'Marrow key is loaded from the process environment.',
         };
     }
-    const ownerFiles = new Set([
-        path.resolve(home, '.marrow', 'env'),
-        path.resolve(home, '.marrow', 'env.local'),
-    ]);
+    // Owner-only ~/.marrow files come before any project file, so a key planted in a
+    // repository never shadows the owner's own key. Values come from the trusted bytes.
+    const ownerFilePaths = [path.join(home, '.marrow', 'env'), path.join(home, '.marrow', 'env.local')];
+    const ownerFiles = new Set(ownerFilePaths.map((filePath) => path.resolve(filePath)));
+    const ownerIds = [];
+    for (const filePath of ownerFilePaths) {
+        const ownerValues = readTrustedOwnerEnvFile(filePath, home);
+        if (!ownerValues)
+            continue;
+        const found = pickAgentKey(ownerValues);
+        if (!found.key) {
+            ownerIds.push(ownerValues);
+            continue;
+        }
+        loadedFiles.push(filePath);
+        return {
+            apiKey: found.key,
+            baseUrl: ownerValues.MARROW_BASE_URL || env.MARROW_BASE_URL || DEFAULT_BASE_URL,
+            agentId: agentIdFrom(ownerValues) || agentIdFrom(env),
+            sessionId: ownerValues.MARROW_SESSION_ID || env.MARROW_SESSION_ID,
+            source: `${filePath}:${found.source}`,
+            loadedFiles,
+            missing: false,
+            exactFix: `Marrow key was found in ${filePath}. Keep this file private and run npx @getmarrow/install doctor to verify.`,
+        };
+    }
     for (const filePath of candidateEnvFiles(cwd, home)) {
-        let parsed = parseEnvFile(filePath);
-        let found = pickAgentKey(parsed);
+        const parsed = parseEnvFile(filePath);
+        const found = pickAgentKey(parsed);
         if (!found.key)
             continue;
         loadedFiles.push(filePath);
-        // The key is read from any of these files, as before. The base URL is honoured
-        // from an owner-only ~/.marrow file; from any other file only when it is exactly
-        // the official endpoint. Otherwise it is ignored with one notice.
+        // No owner key exists, so the project key is used, with one notice naming the
+        // file. Its base URL is used only when it is exactly the official endpoint;
+        // otherwise it is ignored with one notice. Agent and session ids from the
+        // process environment or an owner-only ~/.marrow file win over the file's.
         const ownerPath = ownerFiles.has(path.resolve(filePath));
-        const ownerValues = ownerPath ? readTrustedOwnerEnvFile(filePath, home) : null;
-        const trusted = ownerValues !== null && Boolean(pickAgentKey(ownerValues).key);
-        if (trusted && ownerValues) {
-            parsed = ownerValues;
-            found = pickAgentKey(ownerValues);
-        }
         let fileBaseUrl = parsed.MARROW_BASE_URL || '';
         let notice;
-        if (fileBaseUrl && !trusted) {
+        if (fileBaseUrl) {
             if (isOfficialBaseUrl(fileBaseUrl)) {
                 fileBaseUrl = DEFAULT_BASE_URL;
             }
@@ -236,15 +263,18 @@ function resolveMarrowEnv(options = {}) {
                 notice = baseUrlNotice(filePath, ownerPath);
             }
         }
+        const ownerAgentId = ownerIds.map(agentIdFrom).find(Boolean);
+        const ownerSessionId = ownerIds.map((values) => values.MARROW_SESSION_ID).find(Boolean);
         return {
             apiKey: found.key,
             baseUrl: fileBaseUrl || env.MARROW_BASE_URL || DEFAULT_BASE_URL,
-            agentId: parsed.MARROW_FLEET_AGENT_ID || parsed.MARROW_AGENT_ID || env.MARROW_FLEET_AGENT_ID || env.MARROW_AGENT_ID,
-            sessionId: parsed.MARROW_SESSION_ID || env.MARROW_SESSION_ID,
+            agentId: agentIdFrom(env) || ownerAgentId || agentIdFrom(parsed),
+            sessionId: env.MARROW_SESSION_ID || ownerSessionId || parsed.MARROW_SESSION_ID,
             source: `${filePath}:${found.source}`,
             loadedFiles,
             missing: false,
             exactFix: `Marrow key was found in ${filePath}. Keep this file private and run npx @getmarrow/install doctor to verify.`,
+            keyNotice: projectKeyNotice(filePath, ownerPath),
             ...(notice ? { baseUrlNotice: notice } : {}),
         };
     }
@@ -256,7 +286,7 @@ function resolveMarrowEnv(options = {}) {
         source: null,
         loadedFiles,
         missing: true,
-        exactFix: 'Create an API key at https://getmarrow.ai, then run: mkdir -p .marrow && printf "MARROW_API_KEY=mrw_live_...\\n" > .marrow/env && chmod 600 .marrow/env && npx @getmarrow/install doctor',
+        exactFix: 'Create an API key at https://getmarrow.ai, then run: mkdir -p ~/.marrow && chmod 700 ~/.marrow && printf "MARROW_API_KEY=mrw_live_...\\n" > ~/.marrow/env && chmod 600 ~/.marrow/env && npx @getmarrow/install doctor',
     };
 }
 //# sourceMappingURL=env.js.map

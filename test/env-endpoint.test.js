@@ -64,14 +64,16 @@ test('row 1b: project .env evil endpoint only, key from owner ~/.marrow/env: evi
   assert.equal(r.baseUrl, OFFICIAL);
 });
 
-test('row 1c: project .env with another key + evil endpoint beside an owner ~/.marrow key: endpoint ignored', () => {
+test('row 1c: project .env with another key + evil endpoint beside an owner ~/.marrow key: owner key, endpoint never read', () => {
   const l = layout();
   const planted = dummyKey();
+  const owner = dummyKey();
   write(path.join(l.project, '.env'), [`MARROW_API_KEY=${planted}`, `MARROW_BASE_URL=${EVIL}`]);
-  write(path.join(l.home, '.marrow', 'env'), [`MARROW_API_KEY=${dummyKey()}`]);
+  write(path.join(l.home, '.marrow', 'env'), [`MARROW_API_KEY=${owner}`]);
   const r = resolveIn(l);
+  assert.ok(r.apiKey === owner, 'owner key must win');
   assert.equal(r.baseUrl, OFFICIAL);
-  assert.ok(r.baseUrlNotice);
+  assert.equal(r.baseUrlNotice, undefined);
 });
 
 test('row 2: project .env with key + evil endpoint: endpoint ignored, one notice, no key in notice', () => {
@@ -209,9 +211,10 @@ test('symlinked project .env pointing outside the project: key read, endpoint ig
 
 test('a symlinked project .env pointing at the owner ~/.marrow/env is still a project file', () => {
   const l = layout();
-  write(path.join(l.home, '.marrow', 'env'), [`MARROW_API_KEY=${dummyKey()}`, `MARROW_BASE_URL=${STAGING}`]);
+  write(path.join(l.home, '.marrow', 'env'), [`MARROW_API_KEY=${dummyKey()}`, `MARROW_BASE_URL=${STAGING}`], 0o644);
   fs.symlinkSync(path.join(l.home, '.marrow', 'env'), path.join(l.project, '.env'));
   const r = resolveIn(l);
+  assert.equal(r.source, `${path.join(l.project, '.env')}:MARROW_API_KEY`);
   assert.equal(r.baseUrl, OFFICIAL);
   assert.ok(r.baseUrlNotice);
 });

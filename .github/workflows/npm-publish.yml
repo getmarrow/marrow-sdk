@@ -4,9 +4,15 @@
 # this workflow. The ops-server release script creates that tag after all of its
 # release gates pass. The tag message carries the tarball integrity that the ops
 # server computed from the audited commit, and the publish job publishes only a
-# tarball with exactly that integrity. Repository rulesets restrict who may
-# create, move or delete npm-* tags. The npm-publish environment accepts only
-# npm-sdk-v* tags.
+# tarball with exactly that integrity. Organization rulesets let only the
+# release App create npm-* tags and let nobody move or delete them. The
+# npm-publish environment accepts only npm-sdk-v* tags.
+#
+# Both jobs first require that the run was started by a tag push from the
+# marrow-release GitHub App's bot user (github.actor_id and the triggering
+# actor, compared by id with RELEASE_APP_BOT_ID below). A tag pushed by any
+# other identity, even one that can edit rulesets, publishes nothing, and a
+# person re-running an old run publishes nothing.
 #
 # The build job runs project and dependency code, so it never holds an OIDC
 # token. The publish job runs no project code, has no checkout, and holds no npm
@@ -33,6 +39,10 @@ env:
   PACK_NPM_VERSION: 10.9.9
   PUBLISH_NPM_VERSION: 11.19.1
   PUBLISH_NPM_INTEGRITY: sha512-ztsxKxt/kkIaAs+2i0GU6I+DRmUdrNasxTZKJe9TCdSjKxlhah/4r/hl5ygMD6XAg1qZ9c2TNomR4qgOydp10g==
+  # User id of the marrow-release App's bot user (<app-slug>[bot]); not the App ID.
+  # Reviewed constant, pinned with this file by the release script. Until a reviewed
+  # commit replaces the placeholder, every run fails closed.
+  RELEASE_APP_BOT_ID: '341766214'
 
 jobs:
   build:
@@ -42,6 +52,29 @@ jobs:
     permissions:
       contents: read # read the tag object, compare with master, check out the tagged commit
     steps:
+      - name: Require a tag push and run by the release App
+        env:
+          LC_ALL: C
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          ACTOR_ID: ${{ github.actor_id }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_APP_BOT_ID" =~ ^[1-9][0-9]{0,11}$ ]] || { echo '::error::The release App bot user id is not set in this workflow.'; exit 1; }
+          [ "$EVENT" = push ] || { echo '::error::Only a tag push may publish.'; exit 1; }
+          [ "$REF_TYPE" = tag ] || { echo '::error::Only a tag push may publish.'; exit 1; }
+          [ "$ACTOR_ID" = "$RELEASE_APP_BOT_ID" ] || { echo '::error::The release tag was not pushed by the release App.'; exit 1; }
+          [[ "$TRIGGERING_ACTOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$ ]] || { echo '::error::Unexpected triggering actor.'; exit 1; }
+          login="${TRIGGERING_ACTOR//\[/%5B}"
+          login="${login//\]/%5D}"
+          user_json="$(curl -fsS --globoff --max-time 30 --retry 3 --config <(printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN") \
+            -H 'Accept: application/vnd.github+json' "https://api.github.com/users/$login")"
+          [ "$(jq -r '.id' <<<"$user_json")" = "$RELEASE_APP_BOT_ID" ] \
+            || { echo '::error::This run was not started by the release App (a re-run by a person cannot publish).'; exit 1; }
+          echo "Tag push and run by the release App bot user $RELEASE_APP_BOT_ID."
+
       - name: Verify the release tag and its release record
         id: tag
         env:
@@ -170,6 +203,29 @@ jobs:
       contents: read # read the tag object and compare it with master; no checkout
       id-token: write # npm trusted publishing and provenance; this job runs no project code
     steps:
+      - name: Require a tag push and run by the release App
+        env:
+          LC_ALL: C
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          ACTOR_ID: ${{ github.actor_id }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_APP_BOT_ID" =~ ^[1-9][0-9]{0,11}$ ]] || { echo '::error::The release App bot user id is not set in this workflow.'; exit 1; }
+          [ "$EVENT" = push ] || { echo '::error::Only a tag push may publish.'; exit 1; }
+          [ "$REF_TYPE" = tag ] || { echo '::error::Only a tag push may publish.'; exit 1; }
+          [ "$ACTOR_ID" = "$RELEASE_APP_BOT_ID" ] || { echo '::error::The release tag was not pushed by the release App.'; exit 1; }
+          [[ "$TRIGGERING_ACTOR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$ ]] || { echo '::error::Unexpected triggering actor.'; exit 1; }
+          login="${TRIGGERING_ACTOR//\[/%5B}"
+          login="${login//\]/%5D}"
+          user_json="$(curl -fsS --globoff --max-time 30 --retry 3 --config <(printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN") \
+            -H 'Accept: application/vnd.github+json' "https://api.github.com/users/$login")"
+          [ "$(jq -r '.id' <<<"$user_json")" = "$RELEASE_APP_BOT_ID" ] \
+            || { echo '::error::This run was not started by the release App (a re-run by a person cannot publish).'; exit 1; }
+          echo "Tag push and run by the release App bot user $RELEASE_APP_BOT_ID."
+
       - name: Verify the release tag and its release record
         id: tag
         env:

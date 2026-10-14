@@ -4,7 +4,7 @@
 
 Marrow is the runtime control and proof layer for teams running AI agents. `@getmarrow/sdk` is the Node.js and TypeScript client for that layer: use it when you own the agent process and need pre-action policy gates, owner approvals, proof-backed completion, passive outcome capture, and tenant-scoped fleet learning in code.
 
-**Current version: 3.7.65.** See [What's New in v3.7.65](#whats-new-in-v3765). Older release notes are in the [changelog](https://github.com/getmarrow/marrow-sdk/blob/master/CHANGELOG.md).
+**Current version: 3.7.66.** See [What's New in v3.7.66](#whats-new-in-v3766). Older release notes are in the [changelog](https://github.com/getmarrow/marrow-sdk/blob/master/CHANGELOG.md).
 
 ## Contents
 
@@ -25,7 +25,7 @@ Marrow is the runtime control and proof layer for teams running AI agents. `@get
 - [Adaptive Policy](#adaptive-policy)
 - [Status, Resilience, and Client Updates](#status-resilience-and-client-updates)
 - [Model-cost usage evidence](#model-cost-usage-evidence)
-- [What's New in v3.7.65](#whats-new-in-v3765)
+- [What's New in v3.7.66](#whats-new-in-v3766)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
 - [Context and Workflow Examples](#context-and-workflow-examples)
@@ -396,13 +396,11 @@ Passive JSON fetch capture recognizes exact official HTTPS model endpoints (Open
 
 Streaming/SSE usage is not captured by this JSON path. Use an explicit usage adapter with authoritative final usage for streaming hosts. Proxies and unsupported endpoints do not acquire first-party billing proof from the response shape. Capturing one call does not prove complete account usage, Marrow overhead, baseline comparability or savings. Unknown facts may therefore leave dashboard costs partial or unavailable and savings pending.
 
-## What's New in v3.7.65
+## What's New in v3.7.66
 
-- Guarded runs now enforce the runtime gate verdict from the slim runtime response Marrow serves this SDK by default. In 3.7.64 an enforced block and an owner-approval hold could still run. See [Runtime gate verdicts](#runtime-gate-verdicts) for the outcomes and [Approvals](#approvals) for holds.
-- This applies to `runGuarded()` and to the passive runtime's `tool()`, `command()`, `deploy()`, `publish()` and governed fetch, and holds and blocks stop even with `requireActionPermit: false`.
-- New, all additive: `readRuntimeGateVerdict()`, `MarrowRuntimeGateBlockedError`, and the optional result fields `gate_verdict`, `gate_error` and `owner_approval`. Existing code compiles unchanged.
-- A degraded verdict that holds, blocks or rates the action high-risk no longer runs on any plan; a block stays a block.
-- Summary text for runtime stops changed. Match on `gate_error.code` or `owner_approval.state`, not on summary strings.
+- Security: a project env file can no longer move the SDK to another server. `marrowFromEnv()` and `resolveMarrowEnv()` still read `MARROW_API_KEY` (or `MARROW_KEY`) from project `.env`, `.env.local`, `.marrow/env` and `.marrow/env.local` files and their parent folders, but a `MARROW_BASE_URL` there is used only when it is exactly the official origin `https://api.getmarrow.ai`. Any other value is ignored with one warning that names the file and says how to set an override; the warning never contains the key or the value. Endpoint overrides are honoured from the process environment, the `baseUrl` constructor option, and owner-only `~/.marrow/env` / `~/.marrow/env.local` files (same owner and mode rule as `@getmarrow/mcp`). `MarrowResolvedEnv` gains an optional `baseUrlNotice`. Staging or self-hosted users who set the endpoint in a project `.env` must move it to one of those places.
+- Security: a key in a project file can no longer replace your own key. `marrowFromEnv()` and `resolveMarrowEnv()` now take the key from the process environment, then an owner-only `~/.marrow/env` / `~/.marrow/env.local`, and only when neither has a key from a project file (`.env`, `.env.local`, `.marrow/env`, `.marrow/env.local`, parent folders, or a `~/.marrow` file that is not owner-only). Before, any project file beat `~/.marrow`. When a project-file key is used, `marrowFromEnv()` prints one warning naming the file (never the key) and saying your own key overrides it; `MarrowResolvedEnv` gains an optional `keyNotice`. When the key comes from a project file, agent and session ids from the process environment or an owner-only `~/.marrow` file now win over the file's (before, the file's won). Users who keep their key only in a project `.env` see no other change. The missing-key hint now suggests `~/.marrow/env`.
+- README corrected against the code; see the changelog for the list.
 
 Older release notes: [changelog](https://github.com/getmarrow/marrow-sdk/blob/master/CHANGELOG.md).
 

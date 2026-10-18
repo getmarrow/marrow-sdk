@@ -148,6 +148,17 @@ function ownerKeyBaseUrl(filePath, parsed, env) {
         notice: `ignored MARROW_BASE_URL from the process environment: the key comes from ~/.marrow/${path.basename(filePath)}; list the URL in MARROW_ALLOWED_BASE_URLS in that file to allow it`,
     };
 }
+// A ~/.marrow file that is not owner-only (a symlink, or loose permissions) supplied the key: an
+// environment URL gets it only when that same file names it or lists it in MARROW_ALLOWED_BASE_URLS
+// (the owner-file rule); otherwise the default endpoint, with one notice.
+function looseOwnerEnvBaseUrl(filePath, parsed, env) {
+    const candidate = parseKeyTarget(String(env.MARROW_BASE_URL || '').trim());
+    const named = parseKeyTarget(String(parsed.MARROW_BASE_URL || '').trim());
+    const exact = (url) => `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+    if (candidate && named && exact(candidate) === exact(named))
+        return { baseUrl: exact(candidate) };
+    return ownerKeyBaseUrl(filePath, { ...parsed, MARROW_BASE_URL: '' }, env);
+}
 const BASE_URL_FIX = 'to use another endpoint, set MARROW_BASE_URL in your environment, pass baseUrl to new MarrowClient(), or put it in ~/.marrow/env with owner-only permissions (chmod 700 ~/.marrow && chmod 600 ~/.marrow/env)';
 function baseUrlNotice(filePath, ownerPath) {
     const reason = ownerPath
@@ -326,11 +337,18 @@ function resolveMarrowEnv(options = {}) {
                 notice = baseUrlNotice(filePath, ownerPath);
             }
         }
+        let envBaseUrl = env.MARROW_BASE_URL || '';
+        if (ownerPath && envBaseUrl) {
+            const envTarget = looseOwnerEnvBaseUrl(filePath, parsed, env);
+            envBaseUrl = envTarget.baseUrl;
+            if (envTarget.notice && !fileBaseUrl)
+                notice = notice ? `${notice} ${envTarget.notice}` : envTarget.notice;
+        }
         const ownerAgentId = ownerIds.map(agentIdFrom).find(Boolean);
         const ownerSessionId = ownerIds.map((values) => values.MARROW_SESSION_ID).find(Boolean);
         return {
             apiKey: found.key,
-            baseUrl: fileBaseUrl || env.MARROW_BASE_URL || DEFAULT_BASE_URL,
+            baseUrl: fileBaseUrl || envBaseUrl || DEFAULT_BASE_URL,
             agentId: agentIdFrom(env) || ownerAgentId || agentIdFrom(parsed),
             sessionId: env.MARROW_SESSION_ID || ownerSessionId || parsed.MARROW_SESSION_ID,
             source: `${filePath}:${found.source}`,

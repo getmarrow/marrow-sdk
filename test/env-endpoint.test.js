@@ -276,7 +276,8 @@ test('owner ~/.marrow/env found by the walk (cwd inside home) is still honoured'
   assert.equal(resolveIn(l, {}, cwd).baseUrl, STAGING);
 });
 
-// Loose ~/.marrow layouts: the key is still read (as on master), the endpoint is not honoured.
+// Loose ~/.marrow layouts: the key is still read (as on master), the endpoint is not honoured, and an
+// environment URL that file neither names nor allowlists gets the default endpoint (the owner-file rule).
 const LOOSE = [
   ['file 0644', (l) => fs.chmodSync(path.join(l.home, '.marrow', 'env'), 0o644)],
   ['file 0660 group-writable', (l) => fs.chmodSync(path.join(l.home, '.marrow', 'env'), 0o660)],
@@ -308,7 +309,10 @@ for (const [label, loosen] of LOOSE) {
     assert.equal(r.baseUrl, OFFICIAL);
     assert.match(r.baseUrlNotice, /ignored: the file is not owner-only/);
     assertNoKey(r.baseUrlNotice, key);
-    assert.equal(resolveIn(l, { MARROW_BASE_URL: STAGING }).baseUrl, STAGING);
+    const viaEnv = resolveIn(l, { MARROW_BASE_URL: STAGING });
+    assert.equal(viaEnv.baseUrl, OFFICIAL);
+    assert.match(viaEnv.baseUrlNotice, /ignored MARROW_BASE_URL from the process environment/);
+    assertNoKey(viaEnv.baseUrlNotice, key);
   });
 }
 

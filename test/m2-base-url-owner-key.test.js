@@ -111,7 +111,7 @@ test('an allowlist in a file that is not owner-only does not authorise anything 
   assert.equal(resolved.baseUrl, DEFAULT_URL);
 });
 
-test('trust behaviour is unchanged: a symlinked or loose ~/.marrow/env is not an owner-only file, its allowlist is never read, and its key keeps today\'s fallback and notice', { skip: process.platform === 'win32' }, () => {
+test('trust behaviour: a symlinked or loose ~/.marrow/env is not an owner-only file; its key keeps today\'s fallback and notice, and an environment URL needs that same file\'s allowlist', { skip: process.platform === 'win32' }, () => {
   for (const kind of ['symlink', 'mode 0644']) {
     const l = layout('untrusted-owner');
     const key = dummyKey('untrusted');
@@ -123,12 +123,16 @@ test('trust behaviour is unchanged: a symlinked or loose ~/.marrow/env is not an
       write(l.envFile, [`MARROW_API_KEY=${key}`, 'MARROW_ALLOWED_BASE_URLS=https://staging.example'], 0o644);
     }
     const resolved = resolveIn(l, { MARROW_BASE_URL: 'https://staging.example' });
-    // Same as master: the key comes through the project-file fallback with its notice. This branch is
-    // not an owner-only file, so the owner-file URL rule does not apply to it (residual R1 in RESULT).
+    // The key comes through the project-file fallback with its notice, as on master. The environment
+    // URL follows the owner-file rule: kept because this same file allowlists it, otherwise the default.
     assert.equal(resolved.apiKey, key, kind);
     assert.match(resolved.keyNotice, /not owner-only/, kind);
     assert.equal(resolved.baseUrl, 'https://staging.example', kind);
     assert.equal(resolved.baseUrlNotice, undefined, kind);
+    const attacker = resolveIn(l, { MARROW_BASE_URL: 'https://attacker.example' });
+    assert.equal(attacker.apiKey, key, kind);
+    assert.equal(attacker.baseUrl, DEFAULT_URL, kind);
+    assert.match(attacker.baseUrlNotice, /^ignored MARROW_BASE_URL from the process environment/, kind);
   }
 });
 

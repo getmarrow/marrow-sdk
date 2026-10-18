@@ -8,7 +8,20 @@ const { MarrowClient } = require('../dist/index.js');
 const { DurableEventSpool } = require('../dist/event-spool.js');
 const { version: sdkVersion } = require('../package.json');
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// No test here reaches a real endpoint. A client built without baseUrl targets the production
+// default, and a few tests stub only some client methods, so any request no test stubs fails as an
+// unreachable network does (fetch rejects with ECONNREFUSED). A test that installs its own fetch
+// restores this one afterwards.
+const networkFetch = globalThis.fetch;
+globalThis.fetch = async function unreachableNetwork() {
+  const cause = Object.assign(new Error('connect ECONNREFUSED (passive-runtime tests have no network)'), { code: 'ECONNREFUSED' });
+  throw new TypeError('fetch failed', { cause });
+};
+test.after(() => {
+  globalThis.fetch = networkFetch;
+});
+
+const delay =(ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(predicate, timeoutMs = 1_500) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {

@@ -2,6 +2,12 @@
 
 Release notes for `@getmarrow/sdk`, newest first. The README documents only the current version; older notes live here. Feature documentation that still applies to the current code has been promoted into the README's permanent sections.
 
+## v3.7.67
+
+- Security: a key stored in your own `~/.marrow/env` (or `env.local`) is now sent only to the default Marrow endpoint, to the endpoint that same file names with `MARROW_BASE_URL`, or to an exact origin that file lists in the new `MARROW_ALLOWED_BASE_URLS` (comma-separated bare origins; no wildcards, paths, credentials, queries or fragments; read from that file only, never from the process environment). A `MARROW_BASE_URL` set only in the process environment (a project `.mcp.json` or settings `env` block, direnv, a devcontainer) no longer moves such a key: `marrowFromEnv()` and `resolveMarrowEnv()` use the default endpoint, and `MarrowResolvedEnv.baseUrlNotice` carries one line naming the source, never the key or the URL. A key from the process environment, or from a project file or a `~/.marrow` file that is not owner-only, keeps using the process-environment URL, as before. If you run a staging or self-hosted endpoint with a key in `~/.marrow/env`, add `MARROW_BASE_URL=` or `MARROW_ALLOWED_BASE_URLS=` to that file.
+- The client refuses a base URL that contains a user name or password, and the error no longer repeats the URL. HTTPS is still required; plain http is accepted only for `localhost` and `127.0.0.1`.
+- Nothing changes for a default setup: with no URL variable set there is no difference and no notice.
+
 ## v3.7.66
 
 - Security: a project env file can no longer move the SDK to another server. `marrowFromEnv()` and `resolveMarrowEnv()` still read `MARROW_API_KEY` (or `MARROW_KEY`) from project `.env`, `.env.local`, `.marrow/env` and `.marrow/env.local` files and their parent folders, but a `MARROW_BASE_URL` there is used only when it is exactly the official origin `https://api.getmarrow.ai`. Any other value is ignored with one warning that names the file and says how to set an override; the warning never contains the key or the value. Endpoint overrides are honoured from the process environment, the `baseUrl` constructor option, and owner-only `~/.marrow/env` / `~/.marrow/env.local` files (same owner and mode rule as `@getmarrow/mcp`). `MarrowResolvedEnv` gains an optional `baseUrlNotice`. Staging or self-hosted users who set the endpoint in a project `.env` must move it to one of those places.

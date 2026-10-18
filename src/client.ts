@@ -1021,15 +1021,20 @@ function validatePathParam(value: string, paramName: string): string {
  * Validate and sanitize a base URL. Requires HTTPS (or http://localhost for dev).
  */
 function validateBaseUrl(rawUrl: string): string {
+  // The raw value is never echoed: it may carry credentials.
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+    const loopbackHttp = parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+    if (parsed.protocol !== 'https:' && !loopbackHttp) {
       throw new Error('baseUrl must use HTTPS (except localhost for development)');
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error('baseUrl must not contain a user name or password');
     }
     return rawUrl.replace(/\/+$/, '');
   } catch (err) {
     if (err instanceof Error && err.message.includes('baseUrl')) throw err;
-    throw new Error(`baseUrl is not a valid URL: ${rawUrl}`);
+    throw new Error('baseUrl is not a valid URL');
   }
 }
 

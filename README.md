@@ -435,7 +435,8 @@ Deadline values are bounded to 1–30 seconds, and high-risk runtime never recei
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `MARROW_API_KEY` | Yes | Account or agent-bound API key (`MARROW_KEY` is accepted as a fallback) |
-| `MARROW_BASE_URL` | No | API base override (read by `marrowFromEnv()` and `resolveMarrowEnv()`). Honoured from the process environment or an owner-only `~/.marrow/env`; a project env file may only set the official `https://api.getmarrow.ai` |
+| `MARROW_BASE_URL` | No | API base override (read by `marrowFromEnv()` and `resolveMarrowEnv()`). Honoured from an owner-only `~/.marrow/env`, or from the process environment when the key also comes from the process environment. When the key comes from `~/.marrow/env`, a `MARROW_BASE_URL` set only in the process environment is ignored (with one notice) unless that file names it or lists its origin in `MARROW_ALLOWED_BASE_URLS`. A project env file may only set the official `https://api.getmarrow.ai` |
+| `MARROW_ALLOWED_BASE_URLS` | No | Read from an owner-only `~/.marrow/env` only. Comma-separated exact origins that a key stored in that file may be sent to when the process environment names them. No wildcards, paths, credentials, queries or fragments |
 | `MARROW_FLEET_AGENT_ID` | No | Agent identity for `marrowFromEnv()` (`MARROW_AGENT_ID` is accepted as a fallback) |
 | `MARROW_SESSION_ID` | No | Session identity for `marrowFromEnv()` |
 | `MARROW_CLIENT` | No | Source client label for provenance (`MARROW_HARNESS` and `MARROW_AGENT_CLIENT` are accepted as fallbacks). Read by every client from the process environment only; an env file is not consulted |

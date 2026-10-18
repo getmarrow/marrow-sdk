@@ -1,0 +1,408 @@
+{
+ "default": "https://api.getmarrow.ai",
+ "vectors": [
+  {
+   "name": "no env URL",
+   "envUrl": null,
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": false
+  },
+  {
+   "name": "empty env URL",
+   "envUrl": "",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": false
+  },
+  {
+   "name": "plain attacker host",
+   "envUrl": "https://attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "userinfo on attacker host",
+   "envUrl": "https://user:hunter2@attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "userinfo username only",
+   "envUrl": "https://api.getmarrow.ai@attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "official host as userinfo",
+   "envUrl": "https://api.getmarrow.ai:443@attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "suffix host",
+   "envUrl": "https://api.getmarrow.ai.attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "trailing dot host",
+   "envUrl": "https://api.getmarrow.ai./",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "path trick dot-dot",
+   "envUrl": "https://api.getmarrow.ai/../x",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "path on official host",
+   "envUrl": "https://api.getmarrow.ai/v2",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "query on official host",
+   "envUrl": "https://api.getmarrow.ai/?a=1",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "fragment on official host",
+   "envUrl": "https://api.getmarrow.ai/#x",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "backslash at",
+   "envUrl": "https://api.getmarrow.ai\\@attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "upper-case official URL is the default",
+   "envUrl": "HTTPS://API.GETMARROW.AI",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": false
+  },
+  {
+   "name": "explicit :443 is the default",
+   "envUrl": "https://api.getmarrow.ai:443",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": false
+  },
+  {
+   "name": "official URL with a trailing slash is the default",
+   "envUrl": "https://api.getmarrow.ai/",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": false
+  },
+  {
+   "name": "official URL with outer spaces is the default",
+   "envUrl": "  https://api.getmarrow.ai  ",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": false
+  },
+  {
+   "name": "other port on the official host",
+   "envUrl": "https://api.getmarrow.ai:8443",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "plain http on the official host",
+   "envUrl": "http://api.getmarrow.ai",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "localhost look-alike",
+   "envUrl": "http://localhost.attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "loopback look-alike nip.io",
+   "envUrl": "http://127.0.0.1.nip.io",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "zero address is not loopback",
+   "envUrl": "http://0.0.0.0:8787",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "IPv4-mapped IPv6 is not named loopback",
+   "envUrl": "http://[::ffff:127.0.0.1]:8787",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "loopback https is just a URL",
+   "envUrl": "https://localhost:8787",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "loopback ::1 needs the allowlist with an owner key",
+   "envUrl": "http://[::1]:8787",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "loopback localhost needs the allowlist with an owner key",
+   "envUrl": "http://localhost:8787",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "ftp scheme",
+   "envUrl": "ftp://attacker.example",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "file scheme",
+   "envUrl": "file:///etc/passwd",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "javascript scheme",
+   "envUrl": "javascript:alert(1)",
+   "allowed": null,
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "inner whitespace",
+   "envUrl": "https://stag ing.example",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "inner tab",
+   "envUrl": "https://staging\t.example",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "wildcard in candidate",
+   "envUrl": "https://*.attacker.example",
+   "allowed": "https://*.attacker.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "wildcard entry alone",
+   "envUrl": "https://attacker.example",
+   "allowed": "*",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "wildcard entry with host",
+   "envUrl": "https://x.attacker.example",
+   "allowed": "https://*.attacker.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist names another host",
+   "envUrl": "https://attacker.example",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist host with suffix is not a match",
+   "envUrl": "https://staging.example.evil",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist host with other port is not a match",
+   "envUrl": "https://staging.example",
+   "allowed": "https://staging.example:8443",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist entry with userinfo is skipped",
+   "envUrl": "https://staging.example",
+   "allowed": "https://u:p@staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist entry with a query is skipped",
+   "envUrl": "https://staging.example",
+   "allowed": "https://staging.example/?x=1",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist entry with a fragment is skipped",
+   "envUrl": "https://staging.example",
+   "allowed": "https://staging.example/#frag",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist entry with a path is skipped",
+   "envUrl": "https://staging.example/v1",
+   "allowed": "https://staging.example/v1",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlist entry with non-loopback http is skipped",
+   "envUrl": "http://staging.example",
+   "allowed": "http://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "candidate with userinfo on an allowlisted origin",
+   "envUrl": "https://u:p@staging.example",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "candidate with a query on an allowlisted origin",
+   "envUrl": "https://staging.example/?a=1",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "candidate with a fragment on an allowlisted origin",
+   "envUrl": "https://staging.example/#a",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "percent-encoded dot in host",
+   "envUrl": "https://staging%2eexample.evil",
+   "allowed": "https://staging.example",
+   "expect": "default",
+   "expectNotice": true
+  },
+  {
+   "name": "allowlisted https origin is kept",
+   "envUrl": "https://staging.example",
+   "allowed": "https://staging.example",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted origin with trailing slash entry",
+   "envUrl": "https://staging.example",
+   "allowed": "https://staging.example/",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted origin, upper-case entry",
+   "envUrl": "https://staging.example",
+   "allowed": "HTTPS://STAGING.EXAMPLE",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted origin, explicit default port entry",
+   "envUrl": "https://staging.example",
+   "allowed": "https://staging.example:443",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted origin among several entries, spaces",
+   "envUrl": "https://staging.example",
+   "allowed": " https://a.example , https://staging.example ,,",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted origin with a candidate path",
+   "envUrl": "https://staging.example/gateway/",
+   "allowed": "https://staging.example",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example/gateway",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted port origin is kept",
+   "envUrl": "https://staging.example:8443",
+   "allowed": "https://staging.example:8443",
+   "expect": "kept",
+   "expectedUrl": "https://staging.example:8443",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted loopback ::1 is kept",
+   "envUrl": "http://[::1]:8787",
+   "allowed": "http://[::1]:8787",
+   "expect": "kept",
+   "expectedUrl": "http://[::1]:8787",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted loopback 127.0.0.1 is kept",
+   "envUrl": "http://127.0.0.1:8787",
+   "allowed": "http://127.0.0.1:8787",
+   "expect": "kept",
+   "expectedUrl": "http://127.0.0.1:8787",
+   "expectNotice": false
+  },
+  {
+   "name": "allowlisted localhost is kept",
+   "envUrl": "http://localhost:8787",
+   "allowed": "http://localhost:8787",
+   "expect": "kept",
+   "expectedUrl": "http://localhost:8787",
+   "expectNotice": false
+  }
+ ],
+ "note": "Shared by marrow-mcp, marrow-sdk and marrow-install. An owner-file key plus this envUrl (process environment) and this MARROW_ALLOWED_BASE_URLS value in the same owner file. expect default: the default endpoint is used; kept: expectedUrl is used. expectNotice: exactly one source-only notice. Copy byte-identical into each repo."
+}

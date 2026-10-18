@@ -7,7 +7,7 @@ export interface MarrowResolvedEnv {
     loadedFiles: string[];
     missing: boolean;
     exactFix: string;
-    /** Set when a base URL in an env file was ignored. Names the file only, never a value. */
+    /** Set when a base URL was ignored: one from an env file, or one from the process environment that a file key may not use. Names the source only, never a value. */
     baseUrlNotice?: string;
     /** Set when the key came from a project file (no owner key exists). Names the file only, never the key. */
     keyNotice?: string;

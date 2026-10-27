@@ -7,6 +7,7 @@ const test = require('node:test');
 const { MarrowClient } = require('../dist/index.js');
 const { DurableEventSpool } = require('../dist/event-spool.js');
 const { version: sdkVersion } = require('../package.json');
+const { installFakeClock, outcomeWithin, untilTrue } = require('./support/fake-clock.js');
 
 // No test here reaches a real endpoint. A client built without baseUrl targets the production
 // default, and a few tests stub only some client methods, so any request no test stubs fails as an
@@ -177,6 +178,7 @@ test('observation lifecycle cap owns real unresolved deliveries and recovers aft
   let peak = 0;
   let started = 0;
   let skippedWarnings = 0;
+  let settled = 0;
   const onUnhandled = (error) => unhandled.push(error);
   globalThis.fetch = async () => new Response('provider response', { status: 200 });
   process.stderr.write = (chunk, ...args) => {
@@ -195,17 +197,26 @@ test('observation lifecycle cap owns real unresolved deliveries and recovers aft
       peak = Math.max(peak, active);
       pending.push(() => {
         active -= 1;
+        settled += 1;
         resolve({ accepted: true });
       });
     });
     const runtime = marrow.createPassiveRuntime();
     runtime.install();
 
-    const providerStarted = Date.now();
-    const responses = await Promise.all(Array.from({ length: 80 }, (_, index) =>
-      globalThis.fetch(`https://provider.example/v1/responses/${index}`, { method: 'POST' })));
-    assert.equal(responses.length, 80);
-    assert.ok(Date.now() - providerStarted < 250, 'provider burst waited on lifecycle delivery');
+    // Time is frozen and no lifecycle delivery settles until the test releases it, so a provider
+    // call that waited on a delivery or on a timer would stay pending. Nothing here measures time.
+    const clock = installFakeClock();
+    let burst;
+    try {
+      burst = await outcomeWithin(Promise.all(Array.from({ length: 80 }, (_, index) =>
+        globalThis.fetch(`https://provider.example/v1/responses/${index}`, { method: 'POST' }))));
+    } finally {
+      clock.restore();
+    }
+    assert.equal(burst.state, 'fulfilled', 'provider burst waited on lifecycle delivery');
+    assert.equal(burst.value.length, 80);
+    assert.equal(settled, 0, 'the responses came back before any lifecycle delivery settled');
     await waitFor(() => started === 64 && marrow.passiveObservationTasks.size === 64);
     assert.equal(active, 64);
     assert.equal(peak, 64);
@@ -241,19 +252,22 @@ test('observation-only real methods emit lifecycle and usage only before and aft
   const observations = [];
   const usage = [];
   const transportCalls = [];
-  let providerStartedAt = 0;
+  // Entries into the control-plane branch below, which is the only place the stub makes a caller wait.
+  let controlWaits = 0;
+  let controlWaitsAtProviderStart = -1;
   let permitCalls = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
     transportCalls.push(url);
     if (url === 'https://api.openai.com/v1/responses') {
-      providerStartedAt = Date.now();
+      controlWaitsAtProviderStart = controlWaits;
       return Response.json({
         model: 'neutral-provider-model',
         usage: { input_tokens: 8, output_tokens: 5, total_tokens: 13 },
       });
     }
     if (/\/v1\/agent\/(context|think)$/.test(url)) {
+      controlWaits += 1;
       await delay(700);
       return /\/context$/.test(url)
         ? Response.json({ data: { lessons: [], warnings: [], loopState: { isOpen: false } } })
@@ -293,13 +307,22 @@ test('observation-only real methods emit lifecycle and usage only before and aft
 
     const runtime = marrow.createPassiveRuntime();
     runtime.install();
-    const startedAt = Date.now();
-    const response = await globalThis.fetch('https://api.openai.com/v1/responses', { method: 'POST' });
-    const deliveredAt = Date.now();
-
+    // Time is frozen: a provider call that waited on the 700 ms control plane, or on any other
+    // timer, would stay pending. Nothing here measures time; it counts entries into the wait.
+    const clock = installFakeClock();
+    let call;
+    try {
+      call = await outcomeWithin(globalThis.fetch('https://api.openai.com/v1/responses', { method: 'POST' }));
+    } finally {
+      clock.restore();
+    }
+    assert.equal(call.state, 'fulfilled', 'provider response was delayed');
+    const response = call.value;
     assert.equal(response.status, 200);
-    assert.ok(providerStartedAt - startedAt < 100, `provider start was delayed ${providerStartedAt - startedAt}ms`);
-    assert.ok(deliveredAt - startedAt < 100, `provider response was delayed ${deliveredAt - startedAt}ms`);
+    assert.equal(controlWaitsAtProviderStart, 0, 'provider start waited on the control plane');
+    assert.equal(controlWaits, 0, 'provider response waited on the control plane');
+    assert.ok(clock.requested.length > 0 && clock.requested.every((ms) => ms === 1_000),
+      `the only sleeps requested were the 1000 ms observation deadlines, got ${JSON.stringify(clock.requested)}`);
     await waitFor(() => observations.length === 2 && usage.length === 1);
     assert.equal(observations.length, 2);
     assert.equal(observations[0].event_type, 'pre_action_checked');
@@ -554,6 +577,48 @@ test('passive install contains corrupt-spool drain failures and reports unavaila
   }
 });
 
+test('positive control: a provider call that does wait on the control plane stays pending until the virtual clock passes the wait', async () => {
+  const originalFetch = globalThis.fetch;
+  let controlWaits = 0;
+  let providerCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (/\/v1\/agent\/(context|think)$/.test(url)) {
+      controlWaits += 1;
+      await delay(700);
+      return /\/context$/.test(url)
+        ? Response.json({ data: { lessons: [], warnings: [], loopState: { isOpen: false } } })
+        : Response.json({ data: { decision_id: 'decision-positive-control' } });
+    }
+    return Response.json({ data: { accepted: true } });
+  };
+  const clock = installFakeClock();
+  try {
+    const marrow = new MarrowClient('test-positive-control-key', { durableEventSpool: false, lifecycleTimeoutMs: 1_000 });
+    marrow.enforce({ mode: 'auto' });
+    const governed = marrow.wrapFetch(async () => {
+      providerCalls += 1;
+      return new Response('provider response', { status: 200 });
+    }, { captureModelUsage: false });
+    const call = governed('https://api.openai.com/v1/responses', { method: 'POST' });
+    const early = await outcomeWithin(call);
+    assert.equal(early.state, 'pending', 'the frozen clock must expose a provider call that waits');
+    assert.equal(controlWaits, 1, 'the call entered the control-plane wait once');
+    assert.equal(providerCalls, 0);
+    assert.ok(clock.requested.includes(700), 'the wait is a 700 ms sleep');
+    let result = early;
+    for (let i = 0; i < 10 && result.state === 'pending'; i += 1) {
+      await clock.advance(700);
+      result = await outcomeWithin(call, 20);
+    }
+    assert.equal(result.state, 'fulfilled', 'the call finishes once the virtual clock passes the waits');
+    assert.equal(providerCalls, 1);
+  } finally {
+    clock.restore();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('explicit lifecycle drain is wall-clock bounded when delivery ignores abort', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'marrow-sdk-passive-timeout-'));
   const spoolPath = join(directory, 'events.json');
@@ -577,12 +642,24 @@ test('explicit lifecycle drain is wall-clock bounded when delivery ignores abort
     });
     assert.equal(queued.queued, true);
     stall = true;
-    const started = Date.now();
-    const health = await marrow.flushLifecycleEvents();
-    const elapsed = Date.now() - started;
-    assert.ok(elapsed >= 900 && elapsed < 2_000, `drain took ${elapsed}ms`);
-    assert.equal(health.state, 'pending');
-    assert.equal(health.pending, 1);
+    // The product asks for its sleeps through setTimeout; a virtual clock records the request and
+    // moves time by exactly that much, so the test never sleeps and never reads the wall clock.
+    const clock = installFakeClock();
+    try {
+      const drain = marrow.flushLifecycleEvents();
+      await untilTrue(() => clock.requested.length > 0);
+      assert.deepEqual(clock.requested, [1_000], 'the stalled delivery waits for the lifecycle deadline and nothing else');
+      await clock.advance(999);
+      assert.equal((await outcomeWithin(drain)).state, 'pending', 'the drain gave up before the lifecycle deadline');
+      await clock.advance(1);
+      const done = await outcomeWithin(drain);
+      assert.equal(done.state, 'fulfilled', 'the drain stayed blocked past the lifecycle deadline');
+      assert.deepEqual(clock.requested, [1_000], 'giving up requested no further sleep');
+      assert.equal(done.value.state, 'pending');
+      assert.equal(done.value.pending, 1);
+    } finally {
+      clock.restore();
+    }
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(directory, { recursive: true, force: true });

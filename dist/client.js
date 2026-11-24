@@ -268,6 +268,27 @@ class MarrowHttpError extends Error {
         this.status = status;
     }
 }
+// The read routes: ids follow the backend rules; an error code is a closed value, never server text; status 0 = refused here.
+const GATE_RECEIPT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,199}$/;
+const SIGNED_RECEIPT_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const CLOSED_CODE = /^[A-Z][A-Z0-9_]{1,79}$/;
+class MarrowReadError extends MarrowHttpError {
+    code;
+    constructor(status, code) {
+        super(status, status === 0 ? 'refused' : 'failed', code);
+        this.code = code;
+        this.name = 'MarrowReadError';
+    }
+}
+function readErrorCode(bytes, status, apiKey) {
+    let body = null;
+    try {
+        body = JSON.parse(String(bytes));
+    }
+    catch { /* not JSON: the status code below */ }
+    const known = [body?.details?.code, body?.code].find((c) => typeof c === 'string' && CLOSED_CODE.test(c) && !(apiKey && c.toLowerCase().includes(apiKey.toLowerCase())));
+    return known ?? `MARROW_HTTP_${status}`;
+}
 function classifyMarrowFailure(error) {
     const message = safeErrorMessage(error).toLowerCase();
     const numericStatus = typeof error === 'object' && error !== null && 'status' in error
@@ -3308,6 +3329,36 @@ class MarrowClient {
         const res = await this.request('GET', `/v1/analytics/value-report?${qs.toString()}`);
         return (res.data || res);
     }
+    /** The chain of one gate receipt (action, decision, approval or reuse, outcome): a record, never a permission. */
+    async governanceChain(gateReceiptId) {
+        if (typeof gateReceiptId !== 'string' || !GATE_RECEIPT_ID.test(gateReceiptId))
+            throw new MarrowReadError(0, 'MARROW_GATE_RECEIPT_ID_INVALID');
+        const text = await this.readText(`/v1/agent/governance/chain/${gateReceiptId}`, true, 1048576, 'MARROW_RESPONSE_TOO_LARGE');
+        let chain;
+        try {
+            chain = JSON.parse(text).data.chain;
+        }
+        catch { /* refused below */ }
+        if (typeof chain !== 'object' || chain === null || Array.isArray(chain))
+            throw new MarrowReadError(200, 'MARROW_RESPONSE_UNREADABLE');
+        return chain;
+    }
+    /** One gate receipt and its outcome close, signed; pass answerText to a verifier unchanged. The ids . and .. would collapse the URL onto another route. */
+    async signedReceiptExport(receiptId) {
+        if (typeof receiptId !== 'string' || receiptId === '.' || receiptId === '..' || !SIGNED_RECEIPT_ID.test(receiptId))
+            throw new MarrowReadError(0, 'MARROW_SIGNED_RECEIPT_ID_INVALID');
+        return { status: 200, answerText: await this.readText(`/v1/agent/audit/signed-receipts/${receiptId}`, true, 65536, 'MARROW_SIGNED_EXPORT_TOO_LARGE') };
+    }
+    /** The public signing keys, read with no key and no identity. */
+    async signingKeys() {
+        const text = await this.readText('/.well-known/marrow-signing-keys.json', false, 65536, 'MARROW_SIGNED_EXPORT_TOO_LARGE');
+        try {
+            return { text, jwks: JSON.parse(text) };
+        }
+        catch {
+            throw new MarrowReadError(200, 'MARROW_RESPONSE_UNREADABLE');
+        }
+    }
     /**
      * Get one pre-action operating brief: risk, workflow, handoff, quality checks,
      * source-of-truth surfaces, proof-pack requirements, and next actions.
@@ -4051,6 +4102,58 @@ class MarrowClient {
             throw new MarrowHttpError(res.status, res.statusText, errorDetail);
         }
         return res.json();
+    }
+    /** One GET; the key goes out only with `auth`. Only a whole 200 body within maxBytes returns, as strict UTF-8 (BOM kept); else a closed error. */
+    async readText(path, auth, maxBytes, tooLarge) {
+        const headers = auth ? { Authorization: `Bearer ${this.apiKey}`, 'X-Marrow-Client': defaultSourceClient(), 'X-Marrow-Package': '@getmarrow/sdk', 'X-Marrow-Package-Version': SDK_ADAPTER_VERSION } : {};
+        if (auth && this.sessionId)
+            headers['X-Marrow-Session-Id'] = this.sessionId;
+        if (auth && this.agentId)
+            headers['X-Marrow-Agent-Id'] = this.agentId;
+        const transportFetch = globalThis[GLOBAL_FETCH_PATCH_KEY]?.originalFetch || globalThis.fetch;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.requestDeadlines.read);
+        timer.unref?.();
+        let status = 0;
+        let bytes = null;
+        try {
+            const res = await transportFetch.call(globalThis, `${this.baseUrl}${path}`, { method: 'GET', headers, redirect: 'manual', signal: controller.signal });
+            status = res.status;
+            const cap = status === 200 ? maxBytes : 8192;
+            const parts = [];
+            let size = 0;
+            let over = Number(res.headers.get('content-length')) > cap;
+            if (!over)
+                for await (const part of (res.body ?? [])) {
+                    size += part.byteLength;
+                    if ((over = size > cap))
+                        break;
+                    parts.push(part);
+                }
+            if (over)
+                void res.body?.cancel().catch(() => undefined);
+            else
+                bytes = Buffer.concat(parts);
+        }
+        catch (error) {
+            const failure = classifyMarrowFailure(error);
+            throw new Error(`Marrow request failed (${failure}). ${exactFixForFailure(failure)}`);
+        }
+        finally {
+            clearTimeout(timer);
+        }
+        if (status !== 200)
+            throw new MarrowReadError(status, readErrorCode(bytes, status, this.apiKey));
+        if (!bytes)
+            throw new MarrowReadError(200, tooLarge);
+        let text = '';
+        try {
+            text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+        }
+        catch { /* refused below */ }
+        if (!text)
+            throw new MarrowReadError(200, 'MARROW_RESPONSE_UNREADABLE');
+        return text;
     }
     normalizeModelUsage(input) {
         return (0, model_usage_1.normalizeModelUsageInput)(input, redactSensitiveText);

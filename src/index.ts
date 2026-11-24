@@ -160,6 +160,7 @@ export type {
   MarrowSessionEndResult,
   MarrowTemplateSummary,
   MarrowTemplateDetail,
+  GateReceiptChain, SignedExportText, SigningKeysText,
 
   // Config Types
   MarrowClientOptions,

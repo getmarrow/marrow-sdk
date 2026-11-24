@@ -2285,3 +2285,7 @@ export interface MarrowTemplateDetail extends MarrowTemplateSummary {
   created_at: string;
   updated_at: string;
 }
+/** The chain of one gate receipt, as the backend answered; signedReceiptExport's answerText is the served body, byte-exact. */
+export type GateReceiptChain = Record<string, unknown>;
+export interface SignedExportText { status: 200; answerText: string }
+export interface SigningKeysText { text: string; jwks: unknown }

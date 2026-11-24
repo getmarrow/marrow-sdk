@@ -13,6 +13,8 @@ export { createMarrowClient, marrowFromEnv } from './factory';
 export { resolveMarrowEnv } from './env';
 export { marrowEvidence } from './evidence-adapters';
 export { MarrowRuntimeGateBlockedError, readRuntimeGateVerdict } from './runtime-gate-verdict';
+export { verifySignedRecords, GATE_RECEIPT_TYPE, OUTCOME_CLOSE_TYPE, SIGNED_RECORDS_FORMAT, SIGNING_KEYS_PATH, SIGNED_RECORD_FAILURE_CODES } from './signed-records';
+export type { SignedRecordFailureCode, SignedRecordsExpect, SignedRecordsVerdict, VerifiedSignedRecord } from './signed-records';
 export type { MarrowResolvedEnv, MarrowResolveEnvOptions } from './env';
 
 export type {

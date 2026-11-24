@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.readRuntimeGateVerdict = exports.MarrowRuntimeGateBlockedError = exports.marrowEvidence = exports.resolveMarrowEnv = exports.marrowFromEnv = exports.createMarrowClient = exports.formatHabitLoopCopy = exports.classifyMarrowFailure = exports.MarrowLoopRequiredError = exports.MarrowClient = void 0;
+exports.SIGNED_RECORD_FAILURE_CODES = exports.SIGNING_KEYS_PATH = exports.SIGNED_RECORDS_FORMAT = exports.OUTCOME_CLOSE_TYPE = exports.GATE_RECEIPT_TYPE = exports.verifySignedRecords = exports.readRuntimeGateVerdict = exports.MarrowRuntimeGateBlockedError = exports.marrowEvidence = exports.resolveMarrowEnv = exports.marrowFromEnv = exports.createMarrowClient = exports.formatHabitLoopCopy = exports.classifyMarrowFailure = exports.MarrowLoopRequiredError = exports.MarrowClient = void 0;
 const client_1 = require("./client");
 var client_2 = require("./client");
 Object.defineProperty(exports, "MarrowClient", { enumerable: true, get: function () { return client_2.MarrowClient; } });
@@ -23,5 +23,12 @@ Object.defineProperty(exports, "marrowEvidence", { enumerable: true, get: functi
 var runtime_gate_verdict_1 = require("./runtime-gate-verdict");
 Object.defineProperty(exports, "MarrowRuntimeGateBlockedError", { enumerable: true, get: function () { return runtime_gate_verdict_1.MarrowRuntimeGateBlockedError; } });
 Object.defineProperty(exports, "readRuntimeGateVerdict", { enumerable: true, get: function () { return runtime_gate_verdict_1.readRuntimeGateVerdict; } });
+var signed_records_1 = require("./signed-records");
+Object.defineProperty(exports, "verifySignedRecords", { enumerable: true, get: function () { return signed_records_1.verifySignedRecords; } });
+Object.defineProperty(exports, "GATE_RECEIPT_TYPE", { enumerable: true, get: function () { return signed_records_1.GATE_RECEIPT_TYPE; } });
+Object.defineProperty(exports, "OUTCOME_CLOSE_TYPE", { enumerable: true, get: function () { return signed_records_1.OUTCOME_CLOSE_TYPE; } });
+Object.defineProperty(exports, "SIGNED_RECORDS_FORMAT", { enumerable: true, get: function () { return signed_records_1.SIGNED_RECORDS_FORMAT; } });
+Object.defineProperty(exports, "SIGNING_KEYS_PATH", { enumerable: true, get: function () { return signed_records_1.SIGNING_KEYS_PATH; } });
+Object.defineProperty(exports, "SIGNED_RECORD_FAILURE_CODES", { enumerable: true, get: function () { return signed_records_1.SIGNED_RECORD_FAILURE_CODES; } });
 exports.default = client_1.MarrowClient;
 //# sourceMappingURL=index.js.map

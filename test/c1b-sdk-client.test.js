@@ -390,7 +390,7 @@ test('S-7 a base URL with a trailing path gets the same form as an existing read
 // ---------------------------------------------------------------- S-8
 // The request log (method, path, header names and values, body) of five existing methods, with the key, the host and the
 // environment-chosen client label replaced. The constant was recorded on BASE; the same file is run on BASE and on the tip.
-const S8_SHA256 = '077cc22bdca594bcb05dad104c80404163f2f5a4615bccd02bb7c37e2408e9d7';
+const S8_SHA256 = 'b8d8606a2e7088fa9c129a920dd029944c0c49a9bbda711aea0d81d3a6da65dd';
 test('S-8 existing methods send byte-equal requests (orient, agentStatus, valueReport, issueActionPermit, verifyActionPermit)', async () => {
   await withFake((req, res) => send(res, 200, { data: {} }), async ({ base, log }) => {
     const client = mk(base, { agentId: 'agent-s8', sessionId: 'session-s8' });

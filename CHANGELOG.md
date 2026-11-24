@@ -2,6 +2,14 @@
 
 Release notes for `@getmarrow/sdk`, newest first. The README documents only the current version; older notes live here. Feature documentation that still applies to the current code has been promoted into the README's permanent sections.
 
+## v3.8.0
+
+- New: `governanceChain(gateReceiptId)` reads the chain for one gate receipt: the attempted action, Marrow's decision, the owner approval and the recorded outcome.
+- New: `signedReceiptExport(receiptId)` returns the signed export answer as exact text, so it can be saved and checked later.
+- New: `signingKeys()` reads Marrow's published signing keys from /.well-known/marrow-signing-keys.json. No key is sent.
+- New: `verifySignedRecords(answerText, keys, { account_id, environment })` checks a saved signed export offline against a saved key list, with no network call. It answers `ok` plus fixed failure codes; a record type it does not know fails, never passes.
+- What a pass means: the records are the ones Marrow signed at export with a listed key, for that account and environment. It is evidence, not a certification.
+
 ## v3.7.67
 
 - Security: a key stored in your own `~/.marrow/env` (or `env.local`) is now sent only to the default Marrow endpoint, to the endpoint that same file names with `MARROW_BASE_URL`, or to an exact origin that file lists in the new `MARROW_ALLOWED_BASE_URLS` (comma-separated bare origins; no wildcards, paths, credentials, queries or fragments; read from that file only, never from the process environment). A `MARROW_BASE_URL` set only in the process environment (a project `.mcp.json` or settings `env` block, direnv, a devcontainer) no longer moves such a key: `marrowFromEnv()` and `resolveMarrowEnv()` use the default endpoint, and `MarrowResolvedEnv.baseUrlNotice` carries one line naming the source, never the key or the URL. A key from a `~/.marrow` file that is not owner-only (a symlink, or readable or writable by others) follows the same rule for a process-environment URL: it is used only when that same file names it or lists its origin. A key from the process environment, or from a project file, keeps using the process-environment URL, as before. If you run a staging or self-hosted endpoint with a key in `~/.marrow/env`, add `MARROW_BASE_URL=` or `MARROW_ALLOWED_BASE_URLS=` to that file.

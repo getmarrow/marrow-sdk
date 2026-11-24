@@ -4,7 +4,7 @@
 
 Marrow is the runtime control and proof layer for teams running AI agents. `@getmarrow/sdk` is the Node.js and TypeScript client for that layer: use it when you own the agent process and need pre-action policy gates, owner approvals, proof-backed completion, passive outcome capture, and tenant-scoped fleet learning in code.
 
-**Current version: 3.7.67.** See [What's New in v3.7.67](#whats-new-in-v3767). Older release notes are in the [changelog](https://github.com/getmarrow/marrow-sdk/blob/master/CHANGELOG.md).
+**Current version: 3.8.0.** See [What's New in v3.8.0](#whats-new-in-v380). Older release notes are in the [changelog](https://github.com/getmarrow/marrow-sdk/blob/master/CHANGELOG.md).
 
 ## Contents
 
@@ -25,7 +25,7 @@ Marrow is the runtime control and proof layer for teams running AI agents. `@get
 - [Adaptive Policy](#adaptive-policy)
 - [Status, Resilience, and Client Updates](#status-resilience-and-client-updates)
 - [Model-cost usage evidence](#model-cost-usage-evidence)
-- [What's New in v3.7.67](#whats-new-in-v3767)
+- [What's New in v3.8.0](#whats-new-in-v380)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
 - [Context and Workflow Examples](#context-and-workflow-examples)
@@ -396,11 +396,13 @@ Passive JSON fetch capture recognizes exact official HTTPS model endpoints (Open
 
 Streaming/SSE usage is not captured by this JSON path. Use an explicit usage adapter with authoritative final usage for streaming hosts. Proxies and unsupported endpoints do not acquire first-party billing proof from the response shape. Capturing one call does not prove complete account usage, Marrow overhead, baseline comparability or savings. Unknown facts may therefore leave dashboard costs partial or unavailable and savings pending.
 
-## What's New in v3.7.67
+## What's New in v3.8.0
 
-- Security: a key stored in your own `~/.marrow/env` (or `env.local`) is now sent only to the default Marrow endpoint, to the endpoint that same file names with `MARROW_BASE_URL`, or to an exact origin that file lists in the new `MARROW_ALLOWED_BASE_URLS`. A `MARROW_BASE_URL` set only in the process environment (for example in a project's `.mcp.json` or settings `env` block, direnv or a devcontainer) no longer moves such a key: the default endpoint is used and one notice says so, naming the source and never the key or the URL. A key from a `~/.marrow` file that is not owner-only (a symlink, or readable or writable by others) follows the same rule. A key from the process environment keeps using the process-environment URL, as before. If you run a staging or self-hosted endpoint with a key in `~/.marrow/env`, add `MARROW_BASE_URL=` or `MARROW_ALLOWED_BASE_URLS=` to that file.
-- The client refuses a base URL that contains a user name or password, and its error no longer repeats the URL. HTTPS is still required (plain http only for `localhost` and `127.0.0.1`).
-- Nothing changes when no URL variable is set.
+- New: `governanceChain(gateReceiptId)` reads the chain for one gate receipt: the attempted action, Marrow's decision, the owner approval and the recorded outcome. It only reads; the chain is a record of what happened, never a permission.
+- New: `signedReceiptExport(receiptId)` returns the signed export answer as exact text (`answerText`), so it can be saved and checked later. Keep it as served: do not parse and re-write it, because a changed byte fails the signature check.
+- New: `signingKeys()` reads Marrow's published signing keys from `/.well-known/marrow-signing-keys.json`. No key is sent.
+- New: `verifySignedRecords(answerText, keys, { account_id, environment })` checks a saved signed export offline against a saved key list, with no network call. It answers `ok` plus fixed failure codes, the values of the exported `SIGNED_RECORD_FAILURE_CODES` (for example `signature`, `kid_unknown`, `account`, `environment` and `record_type`). Unknown record types fail: a record type it does not know fails, never passes. The account and environment always come from you, never from the answer.
+- What a pass means: the records are the ones Marrow signed at export with a listed key, for that account and environment. It is evidence, not a certification: it does not show that the action was safe or that no record is missing. A key list read from the same server that served the export is not independent; keep your own saved copy.
 
 Older release notes: [changelog](https://github.com/getmarrow/marrow-sdk/blob/master/CHANGELOG.md).
 
